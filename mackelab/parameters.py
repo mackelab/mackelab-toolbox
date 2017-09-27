@@ -51,7 +51,7 @@ def expand_params(param_str, fail_on_unexpanded=False, parser=None):
 
     if parser is None:
         parser = Parser()
-    param_strs = [param_str]
+    param_strs = [strip_comments(param_str)]
     done = False
     while not done:
         res_lst = [_expand(s, fail_on_unexpanded, parser) for s in param_strs]
@@ -108,6 +108,10 @@ def expand_param_file(param_path, output_path,
     #print("Parameter files were written to " + ', '.join(pathnames))
         # TODO: Use logging
     return pathnames
+
+def strip_comments(s):
+    return '\n'.join(line.partition('#')[0].rstrip()
+                     for line in s.splitlines())
 
 def _expand(s, fail_on_unexpanded, parser):
     #param_strs = [s]  # Start with a single parameter string
