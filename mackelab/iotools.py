@@ -13,7 +13,7 @@ def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suf
     to that. Otherwise, append a number to it until a free filename is found or the
     number exceeds 'max_files'. In the latter case, raise 'IOError'.
 
-    Return a file handle, rather than just a file name, avoids the possibility of a
+    Returning a file handle, rather than just a file name, avoids the possibility of a
     race condition (a new file of the same name could be created between the time
     where one finds a free filename and then opens the file).
 
@@ -53,11 +53,11 @@ def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suf
     else:
         #Make a full path from path
         pathname = os.path.abspath(path)
-        
+
     # Set the default value for start_suffix
     if start_suffix is None:
         start_suffix = 1 if force_suffix else 2
-        
+
     # Set the mode
     if bytes:
         mode = 'xb'
