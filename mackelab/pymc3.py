@@ -1,4 +1,10 @@
+import numpy as np
+import collections
 import pymc3 as pymc
+
+import simpleeval
+import ast
+import operator
 
 import theano_shim as shim
 
