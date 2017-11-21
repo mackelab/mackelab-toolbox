@@ -2,74 +2,8 @@ import numpy as np
 import collections
 import pymc3 as pymc
 
-import simpleeval
-import ast
-import operator
-
 import theano_shim as shim
-
-class Transform:
-    # Replace the "safe" operators with their standard forms
-    # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
-    #  input but this does not work with sinn histories)
-    _operators = simpleeval.DEFAULT_OPERATORS
-    _operators.update(
-        {ast.Add: operator.add,
-         ast.Mult: operator.mul,
-         ast.Pow: operator.pow})
-    # Allow evaluation to find operations in standard namespaces
-    namespaces = {'np': np,
-                  'shim': shim}
-
-    def __init__(self, transform_desc):
-        xname, expr = transform_desc.split('->')
-        self.xname = xname.strip()
-        self.expr = expr.strip()
-
-    def __call__(self, x):
-        names = {self.xname: x}
-        names.update(self.namespaces)
-        return simpleeval.simple_eval(
-            self.expr,
-            operators=Transform._operators,
-            names=names)
-
-class TransformedVar:
-    def __init__(self, desc, *args, orig=None, new=None):
-        """
-        Should only pass either `orig` or `new`
-        """
-        if len(args) > 0:
-            raise TypeError("TransformedVar() takes only one positional argument.")
-        if not( (orig is None) != (new is None) ):  #xor
-            raise ValueError("Exactly one of `orig`, `new` must be specified.")
-        self.to = Transform(desc.to)
-        self.back = Transform(desc.back)
-        if orig is not None:
-            #assert(shim.issymbolic(orig))
-            self.orig = orig
-            self.new = self.to(self.orig)
-        elif new is not None:
-            #assert(shim.issymbolic(new))
-            self.new = new
-            self.orig = self.back(new)
-        names = [nm.strip() for nm in desc.name.split('->')]
-        assert(len(names) == 2)
-        if self.orig.name is None:
-            self.orig.name = names[0]
-        else:
-            assert(self.orig.name == names[0])
-        if self.new.name is None:
-            self.new.name = names[1]
-        else:
-            assert(self.new.name == names[1])
-
-class NonTransformedVar:
-    def __init__(self, orig):
-        self.orig = orig
-        self.to = lambda x: x
-        self.back = lambda x: x
-        self.new = orig
+from mackelab.parameters import TransformedVar, NonTransformedVar
 
 class PyMCPrior(dict):
     """
@@ -152,6 +86,8 @@ class PyMCPrior(dict):
             if mask is not None:
                 modelvar = next(var for var in modelvars
                                 if var.name == dist.orig.name)
+                    # Grab the first symbolic variable with matching name
+                    # (there should only be one)
                 distvar = dist.back(
                     shim.set_subtensor(dist.to(modelvar)[mask.nonzero()],
                                        dist.new))
@@ -171,11 +107,12 @@ class PyMCPrior(dict):
         if distparams.dist in ['normal', 'expnormal', 'lognormal']:
             if shim.isscalar(distparams.loc) and shim.isscalar(distparams.scale):
                 mu = distparams.loc; sd = distparams.scale
+                # Ensure parameters are true scalars rather than arrays
                 if isinstance(mu, np.ndarray):
                     mu = mu.flat[0]
                 if isinstance(sd, np.ndarray):
                     sd = sd.flat[0]
-                distvar = pymc.Normal('Norm_'+distname, mu=mu, sd=sd)
+                distvar = pymc.Normal(distname, mu=mu, sd=sd)
             else:
                 # Because the distribution is 'normal' and not 'mvnormal',
                 # we sample the parameters independently, hence the
@@ -184,7 +121,15 @@ class PyMCPrior(dict):
                 kwargs = {'shape' : distparams.loc.flatten().shape, # Required
                           'mu'    : distparams.loc.flatten(),
                           'cov'   : np.diag(distparams.scale.flat)}
-                distvar = pymc.MvNormal('Norm_'+distname, **kwargs)
+                distvar = pymc.MvNormal(distname, **kwargs)
+
+        elif distparams.dist in ['exp', 'exponential']:
+            lam = 1/distparams.scale
+            distvar = pymc.Exponential(distname, lam=lam, shape=distparams.shape)
+
+        elif distparams.dist == 'gamma':
+            a = distparams.a; b = 1/distparams.scale
+            distvar = pymc.Gamma(distname, alpha=a, beta=b, shape=distparams.shape)
 
         else:
             raise ValueError("Unrecognized distribution type '{}'."
@@ -206,12 +151,31 @@ class PyMCPrior(dict):
 
 from inspect import ismethod, getmembers, isfunction, ismethoddescriptor, isclass, isbuiltin
 def issimpleattr(obj, attr):
+    """
+    Return True if `attr` is a plain attribute of `obj`; any of the following
+    attribute types is /not/ considered 'plain':
+      - method or function
+      - property
+    The idea is identify only the data that is truly attached to an instance;
+    it should be possible to recreate the instance using just this data and have all
+    dynamic properties still work.
+
+    Parameters
+    ----------
+    obj: object instance
+
+    attr: str
+        Name of an attribute of `obj`; AttributeError is raised if it is not found.
+    """
+    # HACK: I just threw together everything I could think of testing on.
+    #       The test could almost certainly be cleaned-up/shortened.
+
     # Expected to operate on the return value from dir()
     instance_attr = getattr(obj, attr, None)
     cls_attr = getattr(type(obj), attr, None)
     return not (attr == '__dict__'
-                or attr == 'model'
-                or attr == 'vars'
+                #or attr == 'model'
+                #or attr == 'vars'
                 or instance_attr is None  # e.g. __weakref__
                 or ismethod(instance_attr)
                 or isfunction(instance_attr)
@@ -223,7 +187,7 @@ def issimpleattr(obj, attr):
                 or isinstance(instance_attr, collections.Callable))   # e.g. __delattr__
 
 class NDArrayView(pymc.backends.NDArray):
-    def __init__(self, data):
+    def __init__(self, data=None):
         # We can't call super().__init__, so we need to reproduce the required bits here
         # BaseTrace.__init__()
         self.chain = None
@@ -236,13 +200,21 @@ class NDArrayView(pymc.backends.NDArray):
         self._stats = None
 
         # Now read the data and update the attributes accordingly
-        if isinstance(data, pymc.backends.NDArray):
-            raise NotImplementedError
+        if data is None:
+            # Nothing to do
+            pass
+
+        elif isinstance(data, pymc.backends.NDArray):
+            for attr in pymc.backends.base.MultiTrace._attrs:
+                try:
+                    setattr(self, attr, getattr(data, attr))
+                except AttributeError:
+                    pass
 
         else:
-            assert(isinstance(data, dict))
             # Data is a dictionary of the static variables, from which
             # need to reconstruct the NDArray
+            assert(isinstance(data, dict))
             for attrname, value in data.items():
                 setattr(self, attrname, value )
 
@@ -251,6 +223,35 @@ class NDArrayView(pymc.backends.NDArray):
         raise AttributeError
     def record(self, point, sampler_stats=None):
         raise AttributeError
+
+    # Adapt slicing; original tries to create NDArray, which requires a model
+    # This is just copied from pymc.backends.ndarray.py, with a single line change.
+    def _slice(self, idx):
+        # Slicing directly instead of using _slice_as_ndarray to
+        # support stop value in slice (which is needed by
+        # iter_sample).
+
+        # Only the first `draw_idx` value are valid because of preallocation
+        idx = slice(*idx.indices(len(self)))
+
+        sliced = NDArrayView(self)  # <<<< Change here.
+        sliced.chain = self.chain
+        sliced.samples = {varname: values[idx]
+                          for varname, values in self.samples.items()}
+        sliced.sampler_vars = self.sampler_vars
+        sliced.draw_idx = (idx.stop - idx.start) // idx.step
+
+        if self._stats is None:
+            return sliced
+        sliced._stats = []
+        for vars in self._stats:
+            var_sliced = {}
+            sliced._stats.append(var_sliced)
+            for key, vals in vars.items():
+                var_sliced[key] = vals[idx]
+
+        return sliced
+
 
 def import_multitrace(data):
     """
@@ -263,7 +264,10 @@ def import_multitrace(data):
     return pymc.backends.base.MultiTrace(straces)
 
 def export_multitrace(multitrace):
+    excluded_attrs = ['model', 'vars']
     mt_data = [ { attrname: getattr(trace, attrname)
-                  for attrname in dir(trace) if issimpleattr(trace, attrname)}
+                  for attrname in dir(trace)
+                  if attrname not in excluded_attrs
+                     and issimpleattr(trace, attrname)}
                 for trace in multitrace._straces.values() ]
     return mt_data
