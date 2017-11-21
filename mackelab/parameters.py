@@ -12,8 +12,117 @@ Created on Wed Sep 20 13:19:53 2017
 
 from collections import deque, OrderedDict, namedtuple
 from types import SimpleNamespace
+import numpy as np
+import scipy as sp
 
 from . import iotools
+
+##########################
+# Transformed parameters
+##########################
+
+import simpleeval
+import ast
+import operator
+
+class Transform:
+    # Replace the "safe" operators with their standard forms
+    # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
+    #  input but this does not work with non-numerical types.)
+    _operators = simpleeval.DEFAULT_OPERATORS
+    _operators.update(
+        {ast.Add: operator.add,
+         ast.Mult: operator.mul,
+         ast.Pow: operator.pow})
+    # Allow evaluation to find operations in standard namespaces
+    namespaces = {'np': np,
+                  'sp': sp}
+
+    def __new__(cls, *args, **kwargs):
+        # Make calling Transform on a Transform instance just return the instance
+        if len(args) > 0 and isinstance(args[0], Transform):
+            # Don't return a new instance; just return this one
+            return args[0]
+        else:
+            return super().__new__(cls)
+
+    def __init__(self, transform_desc):
+        # No matter what we do in __new__, __init__ is called, so we need
+        # to check this again.
+        if not isinstance(transform_desc, Transform):
+            xname, expr = transform_desc.split('->')
+            self.xname = xname.strip()
+            self.expr = expr.strip()
+
+
+    def __call__(self, x):
+        names = {self.xname: x}
+        names.update(self.namespaces)
+        try:
+            res = simpleeval.simple_eval(
+                self.expr,
+                operators=Transform._operators,
+                names=names)
+        except simpleeval.NameNotDefined as e:
+            e.args = ((e.args[0] +
+                       "\n\nThis may be due to a module function in the transform "
+                       "expression (only numpy and scipy, as 'np' and 'sp') are "
+                       "available by default.\nIf '{}' is a module or class, you can "
+                       "make it available by adding it to the transform namespace: "
+                       "`Transform.namespaces.update({{'{}': {}}})`.\nSuch line would "
+                       "typically be included at the beginning of the execution script "
+                       "(it does not need to be in the same module as the one where "
+                       "the transform is defined, as long as it is executed before)."
+                       .format(e.name, e.name, e.name),)
+                      + e.args[1:])
+            raise
+        return res
+
+    @property
+    def desc(self):
+        return self.xname + " -> " + self.expr
+
+class TransformedVar:
+    def __init__(self, desc, *args, orig=None, new=None):
+        """
+        Should only pass either `orig` or `new`
+        """
+        if len(args) > 0:
+            raise TypeError("TransformedVar() takes only one positional argument.")
+        if not( (orig is None) != (new is None) ):  #xor
+            raise ValueError("Exactly one of `orig`, `new` must be specified.")
+        self.to = Transform(desc.to)
+        self.back = Transform(desc.back)
+        if orig is not None:
+            #assert(shim.issymbolic(orig))
+            self.orig = orig
+            self.new = self.to(self.orig)
+        elif new is not None:
+            #assert(shim.issymbolic(new))
+            self.new = new
+            self.orig = self.back(new)
+        names = [nm.strip() for nm in desc.name.split('->')]
+        assert(len(names) == 2)
+        if self.orig.name is None:
+            self.orig.name = names[0]
+        else:
+            assert(self.orig.name == names[0])
+        if self.new.name is None:
+            self.new.name = names[1]
+        else:
+            assert(self.new.name == names[1])
+
+class NonTransformedVar:
+    """Provides an interface consistent with TransformedVar."""
+    def __init__(self, orig):
+        self.orig = orig
+        self.to = lambda x: x
+        self.back = lambda x: x
+        self.new = orig
+
+###########################
+# Parameter file expansion
+###########################
 
 ExpandResult = namedtuple("ExpandResult", ['strs', 'done'])
 
