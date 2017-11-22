@@ -10,10 +10,12 @@ Created on Wed Sep 20 13:19:53 2017
 @author: alex
 """
 
-from collections import deque, OrderedDict, namedtuple
+from collections import deque, OrderedDict, namedtuple, Iterable
 from types import SimpleNamespace
+import hashlib
 import numpy as np
 import scipy as sp
+from parameters import ParameterSet
 
 from . import iotools
 
@@ -119,6 +121,48 @@ class NonTransformedVar:
         self.to = lambda x: x
         self.back = lambda x: x
         self.new = orig
+
+###########################
+# Making file names from parameters
+###########################
+
+def get_filename(params, suffix=None):
+    if params == '':
+        basename = ""
+    else:
+        # We need a sorted dictionary of parameters, so that the hash is consistent
+        flat_params = params_to_arrays(params).flatten()
+            # flatten avoids need to sort recursively
+            # _params_to_arrays normalizes the data
+        sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
+        basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+        basename += '_'
+    if isinstance(suffix, str):
+        suffix = suffix.lstrip('_')
+    if suffix is None or suffix == "":
+        assert(len(basename) > 1 and basename[-1] == '_')
+        return basename[:-1] # Remove underscore
+    elif isinstance(suffix, str):
+        return basename + suffix
+    elif isinstance(suffix, Iterable):
+        assert(len(suffix) > 0)
+        return basename + '_'.join([str(s) for s in suffix])
+    else:
+        return basename + str(suffix)
+
+def params_to_arrays(params):
+    """Also converts dictionaries to parameter sets."""
+    for name, val in params.items():
+        if isinstance(val, (ParameterSet, dict)):
+            params[name] = params_to_arrays(val)
+        elif (not isinstance(val, str)
+            and isinstance(val, Iterable)
+            and all(type(v) == type(val[0]) for v in val)):
+                # The last condition leaves objects like ('lin', 0, 1) as-is;
+                # otherwise they would be casted to a single type
+            params[name] = np.array(val)
+    return ParameterSet(params)
+
 
 ###########################
 # Parameter file expansion
