@@ -17,13 +17,14 @@ setup(
     extras_require = {
         'smt': [
             'Click',
-            'sumatra'
+            'sumatra[git]',
+            'docutils', 'PyYAML', 'httplib2'  # Required by Sumatra
         ],
         'pymc3': [
             'pymc3'
         ],
         'all': [
-            'Click', 'sumatra', 'pymc3'
+            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2'
         ]
     },
     entry_points = {
