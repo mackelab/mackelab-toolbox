@@ -2,9 +2,16 @@ import os
 import re
 import glob
 import multiprocessing
+from collections import namedtuple
 from datetime import datetime
+import logging
+logger = logging.getLogger(__file__)
+
 from parameters import ParameterSet
 import sumatra.commands
+from sumatra.recordstore import DjangoRecordStore as RecordStore
+    # The usual RecordStore, provided as a convenience
+from sumatra.records import Record
 
 import mackelab.parameters
 from fsGIF import core
@@ -14,7 +21,325 @@ try:
 except ImportError:
     noclick = True
 else:
-    noclick = False
+    click_loaded = True
+
+##################################
+#
+# Accessing the record store
+#
+##################################
+
+# TODO: Make these methods of a "RecordStoreView class"
+def get_records(recordstore, project, label=None,
+                script=None,
+                before=None, after=None,
+                min_data=1,
+                ):
+    """
+    Return the records whose labels match `label`.
+    The filters may be partial, i.e. the parameter sets of all records matching
+    '*label*', '*script*',... are returned.
+
+    min_data: int
+        Minimum number of output files that should be associated with a record.
+        Default value of 1 excludes all records that have no associated data.
+    """
+    # TODO: Use database backend so that not all records need to be loaded into memory just
+    #       to filter them.
+    if label is not None:
+        # RecordStore has builtin functions for searching on labels
+        lbl_gen = (fulllabel for fulllabel in recordstore.labels(project) if label in fulllabel)
+        record_list = [recordstore.get(project, fulllabel) for fulllabel in lbl_gen]
+    else:
+        record_list = recordstore.list(project)
+
+    if script is not None:
+        record_list = [record for record in record_list if script in record.main_file]
+
+    if before is not None:
+        if isinstance(before, tuple):
+            before = datetime(*before)
+        if not isinstance(before, datetime):
+            tnorm = lambda tstamp: tstamp.date()
+        else:
+            tnorm = lambda tstamp: tstamp
+        record_list = [rec for rec in record_list if tnorm(rec.timestamp) < before]
+    if after is not None:
+        if isinstance(after, tuple):
+            after = datetime(*after)
+        if not isinstance(after, datetime):
+            tnorm = lambda tstamp: tstamp.date()
+        else:
+            tnorm = lambda tstamp: tstamp
+        record_list = [rec for rec in record_list if tnorm(rec.timestamp) >= after]
+
+    reclist = RecordList(record_list)
+
+    if min_data > 0:
+        reclist = reclist.filter.output_data(minimum=min_data).list
+
+    return reclist
+
+class RecordView:
+    """A read-only interface to Sumatra records with extra convenience methods."""
+
+    def __new__(cls, record, *args, **kwargs):
+        if isinstance(record, RecordView):
+            return self
+        else:
+            return super().__new__(cls, *args, **kwargs)
+
+    def __init__(self, record):
+        if not isinstance(record, Record):
+            raise ValueError("'record' must be an instance of sumatra.records.Record.")
+        self._record = record
+        # Setting read-only attributes with a loop as below /seems/ to work, but
+        # causes trouble when filtering
+        #for attr in […]
+            # def getter(self):
+            #     return getattr(self._record, attr)
+            # setattr(self, attr, property(getter))
+
+    # Set all the Record attributes as read-only properties
+    @property
+    def timestamp(self):
+        return self._record.timestamp
+    @property
+    def label(self):
+        return self._record.label
+    @property
+    def reason(self):
+        return self._record.reason,
+    @property
+    def duration(self):
+        return self._record.duration
+    @property
+    def executable(self):
+        return self._record.executable
+    @property
+    def repostitory(self):
+        return self._record.repository
+    @property
+    def main_file(self):
+        return self._record.main_file
+    @property
+    def version(self):
+        return self._record.version
+    @property
+    def parameters(self):
+        return self._record.parameters
+    @property
+    def input_data(self):
+        return input_data
+    @property
+    def script_arguments(self):
+        return self._record.script_arguments
+    @property
+    def launch_model(self):
+        return launch_mode
+    @property
+    def datastore(self):
+        return self._record.datastore
+    @property
+    def input_datastore(self):
+        return self._record.input_datastore
+    @property
+    def outcome(self):
+        return self._record.outcome
+    @property
+    def output_data(self):
+        return self._record.output_data
+    @property
+    def tags(self):
+        return self._record.tags,
+    @property
+    def diff(self):
+        return self._records.diff
+    @property
+    def user(self):
+        return self._records.user
+    @property
+    def on_changed(self):
+        return self._record.on_changed
+    @property
+    def stdout_stderr(self):
+        return self._records.stdout_stderr
+    @property
+    def repeats(self):
+        return self._records.repeats
+
+    def get_datapath(self, data_idx=None):
+        if data_idx is None:
+            if len(self.output_data) > 1:
+                raise ValueError("Multile output files : \n"
+                                 + '\n'.join(self.output_data)
+                                 + "\nYou must specify an output index")
+            else:
+                data_idx = 0
+        path = os.path.join(self.datastore.root, self.output_data[data_idx].path)
+        return path
+
+    def extract(self, field):
+        """Retrieve record value corresponding to the field keyword."""
+        def splitarg(arg, default):
+            """Extract the value following '=' in `arg`."""
+            if '=' in arg:
+                res = arg.split('=')
+                if len(res) != 2:
+                    raise ValueError("Malformed extraction argument "
+                                        "'{}'".format(arg))
+                else:
+                    return res[1]
+            else:
+                return default
+        if 'parameters' == field:
+            return self.parameters
+        elif 'datapath' in field:
+            idx = splitarg(field, None)
+            return self.get_datapath(idx)
+
+    # Reproduce the Record interface; database writing functions are deactivated.
+    def __nowrite(self):
+        raise AttributeError("RecordView is read-only – Operations associated with "
+                             "running or writingg to the database are disabled.")
+    def register(self, *args, **kwargs):
+        self.__nowrite()
+    def run(self, *args, **kwargs):
+        self.__nowrite()
+    def __repr__(self):
+        return repr(self._record)
+    def describe(self, *arg, **kwargs):
+        return self._record.describe(*args, **kwargs)
+    def __ne__(self, other):
+        return self._record != other
+    def __eq__(self, other):
+        return self._record == other
+    def difference(self, *args, **kwargs):
+        return self._record.difference(*args, **kwargs)
+    def delete_data(self):
+        self.__nowrite()
+    @property
+    def command_line(self):
+        return self._record.command_line
+    @property
+    def script_content(self):
+        return self._record.script_content
+
+class RecordFilter:
+    """
+    Can overwrite RecordFilter.on_error_defaults to change default behaviour for
+    all filters.
+    Filters can have three defined behaviours when they catch an error. A common
+    need for example is to have the filter catch AttributeError, either to reject
+    all elements that don't have a particular attribute (False), or to avoid filtering
+    elements that don't have a particular attribute (True). By default the
+    `AttributeError` error in `on_error_defaults` is set to False.
+      - False: the condition returns False
+      - True: the condition returns True
+      - 'raise': the error is reraised. The same happens if there is no entry
+        corresponding to the error in `on_error_defaults`.
+    """
+    on_error_defaults = {
+        AttributeError: False
+    }
+
+    def __init__(self, record_list):
+        self.reclst = record_list
+    # Default filter
+    def __call__(self, cond, errors=None):
+        on_error = self.on_error_defaults
+        if errors is not None:
+            on_error.update(errors)
+        def test(rec):
+            """Wraps 'cond' with the error handlers specified by 'on_error'"""
+            try:
+                return cond(rec)
+            except tuple(on_error.keys()) as e:
+                if on_error[type(e)] == 'raise':
+                    raise
+                else:
+                    logger.warning("Filtering raised {}. Ignored (RecordFilter."
+                                   "on_error_defaults.)".format(str(type(e))))
+                    return on_error[type(e)]
+        iterable = filter(test, self.reclst)
+        return RecordList(iterable)
+
+    # Custom filters
+    def output_data(self, minimum=1, maximum=None):
+        # TODO: Use iterable that doesn't need to allocate all the data
+        iterable = [rec for rec in self.reclst
+                    if ((minimum is None or len(rec.output_data) >= minimum)
+                        and (maximum is None or len(rec.output_data) <= maximum))]
+        return RecordList(iterable)
+
+class RecordList:
+    """
+    This class ensures that all elements of an iterable are RecordViews; it
+    can be underlined by any iterable. It will not automatically cast the iterable
+    as a list – a version underlined by a list (which thus supports len(), indexing,
+    etc.) can be obtained through the .list attribute.
+    It also provides a filter interface. If `reclist` is a RecordList, then
+        - `reclist.filter(cond)` is the same as `filter(reclist, cond)`
+        - `reclist.filter.output_data()` filters the list based on output data
+    We expect to add more filters as time goes on.
+    """
+    def __init__(self, iterable):
+        self.iterable = iterable
+        self.iterator = None
+        self.filter = RecordFilter(self)
+
+    def __len__(self):
+        return len(self.iterable)
+
+    def __getitem__(self, key):
+        return self.iterable[key]
+
+    def __iter__(self):
+        self.iterator = iter(self.iterable)
+        return self
+
+    def __next__(self):
+        rec = next(self.iterator)
+        if isinstance(rec, RecordView):
+            # Skip the unecessary casting step
+            return rec
+        elif isinstance(rec, Record):
+            return RecordView(rec)
+        else:
+            raise ValueError("RecordList may only be composed of sumatra records.")
+
+    @property
+    def list(self):
+        """
+        Return a copy of the RecordList which is underlined by a list.
+        """
+        return RecordList(list(self))
+
+    def extract(self, *args ):
+        """
+        Typical usage: `record_list.extract('parameters', 'datapath')`
+        """
+        fields = [ field.split("=")[0] for field in args ]
+        Fit = namedtuple("Fit", fields)
+        for rec in self:
+            yield Fit(*(rec.extract(field) for field in args))
+
+
+##################################
+#
+# Command line interface
+#
+##################################
+
+if click_loaded:
+    def get_free_file(path, max_files=100):
+        return iotools.get_free_file(path, bytes=True, max_files=100)
+
+    def rename_to_free_file(path):
+        new_f, new_path = get_free_file(path)
+        new_f.close()
+        os.rename(path, new_path)
+        return new_path
 
     @click.group()
     def cli():
