@@ -13,11 +13,13 @@ Created on Wed Sep 20 13:19:53 2017
 from collections import deque, OrderedDict, namedtuple, Iterable
 from types import SimpleNamespace
 import hashlib
+from numbers import Number
 import numpy as np
 import scipy as sp
 from parameters import ParameterSet
 
 from . import iotools
+from .utils import flatten
 
 ##########################
 # Transformed parameters
@@ -127,6 +129,9 @@ class NonTransformedVar:
 ###########################
 
 def get_filename(params, suffix=None):
+    """
+    Generate a unique filename by hashing a parameter file.
+    """
     if params == '':
         basename = ""
     else:
@@ -151,13 +156,17 @@ def get_filename(params, suffix=None):
         return basename + str(suffix)
 
 def params_to_arrays(params):
-    """Also converts dictionaries to parameter sets."""
+    """
+    Recursively apply `np.array()` to all values in a ParameterSet. This allows
+    arrays to be specified in files as nested lists, which are more readable.
+    Also converts dictionaries to parameter sets.
+    """
     for name, val in params.items():
         if isinstance(val, (ParameterSet, dict)):
             params[name] = params_to_arrays(val)
         elif (not isinstance(val, str)
             and isinstance(val, Iterable)
-            and all(type(v) == type(val[0]) for v in val)):
+            and all(isinstance(v, Number) for v in flatten(val))):
                 # The last condition leaves objects like ('lin', 0, 1) as-is;
                 # otherwise they would be casted to a single type
             params[name] = np.array(val)
