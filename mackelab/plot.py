@@ -1,13 +1,15 @@
 import datetime
 from collections import namedtuple, Callable
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 
 from subprocess import check_output
 
 from parameters import ParameterSet
 
-###############################
+# =====================================
 # Archival helper functions
 
 def saverep(basename, comment=None, pdf=True, png=True):
@@ -51,8 +53,28 @@ def saverep(basename, comment=None, pdf=True, png=True):
     with open(basename + '.txt', 'w') as textfile:
         textfile.write(info_str)
 
+# ====================================
+# Tick placement
 
-# ==================================
+class LinearTickLocator(mpl.ticker.LinearLocator):
+    """
+    Identical to the standard LinearLocator, except that we provide additional
+    arguments to set tick min/max limits, (in LinearLocator these are hardcoded
+    to the viewport's limits).
+    """
+    def __init__(self, vmin=None, vmax=None, numticks=None, presets=None):
+        super().__init__(numticks, presets)
+        self.vmin = vmin
+        self.vmax = vmax
+
+    def __call__(self):
+        'Return the locations of the ticks'
+        default_vmin, default_vmax = self.axis.get_view_interval()
+        vmin = max(self.vmin, default_vmin) if self.vmin is not None else default_vmin
+        vmax = min(self.vmax, default_vmax) if self.vmax is not None else defalut_vmax
+        return self.tick_values(vmin, vmax)
+
+# ====================================
 # Plotting
 
 def cleanname(_name):
