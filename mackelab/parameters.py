@@ -16,6 +16,9 @@ import hashlib
 from numbers import Number
 import numpy as np
 import scipy as sp
+import logging
+logger = logging.getLogger(__file__)
+
 from parameters import ParameterSet
 
 from . import iotools
@@ -70,10 +73,10 @@ class Transform:
         except simpleeval.NameNotDefined as e:
             e.args = ((e.args[0] +
                        "\n\nThis may be due to a module function in the transform "
-                       "expression (only numpy and scipy, as 'np' and 'sp') are "
-                       "available by default.\nIf '{}' is a module or class, you can "
+                       "expression (only numpy and scipy, as 'np' and 'sp', are "
+                       "available by default).\nIf '{}' is a module or class, you can "
                        "make it available by adding it to the transform namespace: "
-                       "`Transform.namespaces.update({{'{}': {}}})`.\nSuch line would "
+                       "`Transform.namespaces.update({{'{}': {}}})`.\nSuch a line would "
                        "typically be included at the beginning of the execution script "
                        "(it does not need to be in the same module as the one where "
                        "the transform is defined, as long as it is executed before)."
@@ -89,7 +92,10 @@ class Transform:
 class TransformedVar:
     def __init__(self, desc, *args, orig=None, new=None):
         """
-        Should only pass either `orig` or `new`
+        Should pass exactly one of the parameters `orig` and `new`
+        TODO: Allow non-symbolic variables. Possible implementation:
+            Test to see if orig/new is a constant, callable or symbolic.
+            Set the other orig/new to the same type.
         """
         if len(args) > 0:
             raise TypeError("TransformedVar() takes only one positional argument.")
@@ -371,3 +377,284 @@ class Block(SimpleNamespace):
         self.closer = closer
         self.elements = OrderedDict([(start+1, None)])
         self.blocks = []
+
+
+###################
+# ParameterSet sampler
+###################
+
+
+class ParameterSetSampler:
+    """
+    This class mainly serves two purposes:
+      - Convert a distribution definition into a sampler for that parameter
+      - Maintain a cache of the state of the RNG, so that draws
+        a) are consistent across runs and code changes
+           (only changes to the parameter file itself will change the chosen parameters)
+        b) do not affect random draws from outside this module
+    NOTE: To achieve its goals, this class effectively maintains its own separate
+    random number generator. This means that samples produced within this class may not
+    be independent from samples produced outside of it. This shouldn't be a problem if
+    e.g. the 'other' samples are those used to induce noise in a simulation. However,
+    generating other parameters with a separate RNG should be avoided.
+    """
+    population_attrs = ['population', 'populations', 'mixture', 'mixtures', 'label', 'labels']
+    def __init__(self, dists):
+        """
+        Parameters
+        ----------
+        dists: ParameterSet
+        """
+        # Implementation:
+        # In order to always sample the same way, we set an order for parameters.
+        # We can then sample them sequentially (i.e. each is sampled once, before
+        # any one is sampled twice).
+        # At any time, we can save the state of the RNG and reload it later to continue sampling.
+
+        dists = ParameterSet(dists)  # Normalize the input (allows e.g. urls)
+        self._iter_idx = None        # Internal index for the iterator
+        orig_state = np.random.get_state()   # Store the current RNG state so it can be reset later
+
+        # Get population / mixture labels
+        #popstrs = [ attr for attr in [getattr(dists, attr, None) for attr in self.population_strs]
+                         #if attr is not None ]
+        popattrs = [ attr for attr in self.population_attrs if attr in dists ]
+        if len(popattrs) > 1:
+            raise ValueError("Multiple populations specifications. Only one of {} is needed."
+                             .format(population_strs))
+        elif len(popattrs) == 1:
+            popnames = dists[popattrs[0]]
+        else:
+            popnames = None
+
+        # Set seed
+        if 'seed' in dists:
+            np.random.seed(dists.seed)
+
+        # Get all the variable names and fix their order.
+        # If we didn't fix their order here, changing the order in the parameter file
+        # would change the sampled numbers.
+        self.varnames = sorted([name for name in dists if name not in ['seed'] + popattrs])
+
+        # Create the samplers
+        self._samplers = {
+            varname: ParameterSampler(varname, dists[varname], popnames)
+            for varname in self.varnames }
+
+        self._samplers[self.varnames[0]].set_previous(
+            self._samplers[self.varnames[-1]], -1)
+        for i in range(1, len(self.varnames)):
+            self._samplers[self.varnames[i]].set_previous(
+                self._samplers[self.varnames[i-1]], 0)
+
+        # Reset the RNG to its external state
+        self.rng_state = np.random.get_state()
+        np.random.set_state(orig_state)
+
+    # At the moment we shouldn't access samplers directly, because they don't
+    # set the RNG state. Eventually we should change this, and then providing
+    # this iterator might become a good idea
+    # #######
+    # # Define iterator
+    # def __iter__(self):
+    #     self._iter_idx = -1  # Indicates index of last returned sampler
+    #     return self
+
+    # def __next__(self):
+    #     if len(self.varnames) <= self._iter_idx + 1:
+    #         self._iter_idx = None
+    #         return StopIteration
+    #     else:
+    #         self._iter_idx += 1
+    #         return self._samplers[self.varnames[self._iter_idx]]
+    # # End iterator definition
+    # #######
+
+    def sample(self, varname=None):
+        """
+        Return a sample for the variable identified with 'varname'.
+        'Varname' can be a list of names, in which case a ParameterSet
+        instance is returned, with each entry keyed by a variable name.
+        If no variable is specified, the full set is sampled and
+        returned as a ParameterSet.
+        """
+        orig_state = np.random.get_state()
+        np.random.set_state(self.rng_state)
+
+        if varname is None:
+            varname = self.varnames
+
+        if isinstance(varname, str) or not isinstance(varname, Iterable):
+            res = self._samplers[varname]()
+        else:
+            res = ParameterSet(
+                {name: self._samplers[name]() for name in varname})
+
+        self.rng_state = np.random.get_state()
+        np.random.set_state(orig_state)
+
+        return res
+
+class ParameterSampler:
+    """
+    Implements one of the samplers in ParameterSetSampler.
+    Samplers are set as a circular chain: before computing a new sample,
+    each checks the previous sampler to see if it has been computed up to
+    the same index, plus an offset (offsets should be 0 or negative).
+    This is done to ensure that the same parameter set (if it specifies
+    a seed) always returns the same draws.
+
+    Sampling happens in the __call__() method.
+    """
+    # TODO: See if some code can be shared with pymc3.PyMCPrior.get_dist()
+    def __init__(self, name, desc, popnames=None):
+        if not isinstance(desc, ParameterSet):
+            # It's a fixed value: no need for sampling
+            self.sampled_idx = None   # This indicates that we aren't sampling
+            def get_sample():
+                logger.debug("Getting {} sample.".format(self.name))
+                return np.array(desc)
+        else:
+            if 'dist' not in desc:
+                raise ValueError("Unrecognized distribution type '{}'."
+                                .format(desc.dist))
+            if popnames is None:
+                # Provide a default population name, in case there is only one
+                # population (in which case no name is necessary)
+                popnames = ["pop1"]
+            self.sampled_idx = 0
+            shapes = [()]
+            pop_pattern = ()
+            for s in desc.shape:
+                if not isinstance(s, str):
+                    shapes = [ r + (s,) for r in shapes ]
+                    pop_pattern += (False,)
+                else:
+                    pop_pattern += (True,)
+                    pop_sizes = s.split('+')
+                    if len(pop_sizes) != len(popnames):
+                        raise ValueError("The parameter '{}' has a shape with {} "
+                                         "components, but we have {} populations."
+                                         .format(name, len(pop_sizes), len(popnames)))
+                    shapes = [ r + (int(psize),)
+                               for r in shapes
+                               for psize in pop_sizes ]
+
+            pop_samplers = type(self).PopSampler(desc)
+
+            def key(*poplabels):
+                return ','.join(poplabels)
+            n = len(popnames)
+
+            # TODO: Remove special cases/pop_pattern and make a generic
+            #       function that works with any shape
+            if pop_pattern == (True,):
+                def get_sample():
+                    logger.debug("Getting {} sample.".format(self.name))
+                    return np.block(
+                        [pop_samplers[key(pop)](shape)
+                         for pop, shape in zip(popnames, shapes)])
+            elif pop_pattern == (False, True):
+                def get_sample():
+                    logger.debug("Getting {} sample.".format(self.name))
+                    return np.block(
+                        [ [ pop_samplers[key(pop)](shape)
+                            for pop, shape in zip(popnames, shapes)] ] )
+            elif pop_pattern == (True, False):
+                def get_sample():
+                    logger.debug("Getting {} sample.".format(self.name))
+                    return np.block(
+                        [ [pop_samplers[key(pop)](shape)]
+                          for pop, shape in zip(popnames, shapes) ] )
+            elif pop_pattern == (True, True):
+                def get_sample():
+                    logger.debug("Getting {} sample.".format(self.name))
+                    return np.block(
+                        [ [ pop_samplers[key(pop1, pop2)](shapes[i + j])
+                            for pop2, j in zip(popnames, range(0, n**1, n**0)) ]
+                          for pop1, i in zip(popnames, range(0, n**2, n**1)) ] )
+
+        if 'transform' in desc:
+            inverse = Transform(desc.transform.back)
+            self._get_sample = lambda : inverse(get_sample())
+        else:
+            self._get_sample = get_sample
+        self._cache = deque()
+        self.name = name # Not actually used, but useful e.g. for debugging
+
+    # =======
+    class PopSampler:
+        """Retrieval interface for the different block samplers in ParameterSampler"""
+        def __init__(self, distparams):
+            self.distparams = distparams
+            self.key = None
+
+        def __getitem__(self, key):
+            self.key = key    # Used in __getattr__
+            if self.dist == 'normal':
+                def sample_pop(size):
+                    self.key = key    # Used in __getattr__
+                    res = np.random.normal(self.loc,
+                                           self.scale, size=size)
+                    self.key = None
+                    return res
+            else:
+                raise ValueError("Unrecognized distribution type '{}'."
+                                .format(distparams.dist))
+            self.key = None
+            return sample_pop
+
+        # Retrieve the population-specific
+        # parameter, or fall back to the global one if the first
+        # isn't given
+        def __getattr__(self, attr):
+            if attr in self.distparams[self.key]:
+                return getattr(self.distparams[self.key], attr)
+            else:
+                return getattr(self.distparams, attr)
+    # =======
+
+    def __call__(self):
+        if len(self._cache) == 0:
+            self._sample()
+        return self._cache.popleft()
+
+    def _sample(self, sample_i=None):
+        if self.sampled_idx is None:
+            self._cache.append(self._get_sample())
+        else:
+            if sample_i is None:
+                sample_i = self.sampled_idx + 1
+            if sample_i > self.sampled_idx:
+                while self.previous.sampled_idx < sample_i + self.previous_offset:
+                    self.previous._sample(sample_i + self.previous_offset)
+                self.sampled_idx += 1
+                self._cache.append(self._get_sample())
+            else:
+                pass
+                #assert(len(self._cache) > 0)
+
+    @property
+    def previous(self):
+        if self._previous.sampled_idx is None:
+            return self._previous.previous
+        else:
+            return self._previous
+
+    @property
+    def previous_offset(self):
+        if self._previous.sampled_idx is None:
+            # Add the previous sampler's offset, since it's skipped over
+            return self._previous_offset + self._previous.previous_offset
+        else:
+            return self._previous_offset
+
+    def set_previous(self, previous_sampler, offset):
+        """Set the previous ParameterSampler in the chain."""
+        if offset > 0:
+            raise ValueError("Offset cannot be positive.")
+        if offset not in [0, -1]:
+            logger.warning("ParameterSampler index offsets are usually either 0 or -1. "
+                           "You specified {}.".format(offset))
+        self._previous = previous_sampler
+        self._previous_offset = offset
