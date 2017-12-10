@@ -263,7 +263,7 @@ def load(filename, types=None, load_function=None, input_format=None):
 
     basepath, ext = os.path.splitext(filename)
 
-    if len(ext) == 0:
+    if len(ext) == 0 and input_format is None:
         raise ValueError("Filename has no extension. Please specify input format.")
     if input_format is None:
         input_format = ext[1:]
@@ -328,7 +328,7 @@ class output():
 
         # Add extension
         basepath, ext = os.path.splitext(path)
-        if ext[0] != ".":
+        if len(ext) > 0 and ext[0] != ".":
             ext = "." + ext
         self.output_path = basepath + ext
         self.orig_output_path = self.output_path
