@@ -2,7 +2,7 @@ import os
 import re
 import glob
 import multiprocessing
-from collections import namedtuple
+from collections import namedtuple, Iterable
 from datetime import datetime
 import logging
 logger = logging.getLogger(__file__)
@@ -76,7 +76,7 @@ def get_records(recordstore, project, label=None,
     reclist = RecordList(record_list)
 
     if min_data > 0:
-        reclist = reclist.filter.output_data(minimum=min_data).list
+        reclist = reclist.filter.output(minimum=min_data).list
 
     return reclist
 
@@ -168,7 +168,13 @@ class RecordView:
     def repeats(self):
         return self._records.repeats
 
+    @property
+    def outputpath(self):
+        return [ os.path.join(self.datastore.root, output_data.path)
+                 for output_data in self.output_data ]
+
     def get_datapath(self, data_idx=None):
+        logger.warning("Deprecation warning: use `datapath` property.")
         if data_idx is None:
             if len(self.output_data) > 1:
                 raise ValueError("Multile output files : \n"
@@ -180,7 +186,13 @@ class RecordView:
         return path
 
     def extract(self, field):
-        """Retrieve record value corresponding to the field keyword."""
+        """
+        Retrieve record value corresponding to the field keyword.
+        'Field' can specify any defined extraction rule, although generally
+        it simply refers to a particular field in the record.
+        TODO: Provide an extension mechanism so users can define their own
+              extraction rules.
+        """
         def splitarg(arg, default):
             """Extract the value following '=' in `arg`."""
             if '=' in arg:
@@ -194,9 +206,26 @@ class RecordView:
                 return default
         if 'parameters' == field:
             return self.parameters
-        elif 'datapath' in field:
+        elif 'outputpath' in field:
             idx = splitarg(field, None)
-            return self.get_datapath(idx)
+            outputpath = self.outputpath
+            if len(outputpath) == 0:
+                raise IndexError("No output data is associated to this record.")
+            if idx is not None:
+                return outputpath[idx]
+            else:
+                if len(outputpath) == 1:
+                    return outputpath[0]
+                else:
+                    raise IndexError("This record has more than one output; "
+                                     "you must provide an index.")
+        else:
+            extract_rules = ['parameters', 'outputpath']
+            # TODO: Add custom extraction rules here
+            extract_rules = ["'" + rule + "'" for rule in extract_rules]
+            raise ValueError("You tried extracting data from a record using rule '{}', "
+                             "which is undefined. Currently defined rules for are {} and {}."
+                             .format(field, ', '.join(extract_rules[:-1]), extract_rules))
 
     # Reproduce the Record interface; database writing functions are deactivated.
     def __nowrite(self):
@@ -265,7 +294,7 @@ class RecordFilter:
         return RecordList(iterable)
 
     # Custom filters
-    def output_data(self, minimum=1, maximum=None):
+    def output(self, minimum=1, maximum=None):
         # TODO: Use iterable that doesn't need to allocate all the data
         iterable = [rec for rec in self.reclst
                     if ((minimum is None or len(rec.output_data) >= minimum)
@@ -292,7 +321,10 @@ class RecordList:
         return len(self.iterable)
 
     def __getitem__(self, key):
-        return self.iterable[key]
+        res = self.iterable[key]
+        if isinstance(res, Iterable):
+            res = RecordList(res)
+        return res
 
     def __iter__(self):
         self.iterator = iter(self.iterable)
