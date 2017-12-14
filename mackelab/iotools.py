@@ -188,10 +188,11 @@ def save(file, data, format='npr', overwrite=False):
     output_paths = []
 
     # Save data in as numpy representation
-    if 'npr' in format:
+    if 'npr' in selected_formats:
         ext = defined_formats['npr'].ext
         with output(filename, ext, True, overwrite) as (f, output_path):
             try:
+                logger.info("Saving data to 'npr' format...")
                 np.savez(f, **data.repr_np)
             except AttributeError:
                 # TODO: Use custom error type
@@ -205,7 +206,7 @@ def save(file, data, format='npr', overwrite=False):
 
 
     # Save data as representation string
-    if 'repr' in format:
+    if 'repr' in selected_formats:
         fail = False
         if data.__repr__ is object.__repr__:
             # Non-informative repr -- abort
@@ -214,6 +215,7 @@ def save(file, data, format='npr', overwrite=False):
             ext = defined_formats['repr'].ext
             with output(filename, ext, False, overwrite) as (f, output_path):
                 try:
+                    logger.info("Saving data to plain-text 'repr' format'")
                     f.write(repr(data))
                 except:
                     fail = True
@@ -227,9 +229,10 @@ def save(file, data, format='npr', overwrite=False):
                 selected_formats.add('dill')
 
     # Save data in dill format
-    if 'dill' in format:
+    if 'dill' in selected_formats:
         ext = defined_formats['dill'].ext
         with output(filename, ext, True, overwrite) as (f, output_path):
+            logger.info("Saving data as a dill pickle.")
             dill.dump(data, f)
             output_paths.append(output_path)
 
@@ -327,7 +330,8 @@ class output():
     def __init__(self, path, ext, bytes, overwrite=False):
 
         # Add extension
-        basepath, ext = os.path.splitext(path)
+        basepath, _ = os.path.splitext(path)
+            # Remove possible extension from path
         if len(ext) > 0 and ext[0] != ".":
             ext = "." + ext
         self.output_path = basepath + ext
