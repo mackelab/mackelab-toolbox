@@ -53,32 +53,36 @@ def get_records(recordstore, project, label=None,
     else:
         record_list = recordstore.list(project)
 
-    if script is not None:
-        record_list = [record for record in record_list if script in record.main_file]
-
-    if before is not None:
-        if isinstance(before, tuple):
-            before = datetime(*before)
-        if not isinstance(before, datetime):
-            tnorm = lambda tstamp: tstamp.date()
-        else:
-            tnorm = lambda tstamp: tstamp
-        record_list = [rec for rec in record_list if tnorm(rec.timestamp) < before]
-    if after is not None:
-        if isinstance(after, tuple):
-            after = datetime(*after)
-        if not isinstance(after, datetime):
-            tnorm = lambda tstamp: tstamp.date()
-        else:
-            tnorm = lambda tstamp: tstamp
-        record_list = [rec for rec in record_list if tnorm(rec.timestamp) >= after]
-
     reclist = RecordList(record_list)
 
-    if min_data > 0:
-        reclist = reclist.filter.output(minimum=min_data).list
+    if script is not None:
+        reclist = reclist.filter.script(script)
+        #record_list = [record for record in record_list if script in record.main_file]
 
-    return reclist
+    if before is not None:
+        reclist = reclist.filter.before(before)
+        #if isinstance(before, tuple):
+            #before = datetime(*before)
+        #if not isinstance(before, datetime):
+            #tnorm = lambda tstamp: tstamp.date()
+        #else:
+            #tnorm = lambda tstamp: tstamp
+        #record_list = [rec for rec in record_list if tnorm(rec.timestamp) < before]
+    if after is not None:
+        reclist = reclist.filter.after(after)
+        #if isinstance(after, tuple):
+            #after = datetime(*after)
+        #if not isinstance(after, datetime):
+            #tnorm = lambda tstamp: tstamp.date()
+        #else:
+            #tnorm = lambda tstamp: tstamp
+        #record_list = [rec for rec in record_list if tnorm(rec.timestamp) >= after]
+
+
+    if min_data > 0:
+        reclist = reclist.filter.output(minimum=min_data)
+
+    return reclist.list
 
 class RecordView:
     """A read-only interface to Sumatra records with extra convenience methods."""
@@ -301,6 +305,26 @@ class RecordFilter:
                         and (maximum is None or len(rec.output_data) <= maximum))]
         return RecordList(iterable)
 
+    def before(self, date):
+        if isinstance(date, tuple):
+            date = datetime(*date)
+        if not isinstance(date, datetime):
+            tnorm = lambda tstamp: tstamp.date()
+        else:
+            tnorm = lambda tstamp: tstamp
+        return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) < date)
+    def after(self, date):
+        if isinstance(date, tuple):
+            date = datetime(*date)
+        if not isinstance(date, datetime):
+            tnorm = lambda tstamp: tstamp.date()
+        else:
+            tnorm = lambda tstamp: tstamp
+        return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) >= date)
+
+    def script(self, script):
+        return RecordList(record for record in self.reclst if script in record.main_file)
+
 class RecordList:
     """
     This class ensures that all elements of an iterable are RecordViews; it
@@ -311,6 +335,9 @@ class RecordList:
         - `reclist.filter(cond)` is the same as `filter(reclist, cond)`
         - `reclist.filter.output_data()` filters the list based on output data
     We expect to add more filters as time goes on.
+
+    FIXME: If constructed from a generator, can only iterate once. Should do
+           something to protect the user from deleting data by e.g. calling `list()`.
     """
     def __init__(self, iterable):
         self.iterable = iterable
