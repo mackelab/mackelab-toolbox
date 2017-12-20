@@ -285,7 +285,9 @@ def load(filename, types=None, load_function=None, input_format=None):
             data = load_function(data)
         elif 'type' in data:
             # 'type' stored as a 0D array
-            if data['type'].ndim == 0 and data['type'].dtype.kind in {'S', 'U'}:
+            if (data['type'].ndim == 0
+                and data['type'].dtype.kind in {'S', 'U'}
+                and str(data['type']) in types) :
                 # make sure it's really 0D
                 cls = types[str(data['type'])]
                 if hasattr(cls, 'from_repr_np'):

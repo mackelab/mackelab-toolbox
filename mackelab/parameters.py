@@ -397,6 +397,8 @@ class ParameterSetSampler:
     be independent from samples produced outside of it. This shouldn't be a problem if
     e.g. the 'other' samples are those used to induce noise in a simulation. However,
     generating other parameters with a separate RNG should be avoided.
+
+    # TODO: Cast parameters with subpopulations as BroadcastableBlockArray ?
     """
     population_attrs = ['population', 'populations', 'mixture', 'mixtures', 'label', 'labels']
     def __init__(self, dists):
@@ -574,7 +576,7 @@ class ParameterSampler:
                             for pop2, j in zip(popnames, range(0, n**1, n**0)) ]
                           for pop1, i in zip(popnames, range(0, n**2, n**1)) ] )
 
-        if 'transform' in desc:
+        if isinstance(desc, ParameterSet) and 'transform' in desc:
             inverse = Transform(desc.transform.back)
             self._get_sample = lambda : inverse(get_sample())
         else:
