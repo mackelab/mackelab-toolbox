@@ -134,6 +134,19 @@ class NonTransformedVar:
 # Making file names from parameters
 ###########################
 
+# We use the string representation of arrays to compute the hash,
+# so we need to make sure it's standardized. The values below
+# are the NumPy defaults.
+_filename_printoptions = {
+    'precision': 8,
+    'edgeitems': 3,
+    'formatter': None,
+    'infstr': 'inf',
+    'linewidth': 75,
+    'nanstr': 'nan',
+    'suppress': False,
+    'threshold': 1000}
+
 def get_filename(params, suffix=None):
     """
     Generate a unique filename by hashing a parameter file.
@@ -141,6 +154,9 @@ def get_filename(params, suffix=None):
     if params == '':
         basename = ""
     else:
+        # Standardize the numpy print options, which affect output from str()
+        stored_printoptions = np.get_printoptions()
+        np.set_printoptions(**_filename_printoptions)
         # We need a sorted dictionary of parameters, so that the hash is consistent
         flat_params = params_to_arrays(params).flatten()
             # flatten avoids need to sort recursively
@@ -148,6 +164,8 @@ def get_filename(params, suffix=None):
         sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
         basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
         basename += '_'
+        # Reset the saved print options
+        np.set_printoptions(**stored_printoptions)
     if isinstance(suffix, str):
         suffix = suffix.lstrip('_')
     if suffix is None or suffix == "":
