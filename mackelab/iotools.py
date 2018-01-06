@@ -260,7 +260,8 @@ def load(filename, types=None, load_function=None, input_format=None):
     """
     global _load_types
     if types is not None:
-        types = _load_types.copy().update(types)
+        types = dict(types)
+        types.update(_load_types)
     else:
         types = _load_types
 
