@@ -92,7 +92,7 @@ class PyMCPrior(dict):
                     shim.set_subtensor(dist.to(modelvar)[mask.nonzero()],
                                        dist.new))
             else:
-                distvar = dist.new.reshape(distparams.shape)
+                distvar = dist.back(dist.new.reshape(distparams.shape))
 
             self[dist.orig.name] = distvar
 
