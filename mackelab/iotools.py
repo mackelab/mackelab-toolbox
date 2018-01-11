@@ -158,9 +158,9 @@ def save(file, data, format='npr', overwrite=False):
         format_names = ["'" + f + "'" for f in defined_formats]
         bad_format_names = ["'" + f + "'" for f in bad_formats]
         formatstr = "format"
-        if (format_names) > 1:
+        if len(format_names) > 1:
             format_names = ", ".join(format_names[:-1]) + " and " + format_names[-1]
-        if (bad_format_names) > 1:
+        if len(bad_format_names) > 1:
             formatstr = "formats"
             bad_format_names = ", ".join(bad_format_names[:-1]) + " and " + bad_format_names[-1]
         logger.warning("Unrecognized save {} {}.".format(formatstr, bad_format_names)
