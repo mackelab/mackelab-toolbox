@@ -305,17 +305,33 @@ class RecordFilter:
                         and (maximum is None or len(rec.output_data) <= maximum))]
         return RecordList(iterable)
 
-    def before(self, date):
-        if isinstance(date, tuple):
-            date = datetime(*date)
+    def before(self, date, *args):
+        """
+        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        """
+        if isinstance(date, datetime):
+            if len(args) > 0:
+                raise ValueError("Too many arguments for `filter.before()`")
+        elif isinstance(date, tuple):
+            date = datetime(*date, *args)
+        else:
+            date = datetime(date, *args)
         if not isinstance(date, datetime):
             tnorm = lambda tstamp: tstamp.date()
         else:
             tnorm = lambda tstamp: tstamp
         return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) < date)
-    def after(self, date):
-        if isinstance(date, tuple):
-            date = datetime(*date)
+    def after(self, date, *args):
+        """
+        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        """
+        if isinstance(date, datetime):
+            if len(args) > 0:
+                raise ValueError("Too many arguments for `filter.after()`")
+        elif isinstance(date, tuple):
+            date = datetime(*date, *args)
+        else:
+            date = datetime(date, *args)
         if not isinstance(date, datetime):
             tnorm = lambda tstamp: tstamp.date()
         else:
