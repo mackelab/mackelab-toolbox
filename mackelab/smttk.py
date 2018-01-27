@@ -13,6 +13,7 @@ from sumatra.recordstore import DjangoRecordStore as RecordStore
     # The usual RecordStore, provided as a convenience
 from sumatra.records import Record
 
+import mackelab as ml
 import mackelab.parameters
 import mackelab.iotools as iotools
 
@@ -30,6 +31,18 @@ else:
 ##################################
 
 # TODO: Make these methods of a "RecordStoreView class"
+
+def get_record(recordstore, project, label):
+    """
+    Retrieve a singe record. In contrast to `get_records()`, the result is not wrapped in a list.
+    """
+    assert( isinstance(label, str) )
+        # Don't accept lists as input
+    res = get_records(recordstore, project, label)
+    if len(res) > 1:
+        raise RuntimeError("More than one record was found. Specify a unique label.")
+    return res[0]
+
 def get_records(recordstore, project, label=None,
                 script=None,
                 before=None, after=None,
@@ -172,13 +185,91 @@ class RecordView:
     def repeats(self):
         return self._records.repeats
 
+    # Reproduce the Record interface; database writing functions are deactivated.
+    def __nowrite(self):
+        raise AttributeError("RecordView is read-only – Operations associated with "
+                             "running or writingg to the database are disabled.")
+    def register(self, *args, **kwargs):
+        self.__nowrite()
+    def run(self, *args, **kwargs):
+        self.__nowrite()
+    def __repr__(self):
+        return repr(self._record)
+    def describe(self, *arg, **kwargs):
+        return self._record.describe(*args, **kwargs)
+    def __ne__(self, other):
+        return self._record != other
+    def __eq__(self, other):
+        return self._record == other
+    def difference(self, *args, **kwargs):
+        return self._record.difference(*args, **kwargs)
+    def delete_data(self):
+        self.__nowrite()
+    @property
+    def command_line(self):
+        return self._record.command_line
+    @property
+    def script_content(self):
+        return self._record.script_content
+
+    # New functionality
     @property
     def outputpath(self):
         return [ os.path.join(self.datastore.root, output_data.path)
                  for output_data in self.output_data ]
 
+    def get_outputpath(self, include=None, exclude=None, filter=None, keepdim=False):
+        """
+        Parameters
+        ----------
+        include: str, or list/tuple of str
+            Only return paths that include any one of the given strings
+
+        exclude: str, or list/tuple of str
+            Only return paths that do not include any of the given strings
+
+        filter: function
+            Arbitrary function taking a single string (path) as input. If given,
+            only paths for which this function returns True are returned.
+
+        keepdim: bool
+            By default, if only one path is found, it is returned without
+            being wrapped in a list. This is convenient in interactive use,
+            but for scripts it can be better to have a consistent return type.
+            Specifying `keepdim=True` indicates to always return a list.
+
+        Returns
+        -------
+        list of str, or str
+            List of output paths, or the bare path if there is only one and keepdim=False.
+        """
+        # Construct the filter function
+        if filter is None:
+            filter = lambda x: True
+        if include is None:
+            include = ("",) # any() on an empty tuple returns False
+        elif isinstance(include, str) or not isinstance(include, Iterable):
+            include = (include,)
+        if exclude is None:
+            exclude = ()
+        elif isinstance(exclude, str) or not isinstance(exclude, Iterable):
+            exclude = (exclude,)
+        def filter_fn(path):
+            return ( any(s in path for s in include)
+                    and all(s not in path for s in exclude)
+                    and filter(path) )
+
+        # Get output data path(s)
+        paths = [path for path in self.outputpath if filter_fn(path)]
+
+        if not keepdim and len(paths) == 1:
+            paths = paths[0]
+
+        return paths
+
+
     def get_datapath(self, data_idx=None):
-        logger.warning("Deprecation warning: use `datapath` property.")
+        logger.warning("Deprecation warning: use `outputpath` property.")
         if data_idx is None:
             if len(self.output_data) > 1:
                 raise ValueError("Multile output files : \n"
@@ -230,33 +321,6 @@ class RecordView:
             raise ValueError("You tried extracting data from a record using rule '{}', "
                              "which is undefined. Currently defined rules for are {} and {}."
                              .format(field, ', '.join(extract_rules[:-1]), extract_rules))
-
-    # Reproduce the Record interface; database writing functions are deactivated.
-    def __nowrite(self):
-        raise AttributeError("RecordView is read-only – Operations associated with "
-                             "running or writingg to the database are disabled.")
-    def register(self, *args, **kwargs):
-        self.__nowrite()
-    def run(self, *args, **kwargs):
-        self.__nowrite()
-    def __repr__(self):
-        return repr(self._record)
-    def describe(self, *arg, **kwargs):
-        return self._record.describe(*args, **kwargs)
-    def __ne__(self, other):
-        return self._record != other
-    def __eq__(self, other):
-        return self._record == other
-    def difference(self, *args, **kwargs):
-        return self._record.difference(*args, **kwargs)
-    def delete_data(self):
-        self.__nowrite()
-    @property
-    def command_line(self):
-        return self._record.command_line
-    @property
-    def script_content(self):
-        return self._record.script_content
 
 class RecordFilter:
     """
@@ -398,6 +462,54 @@ class RecordList:
         Fit = namedtuple("Fit", fields)
         for rec in self:
             yield Fit(*(rec.extract(field) for field in args))
+
+    def get_datapaths(self, common_params=None,
+                  include=None, exclude=None, filter=None,
+                  return_parameters=False):
+        """
+        Parameters
+        ----------
+        common_params: str, or list of str
+            Unless None, `mackelab.parameters.prune()` will be applied to each record with
+            this filter specification. An error is raised if any of the returned
+            ParameterSets differs from the others.
+
+        include, exclude, filter: same as RecordView.get_outputpath()
+
+        return_parameters: bool
+            If True, also return the common parameters. `common_params` must also
+            be set. Default value is False.
+        Returns
+        -------
+        List of str (paths)
+        """
+        # if not isinstance(records, Iterable):
+        #     raise ValueError("`records` must be a list of records.")
+        # if len(records) == 0:
+        #     raise ValueError("`records` list is empty.")
+        records = list(self)
+
+        # Check to make sure that all records have the same parameters
+        if common_params is not None:
+            test_params = ml.parameters.prune(records[0].parameters, common_params)
+            for rec in records:
+                if ml.parameters.prune(rec.parameters, common_params) != test_params:
+                    raise ValueError("Parameters differ between records")
+
+        # Get the data paths
+        data_paths = []
+        for rec in records:
+            rec_paths = rec.get_outputpath(include, exclude, filter, keepdim=True)
+            data_paths.extend(rec_paths)
+
+        # Return the paths, possibly along with the parameters
+        if return_parameters:
+            if common_params is None:
+                raise ValueError("Must specify a filter for common parameters "
+                                "in order to return a parameter set.")
+            return data_paths, test_params
+        else:
+            return data_paths 
 
 
 ##################################
