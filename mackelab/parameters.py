@@ -89,7 +89,64 @@ class Transform:
     def desc(self):
         return self.xname + " -> " + self.expr
 
-class TransformedVar:
+class MetaTransformedVar(type):
+    """Implements subclass selection mechanism of TransformedVarBase."""
+    # Based on https://stackoverflow.com/a/14756633
+    def __call__(cls, desc, *args, orig=None, new=None):
+        if len(args) > 0:
+            raise TypeError("TransformedVar() takes only one positional argument.")
+        if not( (orig is None) != (new is None) ):  #xor
+            raise ValueError("Exactly one of `orig`, `new` must be specified.")
+
+        if all(s in desc for s in ['name', 'to', 'back']):
+            # Standard way to make transformed variable by providing transform description
+            var = TransformedVar.__new__(TransformedVar, desc, *args, orig=orig, new=new)
+            var.__init__(desc, *args, orig=orig, new=new)
+        elif 'transform' in desc:
+            # Alternative way to make transformed variable: pass entire
+            # variable description, which includes transform description
+            var = TransformedVar.__new__(TransformedVar, desc.transform, *args, orig=orig, new=new)
+            var.__init__(desc.transform, *args, orig=orig, new=new)
+        else:
+            # Not a transformed variable
+            if orig is None:
+                orig = new  # orig == new for non transformed variables
+            var = NonTransformedVar.__new__(NonTransformedVar, orig)
+            var.__init__(orig)
+
+        return var
+
+class TransformedVarBase(metaclass=MetaTransformedVar):
+    """
+    Base class for TransformedVar and NonTransformedVar.
+    Can use it's constructor to obtain either TransformedVar or NonTransformedVar,
+    depending on whether `desc` provides a transform.
+    """
+    TransformName = namedtuple('TransformName', ['orig', 'new'])
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)
+
+    def __init__(self, desc):
+        self.names = self.TransformName(*[nm.strip() for nm in desc.name.split('->')])
+        #assert(len(names) == 2)
+        if hasattr(self.orig, 'name'):
+            if self.orig.name is None:
+                self.orig.name = self.names.orig
+            else:
+                assert(self.orig.name == names.orig)
+        if hasattr(self.new, 'name'):
+            if self.new.name is None:
+                self.new.name = names.new
+            else:
+                assert(self.new.name == names.new)
+
+class TransformedVar(TransformedVarBase):
+
+    # def __new__(cls, desc, *args, orig=None, new=None):
+    #     # Required because of MetaTransformedVar
+    #     return super().__new__(cls)
+
     def __init__(self, desc, *args, orig=None, new=None):
         """
         Should pass exactly one of the parameters `orig` and `new`
@@ -97,10 +154,8 @@ class TransformedVar:
             Test to see if orig/new is a constant, callable or symbolic.
             Set the other orig/new to the same type.
         """
-        if len(args) > 0:
-            raise TypeError("TransformedVar() takes only one positional argument.")
-        if not( (orig is None) != (new is None) ):  #xor
-            raise ValueError("Exactly one of `orig`, `new` must be specified.")
+        if not all(s in desc for s in ['to', 'back', 'name']):
+            raise ValueError("Incomplete transform description")
         self.to = Transform(desc.to)
         self.back = Transform(desc.back)
         if orig is not None:
@@ -111,24 +166,28 @@ class TransformedVar:
             #assert(shim.issymbolic(new))
             self.new = new
             self.orig = self.back(new)
-        names = [nm.strip() for nm in desc.name.split('->')]
-        assert(len(names) == 2)
-        if self.orig.name is None:
-            self.orig.name = names[0]
-        else:
-            assert(self.orig.name == names[0])
-        if self.new.name is None:
-            self.new.name = names[1]
-        else:
-            assert(self.new.name == names[1])
+        super().__init__(desc)
 
-class NonTransformedVar:
+class NonTransformedVar(TransformedVarBase):
     """Provides an interface consistent with TransformedVar."""
-    def __init__(self, orig):
+
+    # def __new__(cls, orig):
+    #     # Required because of MetaTransformedVar
+    #     return super().__new__(cls)
+
+    def __init__(self, desc, orig):
+        """
+        `desc` only used to provide name attribute. If you don't need name,
+        you can pass `desc=None`.
+        """
         self.orig = orig
         self.to = lambda x: x
         self.back = lambda x: x
         self.new = orig
+        if desc is not None:
+            if not all(s in desc for s in ['to', 'back', 'name']):
+                raise ValueError("Incomplete transform description")
+            super().__init__(desc)
 
 ###########################
 # Making file names from parameters
@@ -196,6 +255,58 @@ def params_to_arrays(params):
             params[name] = np.array(val)
     return ParameterSet(params)
 
+###########################
+# Manipulating ParameterSets
+###########################
+
+def prune(params, keep):
+    """
+    Filter `params`, keeping only the names (aka keys) indicated in `filter`.
+    E.g. if `filter` is 'model.N', then the returned object is a ParameterSet
+    with only the contents of `params.model.N`. The root is unchanged, so
+    parameters are still accessed as `params.model.N.[attr]`.
+
+    Parameters
+    ----------
+    params: ParameterSet
+
+    keep: str, or list of str
+        Parameters to keep. Should correspond to keys  in `params`.
+
+    Returns
+    -------
+    ParameterSet
+        Copy of `params`, keeping only the attributes given in `filter`.
+    """
+    # Normalize `filter`
+    if isinstance(keep, str) or not isinstance(keep, Iterable):
+        filters = [keep]
+    else:
+        filters = keep
+
+    # Create a new ParameterSet, and fill it with the elements of `params`
+    newparams = ParameterSet({})
+    for filter in filters:
+        if '.' in filter:
+            filter, subfilter = filter.split('.', maxsplit=1)
+        else:
+            subfilter = None
+        if filter not in params:
+            logger.debug("Tried to filter a ParameterSet with '{}', but it "
+                         "contains no such key. Filter was ignored.")
+        else:
+            if subfilter is None:
+                if filter in newparams:
+                    # This parameter name was already added – almost certainly an error
+                    raise ValueError("Filter parameter '{}' overlaps with another"
+                                     .format(filter))
+                newparams[filter] = params[filter]
+            else:
+                if filter not in newparams:
+                    newparams[filter] = ParameterSet({})
+                newparams[filter][subfilter] = prune(params[filter], subfilter)[subfilter]
+
+    return newparams
 
 ###########################
 # Parameter file expansion
@@ -489,6 +600,12 @@ class ParameterSetSampler:
     #         return self._samplers[self.varnames[self._iter_idx]]
     # # End iterator definition
     # #######
+
+    @property
+    def sampled_varnames(self):
+        """Return the names of the variables which we are sampling."""
+        return [name for name, sampler in self._samplers.items()
+                if sampler.sampled_idx is not None]
 
     def sample(self, varname=None):
         """
