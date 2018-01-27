@@ -4,6 +4,8 @@ import pymc3 as pymc
 
 import theano_shim as shim
 from mackelab.parameters import TransformedVar, NonTransformedVar
+from mackelab.iotools import load
+from mackelab.utils import flatten
 
 class PyMCPrior(dict):
     """
@@ -257,10 +259,21 @@ def import_multitrace(data):
     """
     Parameters
     ----------
-    data: list
+    data: iterable
         MultiTrace data, as returned by `export_multitrace`.
+        Elements may be arbitrarily nested; this makes combining the outputs
+        of multiple `export_multitrace` calls easier.
+        List elements that are strings are treated as paths to a file storing
+        the output of `export_multitrace()` and loaded with `mackelab.iotools.load()`.
     """
-    straces = [NDArrayView(tracedata) for tracedata in data]
+    flatdata = list(flatten(data, terminate=(str,dict)))
+    for i, trace in enumerate(flatdata):
+        if isinstance(trace, str):
+            # Assume this is a path
+            flatdata[i] = load(trace)
+
+    straces = [NDArrayView(tracedata) for tracedata in flatten(flatdata, terminate=dict)]
+        # Need to flatten again because loading from file adds another level of nesting
     return pymc.backends.base.MultiTrace(straces)
 
 def export_multitrace(multitrace):
