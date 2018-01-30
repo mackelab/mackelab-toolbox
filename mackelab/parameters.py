@@ -98,11 +98,11 @@ class MetaTransformedVar(type):
         if not( (orig is None) != (new is None) ):  #xor
             raise ValueError("Exactly one of `orig`, `new` must be specified.")
 
-        if all(s in desc for s in ['name', 'to', 'back']):
+        if desc is not None and all(s in desc for s in ['name', 'to', 'back']):
             # Standard way to make transformed variable by providing transform description
             var = TransformedVar.__new__(TransformedVar, desc, *args, orig=orig, new=new)
             var.__init__(desc, *args, orig=orig, new=new)
-        elif 'transform' in desc:
+        elif desc is not None and 'transform' in desc:
             # Alternative way to make transformed variable: pass entire
             # variable description, which includes transform description
             var = TransformedVar.__new__(TransformedVar, desc.transform, *args, orig=orig, new=new)
@@ -112,7 +112,7 @@ class MetaTransformedVar(type):
             if orig is None:
                 orig = new  # orig == new for non transformed variables
             var = NonTransformedVar.__new__(NonTransformedVar, orig)
-            var.__init__(orig)
+            var.__init__(desc, orig)
 
         return var
 
@@ -126,20 +126,6 @@ class TransformedVarBase(metaclass=MetaTransformedVar):
 
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls)
-
-    def __init__(self, desc):
-        self.names = self.TransformName(*[nm.strip() for nm in desc.name.split('->')])
-        #assert(len(names) == 2)
-        if hasattr(self.orig, 'name'):
-            if self.orig.name is None:
-                self.orig.name = self.names.orig
-            else:
-                assert(self.orig.name == names.orig)
-        if hasattr(self.new, 'name'):
-            if self.new.name is None:
-                self.new.name = names.new
-            else:
-                assert(self.new.name == names.new)
 
 class TransformedVar(TransformedVarBase):
 
@@ -166,7 +152,35 @@ class TransformedVar(TransformedVarBase):
             #assert(shim.issymbolic(new))
             self.new = new
             self.orig = self.back(new)
-        super().__init__(desc)
+
+        # Set the variable names
+        self.names = self.TransformName(*[nm.strip() for nm in desc.name.split('->')])
+        #assert(len(names) == 2)
+        if hasattr(self.orig, 'name'):
+            if self.orig.name is None:
+                self.orig.name = self.names.orig
+            else:
+                assert(self.orig.name == self.names.orig)
+        if hasattr(self.new, 'name'):
+            if self.new.name is None:
+                self.new.name = self.names.new
+            else:
+                assert(self.new.name == self.names.new)
+
+    def rename(self, orig, new):
+        """
+        Rename the variables
+
+        Parameters
+        ----------
+        new: str
+            Name to assign to self.new
+        orig: str
+            Name to assign to self.orig
+        """
+        self.names = self.TransformName(orig=orig, new=new)
+        self.orig.name = orig
+        self.new.name = new
 
 class NonTransformedVar(TransformedVarBase):
     """Provides an interface consistent with TransformedVar."""
@@ -179,15 +193,55 @@ class NonTransformedVar(TransformedVarBase):
         """
         `desc` only used to provide name attribute. If you don't need name,
         you can pass `desc=None`.
+
+        Parameters
+        ----------
+        desc: ParameterSet
+            Transform description
+        orig: variable
+            Theano or Python numeric variable.
         """
         self.orig = orig
         self.to = lambda x: x
         self.back = lambda x: x
         self.new = orig
-        if desc is not None:
-            if not all(s in desc for s in ['to', 'back', 'name']):
-                raise ValueError("Incomplete transform description")
-            super().__init__(desc)
+        # Set name
+        if isinstance(desc, str):
+            self.names = self.TransformName(desc, desc)
+        elif desc is not None and 'name' in desc:
+            nametup = desc.name.split('->')
+            if len(nametup) == 1:
+                self.names = self.TransformName(nametup[0], nametup[0])
+            elif len(nametup) == 2:
+                self.names = self.TransformName(*nametup)
+                assert(self.names.new == self.names.orig)
+            else:
+                raise ValueError("Malformed transformation name description '{}'."
+                                 .format(desc.name))
+        if hasattr(self, 'names'):
+            if hasattr(self.orig, 'name'):
+                if self.orig.name is not None:
+                    assert(self.orig.name == self.names.orig)
+            else:
+                self.orig.name = self.names.orig
+
+    def rename(self, orig, new=None):
+        """
+        Rename the variables
+
+        Parameters
+        ----------
+        orig: str
+            Name to assign to self.orig
+        new: str
+            Ignored; only provided to have consistent API with TransformedVar.
+            If given, must be equal to `orig`.
+        """
+        if new is not None and new != orig:
+            raise ValueError("For NonTransformedVar, the 'new' and 'orig' names must match.")
+        self.names = self.TransformName(orig=orig, new=orig)
+        if hasattr(self.orig, 'name') and self.orig.name is not None:
+            self.orig.name = orig
 
 ###########################
 # Making file names from parameters
@@ -206,10 +260,25 @@ _filename_printoptions = {
     'suppress': False,
     'threshold': 1000}
 
-def get_filename(params, suffix=None):
+def get_filename(params, suffix=None, convert_to_arrays=True):
     """
     Generate a unique filename by hashing a parameter file.
+
+    Parameters
+    ----------
+    params: ParameterSet
+        Filename will be based on these parameters
+
+    suffix: str or None
+        If not None, an underscore ('_') and then the value of `suffix` are
+        appended to the calculated filename
+
+    convert_to_arrays: bool
+        If true, the parameters are normalized by using the result of
+        `params_to_arrays(params)` to calculate the filename.
     """
+    if convert_to_arrays:
+        params = params_to_arrays(params)
     if params == '':
         basename = ""
     else:
@@ -244,6 +313,9 @@ def params_to_arrays(params):
     arrays to be specified in files as nested lists, which are more readable.
     Also converts dictionaries to parameter sets.
     """
+    ParamType = type(params)
+        # Allows to work with types derived from ParameterSet, for example Sumatra's
+        # NTParameterSet
     for name, val in params.items():
         if isinstance(val, (ParameterSet, dict)):
             params[name] = params_to_arrays(val)
@@ -253,7 +325,7 @@ def params_to_arrays(params):
                 # The last condition leaves objects like ('lin', 0, 1) as-is;
                 # otherwise they would be casted to a single type
             params[name] = np.array(val)
-    return ParameterSet(params)
+    return ParamType(params)
 
 ###########################
 # Manipulating ParameterSets
