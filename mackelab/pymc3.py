@@ -51,6 +51,7 @@ class PyMCPrior(dict):
         assert(shim.config.use_theano)
         assert(len(dists) == len(modelvars))
 
+        dists = dists.copy()  # Don't modify passed argument
         for distname, distparams in dists.items():
             hyperparams = [key for key in distparams.keys()
                            if key not in self.metaparams]
@@ -83,28 +84,33 @@ class PyMCPrior(dict):
                         if pname in hyperparams:
                             distparams[pname] = pval[mask]
 
-            dist = self.get_dist(distname, distparams)
+            suffix = ' (dist)'
+            dist = self.get_dist(distname, distparams, suffix)
+            modelvarname = dist.names.orig[:-len(suffix)]
 
             if mask is not None:
-                modelvar = next(var for var in modelvars
-                                if var.name == dist.orig.name)
-                    # Grab the first symbolic variable with matching name
-                    # (there should only be one)
+                # Grab the symbolic variable with matching name
+                # (The symbolic variable's name does not have the suffix)
+                foundvars = [var for var in modelvars
+                             if var.name == modelvarname]
+                assert(len(foundvars) == 1)
+                modelvar = foundvars[0]
                 distvar = dist.back(
                     shim.set_subtensor(dist.to(modelvar)[mask.nonzero()],
                                        dist.new))
             else:
                 distvar = dist.back(dist.new.reshape(distparams.shape))
 
-            self[dist.orig.name] = distvar
+            self[modelvarname] = distvar
 
-
-    def get_dist(self, distname, distparams):
+    def get_dist(self, distname, distparams, name_suffix=" (dist)"):
         if 'transform' in distparams:
             # 'distname' is that of the transformed variable
             names = [nm.strip() for nm in distparams.transform.name.split('->')]
             assert(distname == names[0])
             distname = names[1]
+
+        distvarname = distname + name_suffix
 
         if distparams.dist in ['normal', 'expnormal', 'lognormal']:
             if shim.isscalar(distparams.loc) and shim.isscalar(distparams.scale):
@@ -114,7 +120,7 @@ class PyMCPrior(dict):
                     mu = mu.flat[0]
                 if isinstance(sd, np.ndarray):
                     sd = sd.flat[0]
-                distvar = pymc.Normal(distname, mu=mu, sd=sd)
+                distvar = pymc.Normal(distvarname, mu=mu, sd=sd)
             else:
                 # Because the distribution is 'normal' and not 'mvnormal',
                 # we sample the parameters independently, hence the
@@ -123,15 +129,15 @@ class PyMCPrior(dict):
                 kwargs = {'shape' : distparams.loc.flatten().shape, # Required
                           'mu'    : distparams.loc.flatten(),
                           'cov'   : np.diag(distparams.scale.flat)}
-                distvar = pymc.MvNormal(distname, **kwargs)
+                distvar = pymc.MvNormal(distvarname, **kwargs)
 
         elif distparams.dist in ['exp', 'exponential']:
             lam = 1/distparams.scale
-            distvar = pymc.Exponential(distname, lam=lam, shape=distparams.shape)
+            distvar = pymc.Exponential(distvarname, lam=lam, shape=distparams.shape)
 
         elif distparams.dist == 'gamma':
             a = distparams.a; b = 1/distparams.scale
-            distvar = pymc.Gamma(distname, alpha=a, beta=b, shape=distparams.shape)
+            distvar = pymc.Gamma(distvarname, alpha=a, beta=b, shape=distparams.shape)
 
         else:
             raise ValueError("Unrecognized distribution type '{}'."
@@ -144,12 +150,17 @@ class PyMCPrior(dict):
 
         factor = getattr(distparams, 'factor', 1)
         distvar = factor * distvar
-        distvar.name = distname
 
         if 'transform' in distparams:
-            return TransformedVar(distparams.transform, new=distvar)
+            retvar = TransformedVar(distparams.transform, new=distvar)
         else:
-            return NonTransformedVar(distvar)
+            retvar = NonTransformedVar(distname, orig=distvar)
+        retvar.rename(orig=retvar.names.orig + name_suffix,
+                      new =retvar.names.new  + name_suffix)
+            # Appending " (dist)" identifies this variable as a distribution
+            # More importantly, also avoids name clashes with the original
+            # variable associated to this distribution
+        return retvar
 
 from inspect import ismethod, getmembers, isfunction, ismethoddescriptor, isclass, isbuiltin
 def issimpleattr(obj, attr):
