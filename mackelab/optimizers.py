@@ -1,3 +1,12 @@
+from collections import OrderedDict
+import numpy as np
+import theano_shim as shim
+import theano
+import theano.tensor as T
+    # TODO: Replace all theano and T calls with shim equivalents
+
+# DEBUG ?
+debug_flags = {}
 
 def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     """
@@ -97,7 +106,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
         if m is not None:
             grads[i] = grads[i]*m
                 # m is an array of ones and zeros
-    i = theano.shared(sinn.config.cast_floatX(0.))
+    i = theano.shared(shim.cast_floatX(0.))
     i_t = i + 1.
     fix1 = 1. - (1. - b1)**i_t
     fix2 = 1. - (1. - b2)**i_t
