@@ -1,10 +1,12 @@
 import os
 import re
 import glob
+import operator
 import multiprocessing
 from collections import namedtuple, Iterable
 from datetime import datetime
 import logging
+import numpy as np
 logger = logging.getLogger(__file__)
 
 from parameters import ParameterSet
@@ -322,6 +324,108 @@ class RecordView:
                              "which is undefined. Currently defined rules for are {} and {}."
                              .format(field, ', '.join(extract_rules[:-1]), extract_rules))
 
+_cmpop_strings = ['lt', 'le', 'eq', 'ne', 'gt', 'ge']
+def _get_compare_op(cmpop):
+        """
+        Parameters
+        ----------
+        cmpop: str or function
+            'Compare Op'
+            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
+            If a function, should take two arguments and return a bool
+        """
+        # FIXME: No way to set a custom function with current interface
+        if isinstance(cmpop, str):
+            if cmpop in _cmpop_strings:
+                return getattr(operator, cmpop)
+            else:
+                raise ValueError("Unrecognized comparison operation '{}'.".format(cmpop))
+        elif isinstance(cmpop, collections.Callable):
+            return cmpop
+        else:
+            raise ValueError("'cmpop' must be either a string corresponding to a "
+                             "comparison operation (like 'lt' or 'eq'), or a callable "
+                             "implementing a comparison operation. The passed value is "
+                             "of type '{}', which is not compatible with either of these "
+                             "forms.".format(type(cmpop)))
+
+
+class ParamFilter:
+    """
+    Specialized filter, meant to be used as [record list].filter.parameters.[parameter name]
+    """
+    def __init__(self, name, reclst, cmpop):
+        """
+        Parameters
+        ----------
+        name: str
+            Name of the parameter to filter
+        cmpop: str or function
+            'Compare Op'
+            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
+            If a function, should take two arguments and return a bool
+        """
+        self.name = name
+        self.reclst = reclst
+        self._cmp = _get_compare_op(cmpop)
+
+    def __getitem__(self, key):
+        # TODO: Allow filtering only some components of a parameter
+        raise NotImplementedError
+
+    def __getattr__(self, attr):
+        if attr in _cmpop_strings:
+            return type(self)(self.reclst, attr)
+        else:
+            raise AttributeError
+
+    def __call__(self, value):
+        return RecordList(rec for rec in reclst
+                          if self.name in rec.parameters and self.cmp(rec.parameters[name], value))
+
+    def cmp(self, a, b):
+        return np.all(self._cmp(a, b))
+
+class ParameterSetFilter:
+    """
+    Specialized filter, meant to be used as [record list].filter.parameters
+    """
+
+    def __init__(self, reclst, cmpop='eq'):
+        """
+        Parameters
+        ----------
+        cmpop: str or function
+            'Compare Op'
+            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
+            If a function, should take two arguments and return a bool
+        """
+        self.reclst = reclst
+        self._cmp = _get_compare_op(cmpop)
+
+    def __getattr__(self, attr):
+        if attr in _cmpop_strings:
+            return type(self)(self.reclst, attr)
+        else:
+            return ParameterFilter(attr, self.reclst, self._cmp)
+
+    def __call__(self, paramset):
+        def test(paramset, key, value):
+            try:
+                paramset_value = paramset[key]
+            except KeyError:
+                return False
+            else:
+                return self.cmp(paramset_value, value)
+        paramset = ParameterSet(paramset)
+        return RecordList(rec for rec in self.reclst
+                          if all( test(rec.parameters, key, paramset[key])
+                                  for key in paramset.flatten().keys()))
+            # Currently paramset.flatten() doesn't deal with '->' referencing, so can't use .items()
+
+    def cmp(self, a, b):
+        return np.all(self._cmp(a, b))
+
 class RecordFilter:
     """
     Can overwrite RecordFilter.on_error_defaults to change default behaviour for
@@ -342,6 +446,8 @@ class RecordFilter:
 
     def __init__(self, record_list):
         self.reclst = record_list
+        self.parameters = ParameterSetFilter(record_list)
+
     # Default filter
     def __call__(self, cond, errors=None):
         on_error = self.on_error_defaults
@@ -385,6 +491,7 @@ class RecordFilter:
         else:
             tnorm = lambda tstamp: tstamp
         return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) < date)
+
     def after(self, date, *args):
         """
         Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
@@ -509,7 +616,7 @@ class RecordList:
                                 "in order to return a parameter set.")
             return data_paths, test_params
         else:
-            return data_paths 
+            return data_paths
 
 
 ##################################
