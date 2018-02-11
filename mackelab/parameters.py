@@ -277,6 +277,10 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
         If true, the parameters are normalized by using the result of
         `params_to_arrays(params)` to calculate the filename.
     """
+    if not isinstance(params, ParameterSet):
+        logger.warning("'get_filename()' requires an instance of ParameterSet. "
+                       "Performing an implicit conversion.")
+        params = ParameterSet(params)
     if convert_to_arrays:
         params = params_to_arrays(params)
     if params == '':
