@@ -113,7 +113,6 @@ text (False) output. Default is to open for byte output, which
         raise IOError("Number of files with the name '{}' has exceeded limit."
                       .format(path))
 
-
 def save(file, data, format='npr', overwrite=False):
     """Save `data`. By default, only the 'numpy_repr' representation is saved, if the.
     Not only is the raw format more future-proof, but it can be an order of
@@ -242,7 +241,7 @@ def save(file, data, format='npr', overwrite=False):
 
 def load(filename, types=None, load_function=None, input_format=None):
     """
-    Load file at `filename`. How the data is loaded is determined by the input formt,
+    Load file at `filename`. How the data is loaded is determined by the input format,
     which is inferred from the filename extension. It can also be given by `input_format`
     explicitly.
     If `load_function` is provided, it is be applied to the loaded data. Otherwise,
