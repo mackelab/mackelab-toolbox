@@ -1,5 +1,5 @@
 import numpy as np
-import collections
+from collections import namedtuple, Callable
 import pymc3 as pymc
 
 import theano_shim as shim
@@ -7,6 +7,14 @@ from mackelab.parameters import TransformedVar, NonTransformedVar
 from mackelab.iotools import load
 from mackelab.utils import flatten
 
+modelvarsuffix = "_model"
+    # To avoid name clashes, we need to ensure that the Theano variables of the
+    # original model and those of the PyMC3 model do not share a name.
+    # We do this by appending 'modelvarsuffix' to the original model's variables.
+    # Changing the original model's names is preferred, as this allows accessing
+    # the MCMC traces with the expected attribute names.
+
+PriorVar = namedtuple('PriorVar', ['pymc_var', 'model_var', 'transform', 'mask'])
 class PyMCPrior(dict):
     """
     [...]
@@ -84,26 +92,37 @@ class PyMCPrior(dict):
                         if pname in hyperparams:
                             distparams[pname] = pval[mask]
 
-            suffix = ' (dist)'
+     #       suffix = ' (dist)'
+            suffix = ""
             dist = self.get_dist(distname, distparams, suffix)
-            modelvarname = dist.names.orig[:-len(suffix)]
+     #       modelvarname = dist.names.orig[:-len(suffix)]
+            modelvarname = dist.names.orig
 
+            # Grab the symbolic variable with matching name
+            foundvars = [var for var in modelvars
+                            if var.name in (modelvarname, modelvarname + modelvarsuffix)]
+            assert(len(foundvars) == 1)
+            modelvar = foundvars[0]
+
+            # Create the new PyMC distribution variable (which bases Theano symbolic variable)
             if mask is not None:
-                # Grab the symbolic variable with matching name
-                # (The symbolic variable's name does not have the suffix)
-                foundvars = [var for var in modelvars
-                             if var.name == modelvarname]
-                assert(len(foundvars) == 1)
-                modelvar = foundvars[0]
                 distvar = dist.back(
                     shim.set_subtensor(dist.to(modelvar)[mask.nonzero()],
                                        dist.new))
             else:
                 distvar = dist.back(dist.new.reshape(distparams.shape))
 
-            self[modelvarname] = distvar
+            # Check if the model variable has already been renamed
+            if modelvar.name[-len(modelvarsuffix):] != modelvarsuffix:
+                # Rename the model variable to avoid name clashes
+                modelvar.name = modelvar.name + modelvarsuffix
+                    # TODO: Check that the new name is unique
 
-    def get_dist(self, distname, distparams, name_suffix=" (dist)"):
+            # Create the PyMC3 variable
+            self[modelvarname] = PriorVar(pymc_var=distvar, model_var=modelvar,
+                                          transform=dist, mask=mask)
+
+    def get_dist(self, distname, distparams, name_suffix=""):
         if 'transform' in distparams:
             # 'distname' is that of the transformed variable
             names = [nm.strip() for nm in distparams.transform.name.split('->')]
@@ -149,7 +168,10 @@ class PyMCPrior(dict):
             distvar = shim.log(distvar)
 
         factor = getattr(distparams, 'factor', 1)
-        distvar = factor * distvar
+        olddistvar = distvar
+        distvar = factor * olddistvar
+            # The assignment to 'olddistvar' prevents inplace multiplication, which
+            # can create a recurrent dependency where 'distvar' depends on 'distvar'.
 
         if 'transform' in distparams:
             retvar = TransformedVar(distparams.transform, new=distvar)
@@ -197,7 +219,7 @@ def issimpleattr(obj, attr):
                 or ismethoddescriptor(instance_attr)
                 or isinstance(cls_attr, property)
                 or cls_attr is instance_attr
-                or isinstance(instance_attr, collections.Callable))   # e.g. __delattr__
+                or isinstance(instance_attr, Callable))   # e.g. __delattr__
 
 class NDArrayView(pymc.backends.NDArray):
     def __init__(self, data=None):
