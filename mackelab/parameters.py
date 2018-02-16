@@ -258,7 +258,14 @@ _filename_printoptions = {
     'linewidth': 75,
     'nanstr': 'nan',
     'suppress': False,
-    'threshold': 1000}
+    'threshold': 1000,
+    'floatmode': 'maxprec',
+    'sign': '-',
+    'legacy': False}
+_new_printoptions = {'1.14': ['floatmode', 'sign', 'legacy']}
+    # Lists of printoptions keywords, keyed by the NumPy version where they were introduced
+    # This allows removing keywords when using an older version
+_remove_whitespace_for_filenames = True
 
 def get_filename(params, suffix=None, convert_to_arrays=True):
     """
@@ -286,15 +293,34 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
     if params == '':
         basename = ""
     else:
+        if np.__version__ < '1.14' and _filename_printoptions['legacy'] != '1.13':
+            logger.warning("You are running Numpy v{}. Numpy's string representation "
+                           "algorithm was changed in v.1.14, meaning that computed "
+                           "filenames will not be consistent with those computed on "
+                           "more up-to-date systems. To ensure consistent filenames, "
+                           "either update to 1.14, or set `mackelab.parameters._filename_printoptions['legacy']` "
+                           "to '1.13'. Note that setting the 'legacy' option may not "
+                           "work in all cases.".format(np.__version__))
+        # Remove printoptions that are not supported in this Numpy version
+        printoptions = _filename_printoptions.copy()
+        for version in (v for v in _new_printoptions if v > np.__version__):
+            for key in _new_printoptions[version]:
+                del printoptions[key]
+
         # Standardize the numpy print options, which affect output from str()
         stored_printoptions = np.get_printoptions()
-        np.set_printoptions(**_filename_printoptions)
+        np.set_printoptions(**printoptions)
         # We need a sorted dictionary of parameters, so that the hash is consistent
         flat_params = params_to_arrays(params).flatten()
             # flatten avoids need to sort recursively
             # _params_to_arrays normalizes the data
         sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-        basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+        s = repr(sorted_params)
+        if _remove_whitespace_for_filenames:
+            # Removing whitespace makes the result more reliable; e.g. between
+            # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
+            s = ''.join(s.split())
+        basename = hashlib.sha1(bytes(s, 'utf-8')).hexdigest()
         basename += '_'
         # Reset the saved print options
         np.set_printoptions(**stored_printoptions)
