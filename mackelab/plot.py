@@ -1,9 +1,11 @@
 import datetime
 from collections import namedtuple, Callable
+import math
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker
+from matplotlib.ticker import is_close_to_int
 
 from subprocess import check_output
 
@@ -52,6 +54,37 @@ def saverep(basename, comment=None, pdf=True, png=True):
 
     with open(basename + '.txt', 'w') as textfile:
         textfile.write(info_str)
+
+# ====================================
+# Tick label formatting
+
+class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
+    """
+    Equivalent to standard LogFormatterSciNotation, except that we provide
+    an additional parameter at initialization to control the precision
+    of printed values. Given value corresponds to number of significant digits.
+    """
+    def __init__(*args, precision, **kwargs):
+        self.precision = precision
+        super().__init__(*args, **kwargs)
+
+    def _non_decade_format(self, sign_string, base, fx, usetex):
+        'Return string for non-decade locations'
+        b = float(base)
+        exponent = math.floor(fx)
+        coeff = b ** fx / b ** exponent
+        if is_close_to_int(coeff):
+            coeff = nearest_long(coeff)
+        if usetex:
+            return (r'{sign}{coeff:.{precision}}\times{base}^{{{exponent}}}'
+                    .format(sign=sign_string,
+                            coeff=coeff, precision=self.precision,
+                            base=base, exponent=exponent))
+        else:
+            return ('$%s$' % mpl.ticker._mathdefault(r'{sign}{coeff:.{precision}}\times{base}^{{{exponent}}}'
+                                                     .format(sign=sign_string,
+                                                             coeff=coeff, precision=self.precision,
+                                                             base=base, exponent=exponent)))
 
 # ====================================
 # Tick placement
