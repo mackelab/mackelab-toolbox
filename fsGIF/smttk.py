@@ -512,6 +512,9 @@ class RecordFilter:
     def script(self, script):
         return RecordList(record for record in self.reclst if script in record.main_file)
 
+    def label(self, label):
+        return RecordList(rec for rec in self.reclst if label in rec.label)
+
 class RecordList:
     """
     This class ensures that all elements of an iterable are RecordViews; it
