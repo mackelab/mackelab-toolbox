@@ -3,11 +3,16 @@ import re
 import glob
 import operator
 import multiprocessing
-from collections import namedtuple, Iterable
+from collections import namedtuple, deque, Iterable, Callable
 from datetime import datetime
 import logging
 import numpy as np
 logger = logging.getLogger(__file__)
+try:
+    import pandas as pd
+    pandas_loaded = True
+except ImportError:
+    pandas_loaded = False
 
 from parameters import ParameterSet
 import sumatra.commands
@@ -21,10 +26,15 @@ from fsGIF import core
 
 try:
     import click
+    click_loaded = True
 except ImportError:
+<<<<<<< HEAD:fsGIF/smttk.py
     noclick = True
 else:
     click_loaded = True
+=======
+    click_loaded = False
+>>>>>>> [smttk,parameters] Fix parameter filter. Add functions for record sets:mackelab/smttk.py
 
 ##################################
 #
@@ -324,7 +334,11 @@ class RecordView:
                              "which is undefined. Currently defined rules for are {} and {}."
                              .format(field, ', '.join(extract_rules[:-1]), extract_rules))
 
-_cmpop_strings = ['lt', 'le', 'eq', 'ne', 'gt', 'ge']
+_cmpop_ops = ['lt', 'le', 'eq', 'ne', 'gt', 'ge']
+    # Ops which are implemented in the `operator` module
+_cmpop_strings = _cmpop_ops + ['isin']
+    # Other ops with custom implementations
+
 def _get_compare_op(cmpop):
         """
         Parameters
@@ -334,13 +348,21 @@ def _get_compare_op(cmpop):
             If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
             If a function, should take two arguments and return a bool
         """
+        # Custom filters
+        def isin(a, b):
+            """Return `a in b`"""
+            return a in b
+
         # FIXME: No way to set a custom function with current interface
         if isinstance(cmpop, str):
-            if cmpop in _cmpop_strings:
+            if cmpop in _cmpop_ops:
                 return getattr(operator, cmpop)
+            elif cmpop in _cmpop_strings:
+                if cmpop == 'isin':
+                    return isin
             else:
                 raise ValueError("Unrecognized comparison operation '{}'.".format(cmpop))
-        elif isinstance(cmpop, collections.Callable):
+        elif isinstance(cmpop, Callable):
             return cmpop
         else:
             raise ValueError("'cmpop' must be either a string corresponding to a "
@@ -350,81 +372,109 @@ def _get_compare_op(cmpop):
                              "forms.".format(type(cmpop)))
 
 
-class ParamFilter:
-    """
-    Specialized filter, meant to be used as [record list].filter.parameters.[parameter name]
-    """
-    def __init__(self, name, reclst, cmpop):
-        """
-        Parameters
-        ----------
-        name: str
-            Name of the parameter to filter
-        cmpop: str or function
-            'Compare Op'
-            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
-            If a function, should take two arguments and return a bool
-        """
-        self.name = name
-        self.reclst = reclst
-        self._cmp = _get_compare_op(cmpop)
+# class ParameterFilter:
+#     """
+#     Specialized filter, meant to be used as [record list].filter.parameters.[parameter name]
+#     """
+#     def __init__(self, name, reclst, cmpop):
+#         """
+#         Parameters
+#         ----------
+#         name: str
+#             Name of the parameter to filter
+#         cmpop: str or function
+#             'Compare Op'
+#             If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'in'.
+#             If a function, should take two arguments and return a bool
+#         """
+#         self.name = name
+#         self.reclst = reclst
+#         self._cmp = _get_compare_op(cmpop)
 
-    def __getitem__(self, key):
-        # TODO: Allow filtering only some components of a parameter
-        raise NotImplementedError
+#     def __getitem__(self, key):
+#         # TODO: Allow filtering only some components of a parameter
+#         raise NotImplementedError
 
-    def __getattr__(self, attr):
-        if attr in _cmpop_strings:
-            return type(self)(self.reclst, attr)
-        else:
-            raise AttributeError
+#     def __getattr__(self, attr):
+#         if attr in _cmpop_strings:
+#             return type(self)(self.reclst, attr)
+#         else:
+#             raise AttributeError
 
-    def __call__(self, value):
-        return RecordList(rec for rec in reclst
-                          if self.name in rec.parameters and self.cmp(rec.parameters[name], value))
+#     def __call__(self, value):
+#         return RecordList(rec for rec in self.reclst
+#                           if self.name in rec.parameters and self.cmp(rec.parameters[self.name], value))
 
-    def cmp(self, a, b):
-        return np.all(self._cmp(a, b))
+#     def cmp(self, a, b):
+#         return np.all(self._cmp(a, b))
 
 class ParameterSetFilter:
     """
     Specialized filter, meant to be used as [record list].filter.parameters
     """
 
-    def __init__(self, reclst, cmpop='eq'):
+    def __init__(self, reclst, cmpop='eq', key=None):
         """
         Parameters
         ----------
         cmpop: str or function
             'Compare Op'
-            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
+            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'in'.
             If a function, should take two arguments and return a bool
         """
         self.reclst = reclst
         self._cmp = _get_compare_op(cmpop)
+        self.key = key
 
     def __getattr__(self, attr):
         if attr in _cmpop_strings:
             return type(self)(self.reclst, attr)
         else:
-            return ParameterFilter(attr, self.reclst, self._cmp)
+            key = self.join_keys(self.key, attr)
+            return ParameterSetFilter(self.reclst, self._cmp, key=key)
 
     def __call__(self, paramset):
         def test(paramset, key, value):
             try:
-                paramset_value = paramset[key]
+                fullkey = self.join_keys(self.key, key)
+                if fullkey is None:
+                    paramset_value = paramset
+                else:
+                    paramset_value = paramset[fullkey]
             except KeyError:
                 return False
             else:
                 return self.cmp(paramset_value, value)
-        paramset = ParameterSet(paramset)
-        return RecordList(rec for rec in self.reclst
-                          if all( test(rec.parameters, key, paramset[key])
-                                  for key in paramset.flatten().keys()))
-            # Currently paramset.flatten() doesn't deal with '->' referencing, so can't use .items()
+        if isinstance(paramset, dict):
+            paramset = ParameterSet(paramset)
+
+        if isinstance(paramset, ParameterSet):
+            return RecordList(rec for rec in self.reclst
+                              if all( test(rec.parameters, key, paramset[key])
+                                      for key in paramset.flatten().keys()))
+                # Currently paramset.flatten() doesn't deal with '->' referencing, so can't use .items()
+        else:
+            return RecordList(rec for rec in self.reclst
+                              if test(rec.parameters, None, paramset))
+
+    def _get_paramset(record):
+        if isinstance(record, ParameterSet):
+            return record
+        else:
+            return record.parameters
 
     def cmp(self, a, b):
         return np.all(self._cmp(a, b))
+
+    def join_keys(self, key1, key2):
+        if all(key in ('', None) for key in (key1, key2)):
+            return None
+        elif key1 in ('', None):
+            return key2
+        elif key2 in ('', None):
+            return key1
+        else:
+            return '.'.join((key1, key2))
 
 class RecordFilter:
     """
@@ -564,14 +614,21 @@ class RecordList:
         """
         return RecordList(list(self))
 
+    @property
+    def summary(self):
+        """
+        Return a RecordListSummary.
+        """
+        return RecordListSummary(self)
+
     def extract(self, *args ):
         """
         Typical usage: `record_list.extract('parameters', 'datapath')`
         """
         fields = [ field.split("=")[0] for field in args ]
-        Fit = namedtuple("Fit", fields)
+        RecAttributes = namedtuple("RecAttributes", fields)
         for rec in self:
-            yield Fit(*(rec.extract(field) for field in args))
+            yield RecAttributes(*(rec.extract(field) for field in args))
 
     def get_datapaths(self, common_params=None,
                   include=None, exclude=None, filter=None,
@@ -621,6 +678,84 @@ class RecordList:
         else:
             return data_paths
 
+import re
+import pandas as pd
+class RecordListSummary:
+    def __init__(self, recordlist):
+        lbltest = re.compile('^\d{8,8}-\d{6,6}$')
+            # RegEx for the standard label format YYYYMMDD-HHMMSS
+        self.summarized_records = {}
+        for r in recordlist:
+            # For labels following the standard format, merge records whose
+            # labels differ only by a suffix
+            # Scripts for these records were started within the same second,
+            # thus almost assuredly at the same time with a dispatch script
+            # such as smttk's `run`.
+            lbl_timestamp = r.label[:15]
+            m = lbltest.match(lbl_timestamp)
+            if m is None:
+                # Not a standard label format -- no merging
+                assert(r.label not in summarized_records)
+                self.summarized_records[r.label] = [r]
+            else:
+                # Standard label format
+                if lbl_timestamp in self.summarized_records:
+                    self.summarized_records[lbl_timestamp].append(r)
+                else:
+                    self.summarized_records[lbl_timestamp] = [r]
+
+    # TODO: __str__, __repr__ and DataFrame-printing
+
+    def dataframe(self, fields=('reason', 'tags', 'main_file', 'duration'),
+                  parameters=()):
+        def combine(recs, attr):
+            def get(rec, attr):
+                # Retrieve possibly nested attributes
+                if '.' in attr:
+                    attr, nested = attr.split('.', 1)
+                    return get(getattr(rec, attr), nested)
+                else:
+                    return getattr(rec, attr)
+            if attr == 'duration':
+                s = sum(getattr(r, attr) for r in recs) / len(recs)
+                h, s = s // 3600, s % 3600
+                m, s = s // 60, s % 60
+                return "{:01}h {:02}m {:02}s".format(int(h),int(m),int(s))
+            else:
+                vals = deque()
+                for r in recs:
+                    try:
+                        vals.append(get(r, attr))
+                    except (AttributeError, KeyError):
+                        # Add string indicating this rec does not have attr
+                        vals.append("undefined")
+                return ', '.join(str(a) for a in set(ml.utils.flatten(vals)))
+        data = deque()
+        # Append parameters to the list of fields
+        # Each needs to be prepended with the record attribute 'parameters'
+        if isinstance(parameters, str):
+            parameters = (parameters,)
+        fields += tuple('parameters.' + p for p in parameters)
+        for lbl, sr in self.summarized_records.items():
+            entry = tuple(combine(sr, field) for field in fields)
+            entry = (len(sr),) + entry
+            data.append(entry)
+
+        if pandas_loaded:
+            return pd.DataFrame(np.array(data), index=self.summarized_records.keys(),
+                                columns=('# records',) + fields).sort_index()
+        else:
+            # TODO: Add index to data; make structured array
+            logger.info("Pandas library not loaded; returning plain Numpy array.")
+            return data
+
+    def array(self, fields=('reason', 'tags', 'main_file', 'duration'),
+                  parameters=()):
+        """
+        Return the summary as a NumPy array.
+        NOTE: Not implemented yet
+        """
+        raise NotImplementedError
 
 ##################################
 #
