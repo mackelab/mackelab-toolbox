@@ -11,17 +11,20 @@ Created on Wed Sep 20 13:19:53 2017
 """
 
 from collections import deque, OrderedDict, namedtuple, Iterable
+import itertools
 from types import SimpleNamespace
 import hashlib
 from numbers import Number
 import numpy as np
 import scipy as sp
+import pandas as pd
 import logging
 logger = logging.getLogger(__file__)
 
 from parameters import ParameterSet
 
 from . import iotools
+from . import smttk
 from .utils import flatten
 
 ##########################
@@ -409,6 +412,204 @@ def prune(params, keep):
                 newparams[filter][subfilter] = prune(params[filter], subfilter)[subfilter]
 
     return newparams
+
+###########################
+# Comparing ParameterSets
+###########################
+
+ParamRec = namedtuple('ParamRec', ['label', 'parameters'])
+    # Data structure for associating a name to a parameter set
+
+class ParameterComparison:
+    """
+    Example usage:
+        testparams = ParameterSet("path/to/file")
+        records = mackelab.smttk.get_records('project').list
+        cmp = ParameterComparison([testparams] + records, ['test params'])
+        cmp.dataframe(depth=3)
+    """
+    def __init__(self, params, labels=None):
+        """
+        Parameters
+        ----------
+        params: iterable of ParameterSet's or Sumatra records
+        labels: list or tuple of strings
+            Names for the elements of `params` which are parameter sets. Records
+            don't need a specified name since we use their label.
+        """
+        self.records = make_paramrecs(params, labels)
+        self.comparison = structure_keys(get_differing_keys(self.records))
+
+    def _get_colnames(self, depth=1, param_summary=None):
+        if param_summary is None:
+            param_summary = self.comparison
+        if depth == 1:
+            colnames = list(param_summary.keys())
+        else:
+            nonnested_colnames = [key for key, subkeys in param_summary.items() if subkeys is None]
+            nested_colnames = itertools.chain(*[ [key+"."+colname for colname in self._get_colnames(depth-1, param_summary[key])]
+                                                 for key, subkeys in param_summary.items() if subkeys is not None])
+            colnames = nonnested_colnames + list(nested_colnames)
+        return colnames
+
+    def _display_param(self, record, name):
+        if self.comparison[name] is None:
+            try:
+                display_value = record.parameters[name]
+            except KeyError:
+                display_value = "–"
+        else:
+            display_value = "<+>"
+        return display_value
+
+    def dataframe(self, depth=1, maxcols=50):
+        """
+        Remark
+        ------
+        Changes the value of pandas.options.display.max_columns
+        (to ensure all parameter keys are shown)
+        """
+        colnames = self._get_colnames(depth)
+        columns = [ [self._display_param(rec, name) for name in colnames]
+                    for rec in self.records ]
+        pd.options.display.max_columns = max(len(colnames), maxcols)
+        return pd.DataFrame(data=columns,
+             index=[rec.label for rec in self.records],
+             columns=colnames)
+
+def make_paramrecs(params, labels=None):
+    """
+    Parameters
+    ----------
+    params: iterable of ParameterSet's or sumatra Records
+    labels: list or tuple of strings
+        Names for the elements of `params` which are parameter sets. Records
+        don't need a specified name since we use the label.
+    """
+    if labels is None:
+        labels = []
+    i = 0
+    recs = []
+    for p in params:
+        if isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
+            recs.append(ParamRec(p.label, p.parameters))
+        else:
+            assert(isinstance(p, ParameterSet))
+            if i >= len(labels):
+                raise ValueError("A label must be given for each element of "
+                                 "`params` which is not a Sumatra record.")
+            recs.append(ParamRec(labels[i], p))
+            i += 1
+    assert(i == len(labels)) # Check that we used all names
+    return recs
+
+def _param_diff(params1, params2, name1="", name2=""):
+    KeyDiff = namedtuple('KeyDiff', ['name1', 'name2', 'keys'])
+    NestingDiff = namedtuple('NestingDiff', ['key', 'name'])
+    TypeDiff = namedtuple('TypeDiff', ['key', 'name1', 'name2'])
+    ValueDiff = namedtuple('ValueDiff', ['key', 'name1', 'name2'])
+
+    diff_types = {'keys': KeyDiff,
+                  'nesting': NestingDiff,
+                  'type': TypeDiff,
+                  'value': ValueDiff}
+    diffs = {key: set() for key in diff_types.keys()}
+    keys1, keys2 = set(params1.keys()), set(params2.keys())
+    if keys1 != keys2:
+        diffs['keys'].add( KeyDiff(name1, name2, frozenset(keys1.symmetric_difference(keys2))) )
+    def diff_vals(val1, val2):
+        if isinstance(val1, np.ndarray) or isinstance(val2, np.ndarray):
+            return (val1 != val2).any()
+        else:
+            return val1 != val2
+    for key in keys1.intersection(keys2):
+        if isinstance(params1[key], ParameterSet):
+            if not isinstance(params2[key], ParameterSet):
+                diffs['nesting'].add((key, name1))
+            else:
+                for diffkey, diffval in _param_diff(params1[key], params2[key],
+                                                    name1 + "." + key, name2 + "." + key).items():
+                    # Prepend key to all nested values
+                    if hasattr(diff_types[diffkey], 'key'):
+                        diffval = {val._replace(key = key+"."+val.key) for val in diffval}
+                    if hasattr(diff_types[diffkey], 'keys') and len(diffval) > 0:
+                        iter_type = type(next(iter(diffval)).keys)  # Assumes all key iterables have same type
+                        diffval = {val._replace(keys = iter_type(key+"."+valkey for valkey in val.keys))
+                                   for val in diffval}
+                    # Update differences dictionary with the nested differences
+                    diffs[diffkey].update(diffval)
+        elif isinstance(params2[key], ParameterSet):
+            diffs['nesting'].add(NestingDiff(key, name2))
+        elif type(params1[key]) != type(params2[key]):
+            diffs['type'].add(TypeDiff(key, name1, name2))
+        elif diff_vals(params1[key], params2[key]):
+            diffs['value'].add(ValueDiff(key, name1, name2))
+
+    return diffs
+
+def param_diff(params1, params2, name1="", name2=""):
+    if name1 == "":
+        name1 = "params1" if name2 != "params1" else "params1_1"
+    if name2 == "":
+        name2 = "params2" if name1 != "params2" else "params2_2"
+    diffs = _param_diff(params1, params2, name1, name2)
+    for diff in diffs['keys']:
+        name1, name2, keys = diff
+        for key in keys:
+            print("The parameter sets {} and {} do not share the following keys: {}"
+                  .format(name1, name2, key))
+    for diff in diffs['nesting']:
+        print("Key '{}' is parameter set only for {}.".format(*diff))
+    for diff in diffs['type']:
+        key, name1, name2 = diff
+        print("The following values have different type:\n"
+              "  {}.{}: {} ({})\n  {}.{}: {} ({})"
+              .format(name1, key, params1[key], type(params1[key]),
+                      name2, key, params2[key], type(params2[key])))
+    for diff in diffs['value']:
+        key, name1, name2 = diff
+        print("The parameter sets {} and {} differ on key {}.\n"
+                  "  {}.{}: {}\n  {}.{}: {}"
+              .format(name1, name2, key,
+                      name1, key, params1[key],
+                      name2, key, params2[key]))
+
+def get_differing_keys(records):
+    """
+    Parameters
+    ----------
+    records: ParamRec instances
+    """
+    assert(isinstance(records, Iterable))
+    assert(all(isinstance(rec, ParamRec) for rec in records))
+
+    diffpairs = {(i,j) : _param_diff(records[i].parameters, records[j].parameters,
+                                     records[i].label, records[j].label)
+                  for i, j in itertools.combinations(range(len(records)), 2)}
+    def get_keys(diff):
+        assert(bool(hasattr(diff, 'key')) != bool(hasattr(diff, 'keys'))) # xor
+        if hasattr(diff, 'key'):
+            return set([diff.key])
+        elif hasattr(diff, 'keys'):
+            return set(diff.keys)
+    differing_keys = set().union( *[ get_keys(diff)
+                                     for diffpair in diffpairs.values() # all difference types between two pairs
+                                     for difftype in diffpair.values()  # keys, nesting, type, value
+                                     for diff in difftype ] )
+
+    return differing_keys
+
+def structure_keys(keys):
+    #keys = sorted(keys)
+    roots = set([key.split('.')[0] for key in keys])
+    tree = {root: [] for root in roots}
+    for root in roots:
+        for key in keys:
+            if '.' in key and key.startswith(root):
+                tree[root].append('.'.join(key.split(".")[1:]))
+
+    return ParameterSet({root: None if subkeys == [] else structure_keys(subkeys)
+                         for root, subkeys in tree.items()})
 
 ###########################
 # Parameter file expansion
