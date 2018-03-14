@@ -37,6 +37,11 @@ else:
 >>>>>>> [smttk,parameters] Fix parameter filter. Add functions for record sets:mackelab/smttk.py
 
 ##################################
+# Custom errors
+class RecordNotFound(Exception):
+    pass
+
+##################################
 #
 # Accessing the record store
 #
@@ -533,7 +538,7 @@ class RecordFilter:
             if len(args) > 0:
                 raise ValueError("Too many arguments for `filter.before()`")
         elif isinstance(date, tuple):
-            date = datetime(*date, *args)
+            date = datetime(*(date+args))
         else:
             date = datetime(date, *args)
         if not isinstance(date, datetime):
@@ -550,7 +555,7 @@ class RecordFilter:
             if len(args) > 0:
                 raise ValueError("Too many arguments for `filter.after()`")
         elif isinstance(date, tuple):
-            date = datetime(*date, *args)
+            date = datetime(*(date+args))
         else:
             date = datetime(date, *args)
         if not isinstance(date, datetime):
@@ -620,6 +625,20 @@ class RecordList:
         Return a RecordListSummary.
         """
         return RecordListSummary(self)
+
+    def get(self, label):
+        """
+        Retrieve the record corresponding to the given label.
+        """
+        found = self.filter.label(label).list
+        if len(found) == 0:
+            raise RecordNotFound("No record has a label corresponding to '{}'."
+                                 .format(label))
+        elif len(found) == 1:
+            return found[0]
+        else:
+            raise RecordNotFound("{} records have a label corresponding to '{}'."
+                                 .format(len(found), label))
 
     def extract(self, *args ):
         """
@@ -706,6 +725,12 @@ class RecordListSummary:
 
     # TODO: __str__, __repr__ and DataFrame-printing
 
+    def __call__(self, *args, **kwargs):
+        """
+        Call `.dataframe()` with the given arguments
+        """
+        return self.dataframe(*args, **kwargs)
+
     def dataframe(self, fields=('reason', 'tags', 'main_file', 'duration'),
                   parameters=()):
         def combine(recs, attr):
@@ -743,11 +768,16 @@ class RecordListSummary:
 
         if pandas_loaded:
             return pd.DataFrame(np.array(data), index=self.summarized_records.keys(),
-                                columns=('# records',) + fields).sort_index()
+                                columns=('# records',) + fields).sort_index(ascending=False)
         else:
             # TODO: Add index to data; make structured array
             logger.info("Pandas library not loaded; returning plain Numpy array.")
             return data
+
+    def _repr_html_(self):
+        """Used by Jupyter Notebook to display a nicely formatted table."""
+        df = self.dataframe()
+        return df._repr_html_()
 
     def array(self, fields=('reason', 'tags', 'main_file', 'duration'),
                   parameters=()):
