@@ -34,6 +34,30 @@ def register_datatype(type, typename=None):
     assert(isinstance(typename, str))
     _load_types[typename] = type
 
+def find_registered_typename(type):
+    """
+    If `type` is a registered datatype, return it's associated name.
+    Otherwise, find the nearest parent of `type` which is registered and return its name.
+    If no parents are registered, return `type.__name__`.
+    """
+    def get_name(type):
+        for registered_name, registered_type in _load_types.items():
+            if registered_type is type:
+                return registered_name
+        return None
+
+    typename = get_name(type)
+    if typename is None:
+        for base in type.__mro__:
+            typename = get_name(base)
+            if typename is not None:
+                break
+    if typename is None:
+        typename = type.__name__
+            # No registered type; return something sensible (i.e. the type's name)
+    return typename
+
+
 def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suffix=None):
     """
     Return a file handle to an unused filename. If 'path' is free, return a handle
