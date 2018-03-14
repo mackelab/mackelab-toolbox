@@ -587,7 +587,14 @@ class RecordList:
         return len(self.iterable)
 
     def __getitem__(self, key):
-        res = self.iterable[key]
+        try:
+            res = self.iterable[key]
+        except TypeError:
+            # For convenience, cast recordlist to an indexable list rather than throwing an error
+            # Once we've done this and allocating the memory, we might as well replace the internal iterable
+            self.iterable = list(self.iterable)
+            res = self.iterable[key]
+
         if isinstance(res, Iterable):
             res = RecordList(res)
         return res
