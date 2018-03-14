@@ -90,7 +90,7 @@ class PyMCPrior(dict):
                     for pname, pval in distparams.items():
                         # TODO: Following will not work e.g. for covariance
                         if pname in hyperparams:
-                            distparams[pname] = pval[mask]
+                            distparams[pname] = pval[mask.reshape(pval.shape)]
 
      #       suffix = ' (dist)'
             suffix = ""
