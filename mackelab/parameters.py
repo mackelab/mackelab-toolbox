@@ -24,7 +24,11 @@ logger = logging.getLogger(__file__)
 from parameters import ParameterSet
 
 from . import iotools
-from . import smttk
+try:
+    from . import smttk
+    smttk_loaded = True
+except (NameError, ImportError):
+    smttk_loaded = False
 from .utils import flatten
 
 ##########################
@@ -491,7 +495,7 @@ def make_paramrecs(params, labels=None):
     i = 0
     recs = []
     for p in params:
-        if isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
+        if smttk_loaded and isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
             recs.append(ParamRec(p.label, p.parameters))
         else:
             assert(isinstance(p, ParameterSet))
