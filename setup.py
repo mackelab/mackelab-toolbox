@@ -8,7 +8,9 @@ setup(
     install_requires=[
         'matplotlib',
         'theano_shim >= 0.2',
-        'simpleeval'
+        'simpleeval',
+        'dill',
+        'tqdm'
     ],
     dependency_links=[
         'git+ssh://git@github.com:alcrene/parameters.git',
