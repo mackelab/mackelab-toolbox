@@ -91,10 +91,14 @@ class PyMCPrior(dict):
                         # TODO: Following will not work e.g. for covariance
                         if pname in hyperparams:
                             distparams[pname] = pval[mask.reshape(pval.shape)]
+                    # Since we only want underlying random variables for some components,
+                    # 'shape' doesn't make much sense and so we just define a flat RV.
+                    distparams.shape = (len(mask.nonzero()[0]),)
 
      #       suffix = ' (dist)'
             suffix = ""
             dist = self.get_dist(distname, distparams, suffix)
+                # This is where we create the PyMC3 variable
      #       modelvarname = dist.names.orig[:-len(suffix)]
             modelvarname = dist.names.orig
 
