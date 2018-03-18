@@ -3,7 +3,7 @@ import re
 import glob
 import operator
 import multiprocessing
-from collections import namedtuple, deque, Iterable, Callable
+from collections import namedtuple, deque, Iterable, Sequence, Callable
 from datetime import datetime
 import logging
 import numpy as np
@@ -532,6 +532,7 @@ class RecordFilter:
 
     def before(self, date, *args):
         """
+        Keep only records which occured before the given date. Date is exclusive
         Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
         """
         if isinstance(date, datetime):
@@ -539,6 +540,10 @@ class RecordFilter:
                 raise ValueError("Too many arguments for `filter.before()`")
         elif isinstance(date, tuple):
             date = datetime(*(date+args))
+        elif isinstance(date, int) and len(str(date)) == 8:
+            # Convenience interface to allow dropping the commas
+            year, month, day = date//10000, date%10000//100, date%100
+            date = datetime(year, month, day)
         else:
             date = datetime(date, *args)
         if not isinstance(date, datetime):
@@ -549,6 +554,7 @@ class RecordFilter:
 
     def after(self, date, *args):
         """
+        Keep only records which occurred after the given date. Date is inclusive.
         Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
         """
         if isinstance(date, datetime):
@@ -556,6 +562,10 @@ class RecordFilter:
                 raise ValueError("Too many arguments for `filter.after()`")
         elif isinstance(date, tuple):
             date = datetime(*(date+args))
+        elif isinstance(date, int) and len(str(date)) == 8:
+            # Convenience interface to allow dropping the commas
+            year, month, day = date//10000, date%10000//100, date%100
+            date = datetime(year, month, day)
         else:
             date = datetime(date, *args)
         if not isinstance(date, datetime):
@@ -563,6 +573,31 @@ class RecordFilter:
         else:
             tnorm = lambda tstamp: tstamp
         return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) >= date)
+
+    def on(self, date, *args):
+        """
+        Keep only records which occurred on the given date.
+        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        """
+        if isinstance(date, datetime):
+            if len(args) > 0:
+                raise ValueError("Too many arguments for `filter.on()`")
+        elif isinstance(date, tuple):
+            date = datetime(*(date+args))
+        elif isinstance(date, int) and len(str(date)) == 8:
+            # Convenience interface to allow dropping the commas
+            year, month, day = date//10000, date%10000//100, date%100
+            date = datetime(year, month, day)
+        else:
+            date = datetime(date, *args)
+        after = date
+        before = date.replace(day=date.day+1)
+
+        if not isinstance(date, datetime):
+            tnorm = lambda tstamp: tstamp.date()
+        else:
+            tnorm = lambda tstamp: tstamp
+        return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) >= after and tnorm(rec.timestamp) < before)
 
     def script(self, script):
         return RecordList(record for record in self.reclst if script in record.main_file)
@@ -597,7 +632,7 @@ class RecordList:
             res = self.iterable[key]
         except TypeError:
             # For convenience, cast recordlist to an indexable list rather than throwing an error
-            # Once we've done this and allocating the memory, we might as well replace the internal iterable
+            # Once we've done this and allocated the memory, we might as well replace the internal iterable
             self.iterable = list(self.iterable)
             res = self.iterable[key]
 
@@ -631,12 +666,35 @@ class RecordList:
         """
         Return a RecordListSummary.
         """
+        if not isinstance(self.iterable, Sequence):
+            # Should catch most cases where iterating consumes the iterable
+            # Once we've done this and allocated the memory, we might as well replace the internal iterable
+            self.iterable = list(self.iterable)
         return RecordListSummary(self)
 
     def get(self, label):
         """
         Retrieve the record corresponding to the given label.
+
+        Parameters
+        ----------
+        label: str | list of str
+            Label of the record we want to retrieve.
+            Can also be an iterable of labels. In this case the record corresponding
+            to each is retrieved, and the result returned as a RecordLis.
+
+        Returns
+        -------
+        Record or RecordList
+            Returns a Record if `label` is a `str`, a RecordList otherwise.
         """
+        if not isinstance(label, str):
+            if not isinstance(label, Iterable):
+                raise ValueError("`label` must either be a single string label, "
+                                 "or a list of labels")
+            # TODO: Use 'or' label filter once that is implemented
+            return RecordList([self.get(lbl) for lbl in label])
+
         found = self.filter.label(label).list
         if len(found) == 0:
             raise RecordNotFound("No record has a label corresponding to '{}'."
@@ -773,9 +831,11 @@ class RecordListSummary:
             entry = (len(sr),) + entry
             data.append(entry)
 
+        fieldnames = tuple(field.replace('.', '\n.') for field in fields)
+            # Add line breaks to make parameters easier to read, and take less horizontal space
         if pandas_loaded:
             return pd.DataFrame(np.array(data), index=self.summarized_records.keys(),
-                                columns=('# records',) + fields).sort_index(ascending=False)
+                                columns=('# records',) + fieldnames).sort_index(ascending=False)
         else:
             # TODO: Add index to data; make structured array
             logger.info("Pandas library not loaded; returning plain Numpy array.")
