@@ -64,7 +64,7 @@ class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
     an additional parameter at initialization to control the precision
     of printed values. Given value corresponds to number of significant digits.
     """
-    def __init__(*args, precision, **kwargs):
+    def __init__(self, *args, precision, **kwargs):
         self.precision = precision
         super().__init__(*args, **kwargs)
 
