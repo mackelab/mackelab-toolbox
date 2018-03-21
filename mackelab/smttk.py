@@ -2,6 +2,7 @@ import os
 import re
 import glob
 import operator
+import itertools
 import multiprocessing
 from collections import namedtuple, deque, Iterable, Sequence, Callable
 from datetime import datetime
@@ -109,7 +110,11 @@ def get_records(recordstore, project, label=None,
     return reclist.list
 
 class RecordView:
-    """A read-only interface to Sumatra records with extra convenience methods."""
+    """
+    A read-only interface to Sumatra records with extra convenience methods.
+    In contrast to Sumatra.Record, RecordView is hashable and thus can be used in sets
+    or as a dictionary key.
+    """
 
     def __new__(cls, record, *args, **kwargs):
         if isinstance(record, RecordView):
@@ -127,6 +132,12 @@ class RecordView:
             # def getter(self):
             #     return getattr(self._record, attr)
             # setattr(self, attr, property(getter))
+
+    def __hash__(self):
+        # Hash must return an int
+        # The following returns the label, converting non-numeric characters to their
+        # ASCII value, so '20180319-225426' becomes 2018031945225426.
+        return int(''.join(c if c.isnumeric() else str(ord(c)) for c in self.label))
 
     # Set all the Record attributes as read-only properties
     @property
@@ -339,36 +350,36 @@ _cmpop_strings = _cmpop_ops + ['isin']
     # Other ops with custom implementations
 
 def _get_compare_op(cmpop):
-        """
-        Parameters
-        ----------
-        cmpop: str or function
-            'Compare Op'
-            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge'.
-            If a function, should take two arguments and return a bool
-        """
-        # Custom filters
-        def isin(a, b):
-            """Return `a in b`"""
-            return a in b
+    """
+    Parameters
+    ----------
+    cmpop: str or function
+        'Compare Op'
+        If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'isin'.
+        If a function, should take two arguments and return a bool
+    """
+    # Custom filters
+    def isin(a, b):
+        """Return `a in b`"""
+        return a in b
 
-        # FIXME: No way to set a custom function with current interface
-        if isinstance(cmpop, str):
-            if cmpop in _cmpop_ops:
-                return getattr(operator, cmpop)
-            elif cmpop in _cmpop_strings:
-                if cmpop == 'isin':
-                    return isin
-            else:
-                raise ValueError("Unrecognized comparison operation '{}'.".format(cmpop))
-        elif isinstance(cmpop, Callable):
-            return cmpop
+    # FIXME: No way to set a custom function with current interface
+    if isinstance(cmpop, str):
+        if cmpop in _cmpop_ops:
+            return getattr(operator, cmpop)
+        elif cmpop in _cmpop_strings:
+            if cmpop == 'isin':
+                return isin
         else:
-            raise ValueError("'cmpop' must be either a string corresponding to a "
-                             "comparison operation (like 'lt' or 'eq'), or a callable "
-                             "implementing a comparison operation. The passed value is "
-                             "of type '{}', which is not compatible with either of these "
-                             "forms.".format(type(cmpop)))
+            raise ValueError("Unrecognized comparison operation '{}'.".format(cmpop))
+    elif isinstance(cmpop, Callable):
+        return cmpop
+    else:
+        raise ValueError("'cmpop' must be either a string corresponding to a "
+                            "comparison operation (like 'lt' or 'eq'), or a callable "
+                            "implementing a comparison operation. The passed value is "
+                            "of type '{}', which is not compatible with either of these "
+                            "forms.".format(type(cmpop)))
 
 
 # class ParameterFilter:
@@ -383,7 +394,7 @@ def _get_compare_op(cmpop):
 #             Name of the parameter to filter
 #         cmpop: str or function
 #             'Compare Op'
-#             If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'in'.
+#             If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'isin'.
 #             If a function, should take two arguments and return a bool
 #         """
 #         self.name = name
@@ -418,7 +429,7 @@ class ParameterSetFilter:
         ----------
         cmpop: str or function
             'Compare Op'
-            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'in'.
+            If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'isin'.
             If a function, should take two arguments and return a bool
         """
         self.reclst = reclst
@@ -475,6 +486,33 @@ class ParameterSetFilter:
         else:
             return '.'.join((key1, key2))
 
+class _AnyRecordFilter:
+    class wrapped_function:
+        def __init__(self, f, reclst):
+            self.f = f
+            self.reclst = reclst
+        def __call__(self, arglist):
+            recordlists = [self.f(arg).list for arg in arglist]
+                # We use .list to make sure we have separate iterators for each arg
+                # TODO: Use itertools.tee instead ? That would avoid allocating the lists
+            return RecordList(set(itertools.chain.from_iterable(recordlists)))
+    def __init__(self, recordfilter):
+        self.recordfilter = recordfilter
+    def __getattr__(self, attr):
+        filterfn = getattr(self.recordfilter, attr)
+        self.recordfilter.reclst.list
+        if isinstance(filterfn, Callable):
+            return self.wrapped_function(getattr(self.recordfilter, attr), self.recordfilter.reclst)
+        else:
+            raise AttributeError("RecordFilter.{} is not a callable method."
+                                 .format(attr))
+
+class _AllRecordFilter:
+    def __init__(self, recordfilter):
+        self.recordfilter = recordfilter
+    def __getattr__(self, attr):
+        raise NotImplementedError
+
 class RecordFilter:
     """
     Can overwrite RecordFilter.on_error_defaults to change default behaviour for
@@ -496,6 +534,9 @@ class RecordFilter:
     def __init__(self, record_list):
         self.reclst = record_list
         self.parameters = ParameterSetFilter(record_list)
+        # Multi-condition filter wrappers
+        self.any = _AnyRecordFilter(self)
+        self.all = _AllRecordFilter(self)
 
     # Default filter
     def __call__(self, cond, errors=None):
@@ -510,8 +551,8 @@ class RecordFilter:
                 if on_error[type(e)] == 'raise':
                     raise
                 else:
-                    logger.warning("Filtering raised {}. Ignored (RecordFilter."
-                                   "on_error_defaults.)".format(str(type(e))))
+                    logger.debug("Filtering raised {}. Ignored. (RecordFilter."
+                                 "on_error_defaults)".format(str(type(e))))
                     return on_error[type(e)]
         iterable = filter(test, self.reclst)
         return RecordList(iterable)
@@ -651,9 +692,15 @@ class RecordList:
     @property
     def list(self):
         """
-        Return a copy of the RecordList which is underlined by a list.
+        Convert the internal iterable to a list. This is useful to avoid consuming
+        the iterable, if we need to make multiple passes through it.
+
+        Returns
+        -------
+        self
         """
-        return RecordList(list(self))
+        self.iterable = list(self.iterable)
+        return self
 
     @property
     def summary(self):
@@ -738,6 +785,9 @@ class RecordList:
         if common_params is not None:
             test_params = ml.parameters.prune(records[0].parameters, common_params)
             for rec in records:
+                # FIXME: Following does not work with numpy arrays
+                #        Need to specialize comparisons on ParameterSets to apply
+                #        .any() / .all() comparisons between numpy components.
                 if ml.parameters.prune(rec.parameters, common_params) != test_params:
                     raise ValueError("Parameters differ between records")
 
@@ -835,6 +885,11 @@ class RecordListSummary:
             logger.info("Pandas library not loaded; returning plain Numpy array.")
             return data
 
+    def __str__(self):
+        return str(self.dataframe())
+    def __repr__(self):
+        """Used to display the variable in text-based interpreters."""
+        return repr(self.dataframe())
     def _repr_html_(self):
         """Used by Jupyter Notebook to display a nicely formatted table."""
         df = self.dataframe()
