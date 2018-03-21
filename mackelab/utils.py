@@ -48,7 +48,7 @@ class SanitizedOrderedDict(OrderedDict):
     specify is "close enough".
     """
 
-    def __init__(self, *args, sanitize, ignore_whitespace=True, **kwargs):
+    def __init__(self, *args, sanitize="", ignore_whitespace=True, **kwargs):
         """
         Parameters
         ----------
@@ -57,8 +57,10 @@ class SanitizedOrderedDict(OrderedDict):
             If a function, used to sanitize inputs.
             If a list of characters, sanitization is to remove all characters
             in that list.
+            Can be left unspecified if the only thing we want to sanitize is
+            whitespace.
         ignore_whitespace: bool
-            Whether to also ignore all whitespace. Ignored is `sanitize` is
+            Whether to also ignore all whitespace. Ignored if `sanitize` is
             a function.
         """
         if isinstance(sanitize, Callable):
