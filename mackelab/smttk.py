@@ -874,11 +874,14 @@ class RecordListSummary:
             entry = tuple(combine(sr, field) for field in fields)
             entry = (len(sr),) + entry
             data.append(entry)
+        data = np.array(data)
 
         fieldnames = tuple(field.replace('.', '\n.') for field in fields)
             # Add line breaks to make parameters easier to read, and take less horizontal space
         if pandas_loaded:
-            return pd.DataFrame(np.array(data), index=self.summarized_records.keys(),
+            if len(data) == 0:
+                data = data.reshape((0, len(fieldnames)+1))
+            return pd.DataFrame(data, index=self.summarized_records.keys(),
                                 columns=('# records',) + fieldnames).sort_index(ascending=False)
         else:
             # TODO: Add index to data; make structured array
