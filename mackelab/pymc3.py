@@ -291,6 +291,18 @@ class NDArrayView(pymc.backends.NDArray):
 
         return sliced
 
+class ImportedMultiTrace(pymc.backends.base.MultiTrace):
+
+    def discard(self, n):
+        """
+        Discard `n` samples from the beginning of the trace.
+        Typical use is for removing tuning samples, if they weren't already
+        discarded.
+        """
+        for strace in self._straces.values():
+            for varname, samplearray in strace.samples.items():
+                strace.samples[varname] = samplearray[n:]
+            strace.draw_idx -= n
 
 def import_multitrace(data):
     """
@@ -311,7 +323,7 @@ def import_multitrace(data):
 
     straces = [NDArrayView(tracedata) for tracedata in flatten(flatdata, terminate=dict)]
         # Need to flatten again because loading from file adds another level of nesting
-    return pymc.backends.base.MultiTrace(straces)
+    return ImportedMultiTrace(straces)
 
 def export_multitrace(multitrace):
     excluded_attrs = ['model', 'vars']
