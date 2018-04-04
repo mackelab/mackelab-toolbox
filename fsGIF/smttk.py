@@ -4,7 +4,7 @@ import glob
 import operator
 import itertools
 import multiprocessing
-from collections import namedtuple, deque, Iterable, Sequence, Callable
+from collections import namedtuple, deque, Iterable, Sequence, Callable, OrderedDict
 from datetime import datetime
 import logging
 import numpy as np
@@ -433,6 +433,8 @@ class ParameterSetFilter:
         """
         Parameters
         ----------
+        reclist: RecordList
+            Instance of RecordList.
         cmpop: str or function
             'Compare Op'
             If a string, should be one of 'lt', 'le', 'eq', 'ne', 'gt', 'ge', 'isin'.
@@ -450,6 +452,11 @@ class ParameterSetFilter:
             return ParameterSetFilter(self.reclst, self._cmp, key=key)
 
     def __call__(self, paramset):
+        """
+        Parameters
+        ----------
+        paramset: ParameterSet
+        """
         def test(paramset, key, value):
             try:
                 fullkey = self.join_keys(self.key, key)
@@ -581,8 +588,17 @@ class RecordFilter:
                 raise ValueError("Too many arguments for `filter.before()`")
         elif isinstance(date, tuple):
             date = datetime(*(date+args))
-        elif isinstance(date, int) and len(str(date)) == 8:
+        elif isinstance(date, int) and len(str(date)) <= 8:
             # Convenience interface to allow dropping the commas
+            # Date can be an integer of length 4, 5, 6, 7 or 8; if less than 8
+            # digits, well be extended with the earliest date (so 2018 -> 20180101)
+            datestr = str(date)
+            if len(datestr) < 4:
+                raise ValueError("Date integer must give at least the year.")
+            elif len(datestr) < 8:
+                Δi = 8 - len(datestr)
+                datestr = datestr + "0101"[-Δi:]
+                date = int(datestr)
             year, month, day = date//10000, date%10000//100, date%100
             date = datetime(year, month, day)
         else:
@@ -603,8 +619,17 @@ class RecordFilter:
                 raise ValueError("Too many arguments for `filter.after()`")
         elif isinstance(date, tuple):
             date = datetime(*(date+args))
-        elif isinstance(date, int) and len(str(date)) == 8:
+        elif isinstance(date, int) and len(str(date)) <= 8:
             # Convenience interface to allow dropping the commas
+            # Date can be an integer of length 4, 5, 6, 7 or 8; if less than 8
+            # digits, well be extended with the earliest date (so 2018 -> 20180101)
+            datestr = str(date)
+            if len(datestr) < 4:
+                raise ValueError("Date integer must give at least the year.")
+            elif len(datestr) < 8:
+                Δi = 8 - len(datestr)
+                datestr = datestr + "0101"[-Δi:]
+                date = int(datestr)
             year, month, day = date//10000, date%10000//100, date%100
             date = datetime(year, month, day)
         else:
@@ -625,8 +650,15 @@ class RecordFilter:
                 raise ValueError("Too many arguments for `filter.on()`")
         elif isinstance(date, tuple):
             date = datetime(*(date+args))
-        elif isinstance(date, int) and len(str(date)) == 8:
+        elif isinstance(date, int) and len(str(date)) <= 8:
             # Convenience interface to allow dropping the commas
+            datestr = str(date)
+            if len(datestr) < 4:
+                raise ValueError("Date integer must give at least the year.")
+            elif len(datestr) < 8:
+                Δi = 8 - len(datestr)
+                datestr = datestr + "0101"[-Δi:]
+                date = int(datestr)
             year, month, day = date//10000, date%10000//100, date%100
             date = datetime(year, month, day)
         else:
@@ -742,7 +774,8 @@ class RecordList:
             # TODO: Use 'or' label filter once that is implemented
             return RecordList([self.get(lbl) for lbl in label])
 
-        found = self.filter.label(label).list
+        found = self.filter(lambda rec: rec.label == label).list
+            # Don't use the label filter because it uses 'in' instead of '==' comparison
         if len(found) == 0:
             raise RecordNotFound("No record has a label corresponding to '{}'."
                                  .format(label))
@@ -814,11 +847,10 @@ class RecordList:
 
 import re
 import pandas as pd
-class RecordListSummary:
+class RecordListSummary(OrderedDict):
     def __init__(self, recordlist):
         lbltest = re.compile('^\d{8,8}-\d{6,6}$')
             # RegEx for the standard label format YYYYMMDD-HHMMSS
-        self.summarized_records = {}
         for r in recordlist:
             # For labels following the standard format, merge records whose
             # labels differ only by a suffix
@@ -829,14 +861,14 @@ class RecordListSummary:
             m = lbltest.match(lbl_timestamp)
             if m is None:
                 # Not a standard label format -- no merging
-                assert(r.label not in summarized_records)
-                self.summarized_records[r.label] = [r]
+                assert(r.label not in self)
+                self[r.label] = [r]
             else:
                 # Standard label format
-                if lbl_timestamp in self.summarized_records:
-                    self.summarized_records[lbl_timestamp].append(r)
+                if lbl_timestamp in self:
+                    self[lbl_timestamp].append(r)
                 else:
-                    self.summarized_records[lbl_timestamp] = [r]
+                    self[lbl_timestamp] = [r]
 
     # TODO: __str__, __repr__ and DataFrame-printing
 
@@ -876,7 +908,7 @@ class RecordListSummary:
         if isinstance(parameters, str):
             parameters = (parameters,)
         fields += tuple('parameters.' + p for p in parameters)
-        for lbl, sr in self.summarized_records.items():
+        for lbl, sr in self.items():
             entry = tuple(combine(sr, field) for field in fields)
             entry = (len(sr),) + entry
             data.append(entry)
@@ -887,7 +919,7 @@ class RecordListSummary:
         if pandas_loaded:
             if len(data) == 0:
                 data = data.reshape((0, len(fieldnames)+1))
-            return pd.DataFrame(data, index=self.summarized_records.keys(),
+            return pd.DataFrame(data, index=self.keys(),
                                 columns=('# records',) + fieldnames).sort_index(ascending=False)
         else:
             # TODO: Add index to data; make structured array
