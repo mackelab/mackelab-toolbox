@@ -350,6 +350,7 @@ def params_to_arrays(params):
     arrays to be specified in files as nested lists, which are more readable.
     Also converts dictionaries to parameter sets.
     """
+    # TODO: Don't erase _url attribute
     ParamType = type(params)
         # Allows to work with types derived from ParameterSet, for example Sumatra's
         # NTParameterSet
@@ -364,14 +365,32 @@ def params_to_arrays(params):
             params[name] = np.array(val)
     return ParamType(params)
 
+def params_to_nonarrays(params):
+    """
+    Recursively call `tolist()` on all NumPy array values in a ParameterSet.
+    This allows exporting arrays as nested lists, which are more readable
+    and properly imported (array string representations drop the comma
+    separating elements, which causes import to fail).
+    """
+    # TODO: Don't erase _url attribute
+    ParamType = type(params)
+        # Allows to work with types derived from ParameterSet, for example Sumatra's
+        # NTParameterSet
+    for name, val in params.items():
+        if isinstance(val, (ParameterSet, dict)):
+            params[name] = params_to_nonarrays(val)
+        elif isinstance(val, np.ndarray):
+            params[name] = val.tolist()
+    return ParamType(params)
+
 ###########################
 # Manipulating ParameterSets
 ###########################
 
-def prune(params, keep):
+def prune(params, keep, exclude=None):
     """
-    Filter `params`, keeping only the names (aka keys) indicated in `filter`.
-    E.g. if `filter` is 'model.N', then the returned object is a ParameterSet
+    Filter `params`, keeping only the names (aka keys) indicated in `keep`.
+    E.g. if `keep` is 'model.N', then the returned object is a ParameterSet
     with only the contents of `params.model.N`. The root is unchanged, so
     parameters are still accessed as `params.model.N.[attr]`.
 
@@ -382,20 +401,30 @@ def prune(params, keep):
     keep: str, or list of str
         Parameters to keep. Should correspond to keys  in `params`.
 
+    exclude: str, or list of str
+        (Optional) Same format as `keep`. Exclude these parameters, if they would have
+        otherwise been kept.
+
     Returns
     -------
     ParameterSet
-        Copy of `params`, keeping only the attributes given in `filter`.
+        Copy of `params`, keeping only the attributes given in `keep`.
     """
-    # Normalize `filter`
+    # Normalize filters
     if isinstance(keep, str) or not isinstance(keep, Iterable):
-        filters = [keep]
+        keepfilters = [keep]
     else:
-        filters = keep
+        keepfilters = keep
+    if exclude is None:
+        excludefilters = []
+    elif isinstance(exclude, str) or not isinstance(exclude, Iterable):
+        excludefilters = [exclude]
+    else:
+        excludefilters = exclude
 
     # Create a new ParameterSet, and fill it with the elements of `params`
     newparams = ParameterSet({})
-    for filter in filters:
+    for filter in keepfilters:
         if '.' in filter:
             filter, subfilter = filter.split('.', maxsplit=1)
         else:
@@ -409,11 +438,20 @@ def prune(params, keep):
                     # This parameter name was already added – almost certainly an error
                     raise ValueError("Filter parameter '{}' overlaps with another"
                                      .format(filter))
-                newparams[filter] = params[filter]
+                newparams[filter] = params[filter].copy()  # Don't touch the original data
             else:
                 if filter not in newparams:
                     newparams[filter] = ParameterSet({})
                 newparams[filter][subfilter] = prune(params[filter], subfilter)[subfilter]
+
+    # Remove the excluded parameters
+    for filter in excludefilters:
+        if '.' in filter:
+            # del does not work with nested keys
+            psetkey, el = filter.rsplit('.', maxsplit=1)
+            del newparams[psetkey][el]
+        else:
+            del newparams[filter]
 
     return newparams
 
@@ -552,6 +590,8 @@ def _param_diff(params1, params2, name1="", name2=""):
     return diffs
 
 def param_diff(params1, params2, name1="", name2=""):
+    print("Bug warning: current implementation does not catch some differences "
+          "in shape because of broadcasting (e.g. [[1 2], [1, 2]] vs [1, 2]).")
     if name1 == "":
         name1 = "params1" if name2 != "params1" else "params1_1"
     if name2 == "":
