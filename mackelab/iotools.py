@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Created on Wed Sep 20 16:56:37 2017
 
@@ -8,7 +7,7 @@ Created on Wed Sep 20 16:56:37 2017
 import os
 import os.path
 import io
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import logging
 import numpy as np
 import dill
@@ -17,12 +16,13 @@ logger = logging.getLogger('mackelab.iotools')
 
 Format = namedtuple("Format", ['ext'])
     # TODO: Extend Format to include load/save functions
-defined_formats = {
+defined_formats = OrderedDict([
     # List of formats known to the load/save functions
-    'npr':  Format('npr'),
-    'repr': Format('repr'),
-    'dill': Format('dill')
-    }
+    # The order of these formats also defines a preference, for when two types might be used
+    ('npr',  Format('npr')),
+    ('repr', Format('repr')),
+    ('dill', Format('dill'))
+    ])
 
 _load_types = {}
 
@@ -289,9 +289,34 @@ def load(filename, types=None, load_function=None, input_format=None):
         types = _load_types
 
     basepath, ext = os.path.splitext(filename)
+    dirname, basename = os.path.split(basepath)
 
     if len(ext) == 0 and input_format is None:
-        raise ValueError("Filename has no extension. Please specify input format.")
+        #raise ValueError("Filename has no extension. Please specify input format.")
+        # Try every file whose name without extension matches `filename`
+        match = lambda fname: os.path.splitext(fname)[0] == basename
+        fnames = [name for name in os.listdir(dirname) if match(name)]
+        # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
+        # We do not attempt to load other extensions, since we don't know the format
+        ordered_fnames = []
+        for formatext in defined_formats:
+            name = basename + '.' + formatext
+            if name in fnames:
+                ordered_fnames.append(name)
+        # Try to load every file name in sequence. Terminate after the first success.
+        for fname in ordered_fnames:
+            try:
+                data = load(fname, types, load_function)
+            except (FileNotFoundError):
+                # Basically only possible to reach here with a race condition, where
+                # file is deleted after having been listed
+                # TODO: Also catch loading errors ?
+                continue
+            else:
+                return data
+        # No file was found
+        raise FileNotFoundError("No file with base name '{}' was found."
+                                .format(basename))
     if input_format is None:
         input_format = ext[1:]
     if input_format not in defined_formats:
