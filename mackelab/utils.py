@@ -37,7 +37,12 @@ def flatten(l, terminate=()):
         else:
             yield el
 
-class SanitizedOrderedDict(OrderedDict):
+class SanitizedDict(dict):
+    def __init__(self, *args, **kwargs):
+        logger.warning("mackelab.utils.SanitizedDict is not implemented")
+        super().__init__(*args, **kwargs)
+
+class SanitizedOrderedDict(OrderedDict, SanitizedDict):
     """
     Subclass of OrderedDict with sanitized keys.
     Any key query is passed through a user-defined 'sanitization' function
