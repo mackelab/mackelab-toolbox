@@ -68,6 +68,10 @@ class Transform:
             self.xname = xname.strip()
             self.expr = expr.strip()
 
+    def __str__(self):
+        return self.desc
+    def __repr__(self):
+        return str(type(self)) + '(' + self.desc + ')'
 
     def __call__(self, x):
         names = {self.xname: x}
@@ -162,7 +166,6 @@ class TransformedVar(TransformedVarBase):
 
         # Set the variable names
         self.names = self.TransformName(*[nm.strip() for nm in desc.name.split('->')])
-        #assert(len(names) == 2)
         if hasattr(self.orig, 'name'):
             if self.orig.name is None:
                 self.orig.name = self.names.orig
@@ -173,6 +176,9 @@ class TransformedVar(TransformedVarBase):
                 self.new.name = self.names.new
             else:
                 assert(self.new.name == self.names.new)
+
+    def __str__(self):
+        return self.names.orig + '->' + self.names.new + ' (' + self.to.desc + ')'
 
     def rename(self, orig, new):
         """
@@ -192,10 +198,6 @@ class TransformedVar(TransformedVarBase):
 class NonTransformedVar(TransformedVarBase):
     """Provides an interface consistent with TransformedVar."""
 
-    # def __new__(cls, orig):
-    #     # Required because of MetaTransformedVar
-    #     return super().__new__(cls)
-
     def __init__(self, desc, orig):
         """
         `desc` only used to provide name attribute. If you don't need name,
@@ -209,10 +211,11 @@ class NonTransformedVar(TransformedVarBase):
             Theano or Python numeric variable.
         """
         self.orig = orig
-        self.to = lambda x: x
-        self.back = lambda x: x
+        self.to = Transform('x -> x')
+        self.back = Transform('x -> x')
         self.new = orig
         # Set name
+        self.names = None
         if isinstance(desc, str):
             self.names = self.TransformName(desc, desc)
         elif desc is not None and 'name' in desc:
@@ -225,12 +228,18 @@ class NonTransformedVar(TransformedVarBase):
             else:
                 raise ValueError("Malformed transformation name description '{}'."
                                  .format(desc.name))
-        if hasattr(self, 'names'):
+        if self.names is not None:
             if hasattr(self.orig, 'name'):
                 if self.orig.name is not None:
                     assert(self.orig.name == self.names.orig)
             else:
                 self.orig.name = self.names.orig
+
+    def __str__(self):
+        if self.names is not None:
+            return self.names.orig + '(' + str(self.orig) + ')'
+        else:
+            return str(self.orig)
 
     def rename(self, orig, new=None):
         """
