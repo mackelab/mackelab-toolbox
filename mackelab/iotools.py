@@ -306,7 +306,8 @@ def load(filename, types=None, load_function=None, input_format=None):
         # Try to load every file name in sequence. Terminate after the first success.
         for fname in ordered_fnames:
             try:
-                data = load(fname, types, load_function)
+                data = load(os.path.join(dirname, fname),
+                            types, load_function)
             except (FileNotFoundError):
                 # Basically only possible to reach here with a race condition, where
                 # file is deleted after having been listed
