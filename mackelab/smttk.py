@@ -1313,6 +1313,14 @@ if click_loaded:
         argv_list = [ "-m {} --label {}_{} {} {}"
                       .format(script, label, i, " ".join(args), param_file)
                       for i, param_file in enumerate(param_paths, start=1)]
+
+        # Process idx array. Used to assign a unique index to each concurrently
+        # running process
+        # 'b' => signed char (1 byte)
+        assert('process_idcs' not in globals())
+        global process_idcs
+        process_idcs = multiprocessing.Array('b', [0] *  cores)
+
         if dry_run:
             # Dry-run
             print("With these arguments, the following calls would "
@@ -1331,7 +1339,37 @@ if click_loaded:
                     pool.map(_smtrun, argv_list)
 
     def _smtrun(argv_str):
-        return sumatra.commands.run(argv_str.split())
+        # Find first unused process index
+        if 'process_idcs' in globals():
+            global process_idcs
+            with process_idcs.get_lock():
+                if False:#len(process_idcs) == 1:
+                    pidx = None
+                else:
+                    found = False
+                    for i, v in enumerate(process_idcs):
+                        if v == 0:
+                            process_idcs[i] = 1
+                            pidx = i
+                            found = True
+                            break
+                    if not found:
+                        # This should never happen, but just in case
+                        # do something reasonable
+                        pidx = len(process_idcs)
+                        print("Unable to find a free process index. Assigning "
+                            "index {}; it may be shared.".format(pidx))
+
+        if pidx is not None:
+            argv_str = '--threadidx {} '.format(pidx) + argv_str
+        res = sumatra.commands.run(argv_str.split())
+
+        # Free the process index
+        if pidx is not None:
+            with process_idcs.get_lock():
+                process_idcs[pidx] = 0
+
+        return res
 
     cli.add_command(run)
 
