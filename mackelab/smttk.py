@@ -804,9 +804,12 @@ class RecordList:
         return_parameters: bool
             If True, also return the common parameters. `common_params` must also
             be set. Default value is False.
+
         Returns
         -------
-        List of str (paths)
+        List of str (paths).
+        Optionally also returns a ParameterSet. The returned ParameterSet is a copy
+        of `common_params`, such that it can be modified with affecting the original.
         """
         # if not isinstance(records, Iterable):
         #     raise ValueError("`records` must be a list of records.")
@@ -835,7 +838,7 @@ class RecordList:
             if common_params is None:
                 raise ValueError("Must specify a filter for common parameters "
                                 "in order to return a parameter set.")
-            return data_paths, test_params
+            return data_paths, test_params.copy()
         else:
             return data_paths
 
@@ -845,6 +848,8 @@ class RecordListSummary(OrderedDict):
     def __init__(self, recordlist):
         lbltest = re.compile('^\d{8,8}-\d{6,6}$')
             # RegEx for the standard label format YYYYMMDD-HHMMSS
+        super().__init__()
+            # Empty initialization – we enter the entries ourselves below
         for r in recordlist:
             # For labels following the standard format, merge records whose
             # labels differ only by a suffix
@@ -875,6 +880,7 @@ class RecordListSummary(OrderedDict):
     def dataframe(self, fields=('reason', 'tags', 'main_file', 'duration'),
                   parameters=()):
         def combine(recs, attr):
+            # Combine the values from different records in a single entry
             def get(rec, attr):
                 # Retrieve possibly nested attributes
                 if '.' in attr:
@@ -896,6 +902,14 @@ class RecordListSummary(OrderedDict):
                         # Add string indicating this rec does not have attr
                         vals.append("undefined")
                 return ', '.join(str(a) for a in set(ml.utils.flatten(vals)))
+        def format_field(field):
+            # Take a field key and output the formatted string to display
+            # in the dataframe header
+            if field == 'duration':
+                field = 'avg. duration'
+            field = field.replace('.', '\n.')
+            return field
+
         data = deque()
         # Append parameters to the list of fields
         # Each needs to be prepended with the record attribute 'parameters'
@@ -908,7 +922,7 @@ class RecordListSummary(OrderedDict):
             data.append(entry)
         data = np.array(data)
 
-        fieldnames = tuple(field.replace('.', '\n.') for field in fields)
+        fieldnames = tuple(format_field(field) for field in fields)
             # Add line breaks to make parameters easier to read, and take less horizontal space
         if pandas_loaded:
             if len(data) == 0:
@@ -1280,12 +1294,14 @@ if click_loaded:
     @click.argument("params", nargs=1)
     def run(dry_run, cores, script, max_tasks, args, params):
         basename, _ = os.path.splitext(os.path.basename(script))
-        tmpparam_path = os.path.join(tmp_dir, basename + ".params")
+        # TODO: Get extension from parameter path
+        tmpparam_path = os.path.join(tmp_dir, basename + ".ntparameterset")
+        # FIXME: Parameter expansion does not work with nested files
         param_paths = mackelab.parameters.expand_param_file(
             params, tmpparam_path, max_files=max_tasks)
 
         # We need to generate our own label, as Sumatra's default is to use a timestamp
-        # which is precise up to seconds. Thus jobs launched simultaneously would have the
+        # which is only precise up to seconds. Thus jobs launched simultaneously would have the
         # same label. To avoid this, we generate our own label by appending a run-specific
         # number to the default time stamp label
 
