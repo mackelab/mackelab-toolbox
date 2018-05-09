@@ -868,6 +868,9 @@ class Block(SimpleNamespace):
 # ParameterSet sampler
 ###################
 
+class NoPops:
+    # Sentinel class
+    pass
 
 class ParameterSetSampler:
     """
@@ -877,20 +880,76 @@ class ParameterSetSampler:
         a) are consistent across runs and code changes
            (only changes to the parameter file itself will change the chosen parameters)
         b) do not affect random draws from outside this module
-    NOTE: To achieve its goals, this class effectively maintains its own separate
+
+    Each parameter description may contain a transform description. When that is
+    the case, the defined distribution is on the transformed variable. The
+    sampler will apply the inverse transformation before returning the variable,
+    such that sampled variables are always on the original space.
+
+    Usage
+    -----
+    >>> from parameters import ParameterSet
+    >>> # Define two variables:
+        # - `x` for which `log10(x)` is normally distributed with
+        #   with mean 0, standard deviation 1 and shape (2,).
+        #   This is equivalent to using a 'lognormal' distribution.
+        # - `y` which is gamma distributed.
+        dist_desc = ParameterSet({'seed': 100,
+                                  'x': {
+                                    'dist'     : 'normal',
+                                    'shape'    : (2,),
+                                    'loc'      : 0.,
+                                    'scale'    : 1.,
+                                    'transform': {
+                                      'name': 'x -> logx',
+                                      'to'  : 'x -> np.log10(x)',
+                                      'back': 'logx -> 10**logx' }
+                                    },
+                                  'y': {
+                                    'dist'     : 'gamma',
+                                    'shape'    : (1,),
+                                    'a'        : 2.,
+                                    'scale'    : 1.
+                                  }
+                                }
+    >>> sampler = ParameterSetSampler(dist_desc)
+    >>> x = sampler.sample('x')
+    >>> y = sampler.sample('y')
+    >>> # Other ways to call sample():
+    >>> xy = sampler.sample(['x', 'y'])  # ParameterSet
+    >>> xy2 = sampler()  # ParameterSet
+    >>> x == xy['x']  # False
+    >>> x != xy2['x'] and xy['x'] != xy2['x']  # True
+    >>> # Order in which we sample parameters does not matter
+    >>> sampler2 = ParameterSetSampler(dist_desc)  # Uses same seed as `sampler`
+    >>> y2 = sampler2.sample('y')
+    >>> x2 = sampler2.sample('x')
+    >>> x == x2  # True
+    >>> y == y2  # True
+
+    TODO: Usage with populations
+
+    Note
+    ----
+    To achieve its goals, this class effectively maintains its own separate
     random number generator. This means that samples produced within this class may not
-    be independent from samples produced outside of it. This shouldn't be a problem if
+    not be independent from samples produced outside of it. This shouldn't be a problem if
     e.g. the 'other' samples are those used to induce noise in a simulation. However,
     generating other parameters with a separate RNG should be avoided.
 
-    # TODO: Cast parameters with subpopulations as BroadcastableBlockArray ?
+    Parameters
+    ----------
+    dists: ParameterSet (param_desc format)
+        For priors in `dists` which define a transform, the returned sampler
+        will be for the *transformed* variable.
+    seed: int
+        If given, overrides any seed present in `dists`.
+
+    TODO: Cast parameters with subpopulations as BroadcastableBlockArray ?
     """
     population_attrs = ['population', 'populations', 'mixture', 'mixtures', 'label', 'labels']
-    def __init__(self, dists):
+    def __init__(self, dists, seed=None):
         """
-        Parameters
-        ----------
-        dists: ParameterSet
         """
         # Implementation:
         # In order to always sample the same way, we set an order for parameters.
@@ -915,8 +974,10 @@ class ParameterSetSampler:
             popnames = None
 
         # Set seed
-        if 'seed' in dists:
-            np.random.seed(dists.seed)
+        if seed is None:
+            seed = getattr(dists, 'seed', None)
+        if seed is not None:
+            np.random.seed(seed)
 
         # Get all the variable names and fix their order.
         # If we didn't fix their order here, changing the order in the parameter file
@@ -1011,13 +1072,15 @@ class ParameterSampler:
             if 'dist' not in desc:
                 raise ValueError("Unrecognized distribution type '{}'."
                                 .format(desc.dist))
-            if popnames is None:
-                # Provide a default population name, in case there is only one
-                # population (in which case no name is necessary)
-                popnames = ["pop1"]
+            # if popnames is None:
+            #     # Provide a default population name, in case there is only one
+            #     # population (in which case no name is necessary)
+            #     popnames = ["pop1"]
             self.sampled_idx = 0
             shapes = [()]
             pop_pattern = ()
+                # pop_pattern indicates which dimensions are sampled with
+                # differente parameters for each population
             for s in desc.shape:
                 if not isinstance(s, str):
                     shapes = [ r + (s,) for r in shapes ]
@@ -1037,11 +1100,16 @@ class ParameterSampler:
 
             def key(*poplabels):
                 return ','.join(poplabels)
-            n = len(popnames)
 
             # TODO: Remove special cases/pop_pattern and make a generic
             #       function that works with any shape
-            if pop_pattern == (True,):
+            if all(b is False for b in pop_pattern):
+                # There is no population-based sampling
+                assert(len(shapes) == 1)
+                def get_sample():
+                    logger.debug("Getting {} sample.".format(self.name))
+                    return pop_samplers[NoPops](shapes[0])
+            elif pop_pattern == (True,):
                 def get_sample():
                     logger.debug("Getting {} sample.".format(self.name))
                     return np.block(
@@ -1060,12 +1128,17 @@ class ParameterSampler:
                         [ [pop_samplers[key(pop)](shape)]
                           for pop, shape in zip(popnames, shapes) ] )
             elif pop_pattern == (True, True):
+                n = len(popnames)
                 def get_sample():
                     logger.debug("Getting {} sample.".format(self.name))
                     return np.block(
                         [ [ pop_samplers[key(pop1, pop2)](shapes[i + j])
                             for pop2, j in zip(popnames, range(0, n**1, n**0)) ]
                           for pop1, i in zip(popnames, range(0, n**2, n**1)) ] )
+            else:
+                raise NotImplementedError("Population samplers for block-broadcastable "
+                                          "pattern '{}' are not yet implemented."
+                                          .format(pop_pattern))
 
         if isinstance(desc, ParameterSet) and 'transform' in desc:
             inverse = Transform(desc.transform.back)
@@ -1085,15 +1158,32 @@ class ParameterSampler:
         def __getitem__(self, key):
             self.key = key    # Used in __getattr__
             if self.dist == 'normal':
-                def sample_pop(size):
-                    self.key = key    # Used in __getattr__
-                    res = np.random.normal(self.loc,
-                                           self.scale, size=size)
-                    self.key = None
-                    return res
+                def _sample_pop(size):
+                    return np.random.normal(self.loc, self.scale, size=size)
+            elif self.dist == 'expnormal':
+                def _sample_pop(size):
+                    return np.exp(np.random.normal(self.loc, self.scale,
+                                                   size=size))
+            elif self.dist in ['exponential', 'exp']:
+                def _sample_pop(size):
+                    return np.random.exponential(self.scale, size=size)
+            elif self.dist == 'gamma':
+                def _sample_pop(size):
+                    return np.random.gamma(shape=self.a, scale=self.scale,
+                                           size=size)
             else:
                 raise ValueError("Unrecognized distribution type '{}'."
-                                .format(distparams.dist))
+                                .format(self.distparams.dist))
+
+            def sample_pop(size):
+                self.key = key    # Used in __getattr__
+                res = _sample_pop(size)
+                factor = self.factor
+                if factor is not None:
+                    res *= factor
+                self.key = None
+                return res
+
             self.key = None
             return sample_pop
 
@@ -1101,10 +1191,10 @@ class ParameterSampler:
         # parameter, or fall back to the global one if the first
         # isn't given
         def __getattr__(self, attr):
-            if attr in self.distparams[self.key]:
+            if self.key is not NoPops and attr in self.distparams[self.key]:
                 return getattr(self.distparams[self.key], attr)
             else:
-                return getattr(self.distparams, attr)
+                return getattr(self.distparams, attr, None)
     # =======
 
     def __call__(self):
