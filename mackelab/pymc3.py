@@ -1,5 +1,6 @@
 import numpy as np
-from collections import namedtuple, Callable
+from collections import namedtuple, Callable, OrderedDict
+from copy import deepcopy
 import pymc3 as pymc
 
 import theano_shim as shim
@@ -7,6 +8,8 @@ from mackelab.parameters import TransformedVar, NonTransformedVar
 from mackelab.iotools import load
 from mackelab.utils import flatten
 
+TransformNames = namedtuple('TransformedNames', ['orig', 'new'])
+PriorVar = namedtuple('PriorVar', ['pymc_var', 'model_var', 'transform', 'mask'])
 modelvarsuffix = "_model"
     # To avoid name clashes, we need to ensure that the Theano variables of the
     # original model and those of the PyMC3 model do not share a name.
@@ -14,8 +17,31 @@ modelvarsuffix = "_model"
     # Changing the original model's names is preferred, as this allows accessing
     # the MCMC traces with the expected attribute names.
 
-PriorVar = namedtuple('PriorVar', ['pymc_var', 'model_var', 'transform', 'mask'])
-class PyMCPrior(dict):
+class InitializableModel(pymc.model.Model):
+    """
+    Add to PyMC3 models the ability to specify a setup
+    function which is run every time just before any compiled
+    function is called.
+
+    Parameters
+    ----------
+    name, model, theano_config:
+        As pymc3.model.Model
+    setup: callable
+        Function taking no arguments. Will be called just before evaluating
+        any compiled function.
+    """
+    def __init__(self, name='', model=None, theano_config=None, setup=None):
+        self.setup = setup
+        super().__init__(name=name, model=model, theano_config=theano_config)
+
+    def makefn(self, outs, mode=None, *args, **kwargs):
+        f = super().makefn(outs, mode, *args, **kwargs)
+        def makefn_wrapper(*args, **kwargs):
+            self.setup()
+            return f(*args, **kwargs)
+        return makefn_wrapper
+
     """
     [...]
     Can subclass to support other distributions; just need to redefine
