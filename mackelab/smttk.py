@@ -278,7 +278,7 @@ class RecordView:
             exclude = (exclude,)
         def filter_fn(path):
             return ( any(s in path for s in include)
-                    and all(s not in path for s in exclude)
+                    and not any(s in path for s in exclude)
                     and filter(path) )
 
         # Get output data path(s)
@@ -878,7 +878,7 @@ class RecordListSummary(OrderedDict):
         return self.dataframe(*args, **kwargs)
 
     def dataframe(self, fields=('reason', 'tags', 'main_file', 'duration'),
-                  parameters=()):
+                  parameters=(), hash_parameter_sets=True):
         def combine(recs, attr):
             # Combine the values from different records in a single entry
             def get(rec, attr):
@@ -887,7 +887,12 @@ class RecordListSummary(OrderedDict):
                     attr, nested = attr.split('.', 1)
                     return get(getattr(rec, attr), nested)
                 else:
-                    return getattr(rec, attr)
+                    value = getattr(rec, attr)
+                    if hash_parameter_sets and isinstance(value, ParameterSet):
+                        # Get a hash fingerprint (first 7 hash chars) of the file
+                        h = ml.parameters.get_filename(value)
+                        value = '#' + h[:7]
+                    return value
             if attr == 'duration':
                 s = sum(getattr(r, attr) for r in recs) / len(recs)
                 h, s = s // 3600, s % 3600
