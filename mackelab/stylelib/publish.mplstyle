@@ -1,0 +1,30 @@
+# Use as plt.style.use(["default.mplstyle","publish.mplstyle"])
+# Official docs on exporting proper LaTeX plots
+# https://matplotlib.org/users/pgf.html
+# Some possibly useful SO questions:
+# https://stackoverflow.com/questions/33942210/consistent-fonts-between-matplotlib-and-latex
+# https://stackoverflow.com/a/41453758
+
+lines.linewidth: 0.75
+
+font.size: 9
+  # Relative font size are based on font.size. They are
+  # xx-small, x-small, medium, large, x-large, xx-large, larger, smaller
+
+# Rendered LaTeX labels approach
+# text.usetex : True
+    # Setting this to True seems to lead to incorrect bounding boxes on labels, which
+    # can lead to cropping which is really difficult to avoid
+#text.latex.unicode : True
+#text.latex.preamble: \usepackage{cmbright} \usepackage[utf8]{inputenc} \input{declareunicode}
+    # On Ubuntu, cmbright requires install 'texlive-fonts-extra' with apt.
+    # 'declareunicode' is a homemade file which should be on your TeX search path
+
+# Export a pgf compiled pdf
+# The pgf renderer can only be used for exported figures with `savefig`
+# This means the figure shown in the notebook is not exactly the one exported;
+# the latter is pgf code compiled with xelatex, and so should provide consistent
+# fonts when imported into a latex document.
+pgf.rcfonts: False
+pgf.texsystem: xelatex
+pgf.preamble: \usepackage{cmbright} \usepackage{unicode-math}

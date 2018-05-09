@@ -1,0 +1,32 @@
+# See http://matplotlib.org/users/customizing.html#a-sample-matplotlibrc-file for option examples
+
+font.family: sans-serif
+font.style: normal
+font.sans-serif: CMU Bright, Arial, Helvetica, Liberation Sans, DejaVu Sans
+font.size: 11
+  # Relative font size are based on font.size. They are
+  # xx-small, x-small, small, medium, large, x-large, xx-large, larger, smaller
+
+# dark-text options
+text.color: 4f6066
+
+mathtext.fontset : cm
+axes.titlepad : 14.0
+axes.spines.left : True
+axes.spines.bottom : True
+axes.spines.top : False
+axes.spines.right : False
+axes.titlesize : medium
+axes.titleweight : bold
+xtick.labelsize : small
+ytick.labelsize : small
+legend.fontsize : small
+legend.framealpha : 0
+
+figure.dpi : 150  # Display figures larger in notebook; default is 72
+
+savefig.dpi : 300
+savefig.format : pdf
+savefig.bbox : tight  # Incompatible with pipe-based animation
+savefig.pad_inches : 0
+savefig.transparent : False
