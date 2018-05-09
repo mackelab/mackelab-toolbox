@@ -42,16 +42,36 @@ class InitializableModel(pymc.model.Model):
             return f(*args, **kwargs)
         return makefn_wrapper
 
+class PyMCPrior(OrderedDict):
     """
     [...]
     Can subclass to support other distributions; just need to redefine
     `get_dist`, redirecting  to `super().set_dist()` for standard ones.
+
+    A PyMCPrior is an ordered dictionary of {key: PriorVar} pairs. Keys are the variable
+    names. The entries are guaranteed to be ordered in the same way
+    PriorVar is a named tuple with the following attributes:
+        - pymc_var
+        - model_var
+        - transform
+        - mask
+    `model_var` is a symbolic variable in our computational graph. `pymc_var` is the
+    equivalent PyMC3 variable. To create a computational graph for sampling with PyMC3,
+    we can use `theano.clone()` to substitute `model_var` with `pymc_var` in the graph.
+    If a mask is applied, `pymc_var` will depend on `model_var` for those values for
+    which there is no prior.
+    The name assigned to the corresponding PyMC3 variable is given
+    by the transform's 'names.new' attrtibute. This name can be used to retrieve
+    the variable from the PyMC3 model.
     """
     metaparams = ['dist', 'factor', 'mask', 'transform', 'shape']
     # Everything in 'distribution parameters' that isn't a hyperparameter
 
     def __init__(self, dists, modelvars):
         """
+        Instantiate within a PyMC3 model context.
+        TODO: allow providing `model` as parameter
+
         Parameters
         ----------
         dists: dict
@@ -85,7 +105,7 @@ class InitializableModel(pymc.model.Model):
         assert(shim.config.use_theano)
         assert(len(dists) == len(modelvars))
 
-        dists = dists.copy()  # Don't modify passed argument
+        dists = deepcopy(dists)  # Don't modify passed argument
         for distname, distparams in dists.items():
             hyperparams = [key for key in distparams.keys()
                            if key not in self.metaparams]
@@ -121,20 +141,24 @@ class InitializableModel(pymc.model.Model):
                     # 'shape' doesn't make much sense and so we just define a flat RV.
                     distparams.shape = (len(mask.nonzero()[0]),)
 
-     #       suffix = ' (dist)'
-            suffix = ""
-            dist = self.get_dist(distname, distparams, suffix)
-                # This is where we create the PyMC3 variable
      #       modelvarname = dist.names.orig[:-len(suffix)]
-            modelvarname = dist.names.orig
+            suffix = ""
+            transform_names = self.get_distnames(distname, distparams, suffix)
+            modelvarname = transform_names.orig
 
             # Grab the symbolic variable with matching name
+            # FIXME: Pretty sure this will break if get_distnames is called with a suffix
             foundvars = [var for var in modelvars
                             if var.name in (modelvarname, modelvarname + modelvarsuffix)]
             assert(len(foundvars) == 1)
             modelvar = foundvars[0]
 
-            # Create the new PyMC distribution variable (which bases Theano symbolic variable)
+            # Create the new PyMC3 distribution variable
+            dist = self.get_dist(transform_names.new, distparams,
+                                 dtype=modelvar.dtype)
+
+            # Apply appropriate transform and mask to the variable so that it
+            # can be substituted into the computational graph
             if mask is not None:
                 distvar = dist.back(
                     shim.set_subtensor(dist.to(modelvar)[mask.nonzero()],
@@ -152,14 +176,45 @@ class InitializableModel(pymc.model.Model):
             self[modelvarname] = PriorVar(pymc_var=distvar, model_var=modelvar,
                                           transform=dist, mask=mask)
 
-    def get_dist(self, distname, distparams, name_suffix=""):
+        # Ensure that the order matches that in model.vars
+        model = pymc.Model.get_context()
+        for rv, prior in zip(model.vars, self.values()):
+            # PyMC3 may transform the pymc variable, so we check whether its in the inputs.
+            if rv not in shim.graph.inputs([prior.pymc_var]):
+                raise RuntimeError("Priors are not in the same order as the "
+                                   "PyMC3 model. This should not happen, and "
+                                   "thus is probably due to a bug.")
+
+    @property
+    def subs(self):
+        """
+        Return a substitution dictionary suitable for using theano.clone to
+        replace model variables with PyMC3 variables.
+        """
+        return {prior.model_var: prior.pymc_var for prior in self.values()}
+
+    @staticmethod
+    def get_distnames(distname, distparams, suffix=""):
+        """
+        Returns a namedtuple of the same format as names in TransfomedVar.
+        If distparams does not define a transform, simply returns distname with the suffix appended. 'orig' and 'new' attributes are the same.
+        If a transform is defined, extracts the names, confirms that they are consistent with `distname`, and assigns them to the 'orig' and 'new' attributes after appending the suffix.
+        """
         if 'transform' in distparams:
             # 'distname' is that of the transformed variable
-            names = [nm.strip() for nm in distparams.transform.name.split('->')]
-            assert(distname == names[0])
-            distname = names[1]
+            names = TransformNames(
+              *[nm.strip() for nm in distparams.transform.name.split('->')])
+            assert(distname == names.orig)
+        else:
+            names = TransformNames(distname, distname)
 
-        distvarname = distname + name_suffix
+        return TransformNames(orig = names.orig + suffix,
+                              new  = names.new  + suffix)
+
+    def get_dist(self, distvarname, distparams, dtype):
+        # NOTE to developers: make sure any distribution you add passes on
+        # the `dtype` argument, so that distributions match the type of the
+        # variable for which they are a prior.
 
         if distparams.dist in ['normal', 'expnormal', 'lognormal']:
             if shim.isscalar(distparams.loc) and shim.isscalar(distparams.scale):
@@ -169,7 +224,7 @@ class InitializableModel(pymc.model.Model):
                     mu = mu.flat[0]
                 if isinstance(sd, np.ndarray):
                     sd = sd.flat[0]
-                distvar = pymc.Normal(distvarname, mu=mu, sd=sd)
+                distvar = pymc.Normal(distvarname, mu=mu, sd=sd, dtype=dtype)
             else:
                 # Because the distribution is 'normal' and not 'mvnormal',
                 # we sample the parameters independently, hence the
@@ -178,15 +233,17 @@ class InitializableModel(pymc.model.Model):
                 kwargs = {'shape' : distparams.loc.flatten().shape, # Required
                           'mu'    : distparams.loc.flatten(),
                           'cov'   : np.diag(distparams.scale.flat)}
-                distvar = pymc.MvNormal(distvarname, **kwargs)
+                distvar = pymc.MvNormal(distvarname, dtype=dtype, **kwargs)
 
         elif distparams.dist in ['exp', 'exponential']:
             lam = 1/distparams.scale
-            distvar = pymc.Exponential(distvarname, lam=lam, shape=distparams.shape)
+            distvar = pymc.Exponential(distvarname, lam=lam, shape=distparams.shape,
+                                       dtype=dtype)
 
         elif distparams.dist == 'gamma':
             a = distparams.a; b = 1/distparams.scale
-            distvar = pymc.Gamma(distvarname, alpha=a, beta=b, shape=distparams.shape)
+            distvar = pymc.Gamma(distvarname, alpha=a, beta=b, shape=distparams.shape,
+                                 dtype=dtype)
 
         else:
             raise ValueError("Unrecognized distribution type '{}'."
@@ -205,13 +262,14 @@ class InitializableModel(pymc.model.Model):
 
         if 'transform' in distparams:
             retvar = TransformedVar(distparams.transform, new=distvar)
+            if retvar.names.new != distvarname:
+                # Probably because a suffix was set.
+                raise NotImplementedError
+                # retvar.rename(orig=retvar.names.orig + name_suffix,
+                #               new =retvar.names.new  + name_suffix)
         else:
-            retvar = NonTransformedVar(distname, orig=distvar)
-        retvar.rename(orig=retvar.names.orig + name_suffix,
-                      new =retvar.names.new  + name_suffix)
-            # Appending " (dist)" identifies this variable as a distribution
-            # More importantly, also avoids name clashes with the original
-            # variable associated to this distribution
+            retvar = NonTransformedVar(distvarname, orig=distvar)
+        assert(retvar.names.new == distvarname)
         return retvar
 
 from inspect import ismethod, getmembers, isfunction, ismethoddescriptor, isclass, isbuiltin
