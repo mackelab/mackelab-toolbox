@@ -62,6 +62,11 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     if isinstance(params, dict):
         # Convert dictionary to a list of (param, mask_descriptor) tuples
         params = list(params.items())
+    else:
+        # Params have no masks: set it to None for all parameters
+        params = [(p, None) for p in params]
+    # `params` is a list of size 2 tuples
+    assert(isinstance(p, tuple) and len(p) == 2 for p in params)
 
     # Standardize the learning rate form
     if shim.isscalar(lr):
@@ -72,9 +77,8 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
 
     # Extract the gradient mask for each parameter
     for p in params:
-        if isinstance(p, tuple):
-            assert(len(p) == 2)
-            tmpparams.append(p[0])
+        tmpparams.append(p[0])
+        if p[1] is not None:
             if isinstance(p[1], bool):
                 param_masks.append(np.ones(p[0].get_value().shape, dtype=int)
                                    * p[1])
@@ -85,7 +89,6 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
                                      .format(p[1].shape, p[0].name, p[0].get_value().shape))
                 param_masks.append(p[1])
         else:
-            tmpparams.append(p)
             param_masks.append(None)
     params = tmpparams
 
@@ -99,25 +102,38 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     # DEBUG ?
     if 'print grads' in debug_flags:
         for i, p in enumerate(params):
-            if p.name in debug_flags['print grads']:
+            if (debug_flags['print grads'] is True
+                or p.name in debug_flags['print grads']):
                 grads[i] = shim.print(grads[i], 'gradient ' + p.name)
     # Mask out the gradient for parameters we aren't fitting
     for i, m in enumerate(param_masks):
         if m is not None:
             grads[i] = grads[i]*m
                 # m is an array of ones and zeros
-    i = theano.shared(shim.cast_floatX(0.))
+    i = theano.shared(shim.cast_floatX(0.), name='adam_i')
     i_t = i + 1.
     fix1 = 1. - (1. - b1)**i_t
     fix2 = 1. - (1. - b2)**i_t
     for p, g in zip(params, grads):
+        g = shim.cast_floatX(g)
+            # FIXME: prior logp's still have dtype='float64',
+            # no matter the value of floatX.
+            # This is probably due to some internal constants
+            # which are double precision.
+            # Until this is fixed we need the explicit cast
         lr_t = lr[p] * (T.sqrt(fix2) / fix1)
-        if hasattr(p, 'broadcastable'):
-            m = theano.shared(p.get_value() * 0., broadcastable=p.broadcastable)
-            v = theano.shared(p.get_value() * 0., broadcastable=p.broadcastable)
+        initval = shim.cast_floatX(p.get_value() * 0.)
+        if p.name is not None:
+            namem = 'adam_' + p.name + '_m'
+            namev = 'adam_' + p.name + '_v'
         else:
-            m = theano.shared(p.get_value() * 0.)
-            v = theano.shared(p.get_value() * 0.)
+            namen = namep = None
+        if hasattr(p, 'broadcastable'):
+            m = theano.shared(initval, broadcastable=p.broadcastable, name=namem)
+            v = theano.shared(initval, broadcastable=p.broadcastable, name=namev)
+        else:
+            m = theano.shared(initval, name=namem)
+            v = theano.shared(initval, name=namev)
         m_t = (b1 * g) + ((1. - b1) * m)
         v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
         g_t = m_t / (T.sqrt(v_t) + e)
@@ -210,5 +226,3 @@ class NPAdam:
             g_t = self.m[i] / (np.sqrt(self.v[i]) + self.e)
             p_t = p - (lr_t * g_t)
         return updates
-
-
