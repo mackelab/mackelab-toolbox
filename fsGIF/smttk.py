@@ -1166,7 +1166,8 @@ if click_loaded:
                   "the command(s) that would be executed. The expanded parameter "
                   "files are left in the temporary directory to allow inspection.")
     @click.option("-n", "--cores", default=1)
-    @click.option("-m", "--script", nargs=1, prompt=True)
+    @click.option("-m", "--script", nargs=1, prompt=True,
+                  type=click.Path(exists=True, dir_okay=False))
     @click.option("--max-tasks", default=1000)
     @click.argument("args", nargs=-1)
     @click.argument("params", nargs=1)
