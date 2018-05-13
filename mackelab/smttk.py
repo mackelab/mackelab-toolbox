@@ -1295,10 +1295,11 @@ if click_loaded:
     @click.option("-n", "--cores", default=1)
     @click.option("-m", "--script", nargs=1, prompt=True,
                   type=click.Path(exists=True, dir_okay=False))
+    @click.option("-r", "--reason", default="")
     @click.option("--max-tasks", default=1000)
     @click.argument("args", nargs=-1)
     @click.argument("params", nargs=1)
-    def run(dry_run, cores, script, max_tasks, args, params):
+    def run(dry_run, cores, script, reason, max_tasks, args, params):
         basename, _ = os.path.splitext(os.path.basename(script))
         # TODO: Get extension from parameter path
         tmpparam_path = os.path.join(tmp_dir, basename + ".ntparameterset")
@@ -1316,8 +1317,12 @@ if click_loaded:
         label = str(timestamp.strftime(sumatra.core.TIMESTAMP_FORMAT))
             # Same function as used in sumatra.records.Record
 
-        argv_list = [ "-m {} --label {}_{} {} {}"
-                      .format(script, label, i, " ".join(args), param_file)
+        shared_options = ""
+        if reason != "":
+            shared_options += " --reason " + reason
+
+        argv_list = [ "-m {} {} --label {}_{} {} {}"
+                      .format(script, shared_options, label, i, " ".join(args), param_file)
                       for i, param_file in enumerate(param_paths, start=1)]
 
         # Process idx array. Used to assign a unique index to each concurrently
