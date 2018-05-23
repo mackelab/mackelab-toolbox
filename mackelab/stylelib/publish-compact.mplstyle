@@ -1,0 +1,5 @@
+# Use as plt.style.use('default','publish','publish-compact')
+
+font.size: 9
+  # Relative font size are based on font.size. They are
+  # xx-small, x-small, medium, large, x-large, xx-large, larger, smaller

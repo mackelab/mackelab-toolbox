@@ -1,4 +1,4 @@
-# Use as plt.style.use(["default.mplstyle","publish.mplstyle"])
+# Use as plt.style.use(['default','publish'])
 # Official docs on exporting proper LaTeX plots
 # https://matplotlib.org/users/pgf.html
 # Some possibly useful SO questions:
