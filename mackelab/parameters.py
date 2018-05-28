@@ -3,8 +3,6 @@
 Provides the 'expand_params' method for expanding a parameter description strings.
 This allows to use one descriptor to specify multiple parameter sets.
 
-
-
 Created on Wed Sep 20 13:19:53 2017
 
 @author: alex
