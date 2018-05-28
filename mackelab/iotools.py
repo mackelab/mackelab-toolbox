@@ -212,21 +212,26 @@ def save(file, data, format='npr', overwrite=False):
 
     # Save data in as numpy representation
     if 'npr' in selected_formats:
+        fail = False
         ext = defined_formats['npr'].ext
-        with output(filename, ext, True, overwrite) as (f, output_path):
-            try:
-                logger.info("Saving data to 'npr' format...")
-                np.savez(f, **data.repr_np)
-            except AttributeError:
-                # TODO: Use custom error type
-                logger.warning("Unable to save to numpy representation ('npr') format.")
-                if 'dill' not in selected_formats:
-                    # Warn the user that we will use another format
-                    logger.warning("Will try a plain (dill) pickle dump.")
-                    selected_formats.add('dill')
-            else:
-                output_paths.append(output_path)
-
+        try:
+            with output(filename, ext, True, overwrite) as (f, output_path):
+                try:
+                    logger.info("Saving data to 'npr' format...")
+                    np.savez(f, **data.repr_np)
+                except AttributeError:
+                    fail = True
+                else:
+                    output_paths.append(output_path)
+        except IOError:
+            fail = True
+        if fail:
+            # TODO: Use custom error type
+            logger.warning("Unable to save to numpy representation ('npr') format.")
+            if 'dill' not in selected_formats:
+                # Warn the user that we will use another format
+                logger.warning("Will try a plain (dill) pickle dump.")
+                selected_formats.add('dill')
 
     # Save data as representation string
     if 'repr' in selected_formats:
@@ -236,14 +241,17 @@ def save(file, data, format='npr', overwrite=False):
             fail = True
         else:
             ext = defined_formats['repr'].ext
-            with output(filename, ext, False, overwrite) as (f, output_path):
-                try:
-                    logger.info("Saving data to plain-text 'repr' format'")
-                    f.write(repr(data))
-                except:
-                    fail = True
-                else:
-                    output_paths.append(output_path)
+            try:
+                with output(filename, ext, False, overwrite) as (f, output_path):
+                    try:
+                        logger.info("Saving data to plain-text 'repr' format'")
+                        f.write(repr(data))
+                    except:
+                        fail = True
+                    else:
+                        output_paths.append(output_path)
+            except IOError:
+                fail = True
         if fail:
             logger.warning("Unable to save to numpy representation ('npr') format.")
             if 'dill' not in selected_formats:
@@ -254,16 +262,20 @@ def save(file, data, format='npr', overwrite=False):
     # Save data in dill format
     if 'dill' in selected_formats:
         ext = defined_formats['dill'].ext
-        with output(filename, ext, True, overwrite) as (f, output_path):
-            logger.info("Saving data as a dill pickle.")
-            dill.dump(data, f)
-            output_paths.append(output_path)
+        try:
+            with output(filename, ext, True, overwrite) as (f, output_path):
+                logger.info("Saving data as a dill pickle.")
+                dill.dump(data, f)
+                output_paths.append(output_path)
+        except IOError:
+            pass # There might be other things to save, so don't terminate
+                 # execution because this save failed
 
     # Return the list of output paths
     return output_paths
 
 
-def load(filename, types=None, load_function=None, input_format=None):
+def load(filename, types=None, load_function=None, format=None, input_format=None):
     """
     Load file at `filename`. How the data is loaded is determined by the input format,
     which is inferred from the filename extension. It can also be given by `input_format`
@@ -280,6 +292,23 @@ def load(filename, types=None, load_function=None, input_format=None):
     name; typically, the type name will be the class name, although that is not required.
     It is also possible to add to the list of default types by calling this module's
     `add_load_type` method.
+
+    Parameters
+    ----------
+    filename: str | file object (TODO)
+
+    types: dict
+        (Optional)
+    load_function: function
+        (Optional) Post-processing function, called on the result of the loaded
+        data. I.e. does not override `type`, but provides a handle to process
+        the result.
+    format: str
+        Specify the format of the data; overrides any deductions from the
+        filename. Effectively this specifies the loading function, and thus
+        should correspond to a key in `types`.
+    input_format: str (DEPRECATED)
+        Deprecated synonym for `format`.
     """
     global _load_types
     if types is not None:
@@ -290,6 +319,11 @@ def load(filename, types=None, load_function=None, input_format=None):
 
     basepath, ext = os.path.splitext(filename)
     dirname, basename = os.path.split(basepath)
+    if dirname == '':
+        dirname = '.'
+
+    if format is not None:
+        input_format = format
 
     if len(ext) == 0 and input_format is None:
         #raise ValueError("Filename has no extension. Please specify input format.")
@@ -403,6 +437,7 @@ class output():
         except IOError:
             logger.error("Could not create a file at '{}'."
                          .format(self.orig_output_path))
+            raise
 
         return self.f, self.actual_path
 
