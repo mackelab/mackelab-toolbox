@@ -141,7 +141,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
         p_t = p - (lr_t * g_t)
         updates[m] = m_t
         updates[v] = v_t
-        updates[p] = p_t
+        updates[p] = shim.cast(p_t, p.dtype)
     updates[i] = i_t
     return updates
 
