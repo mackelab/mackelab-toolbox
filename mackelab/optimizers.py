@@ -6,7 +6,7 @@ import theano.tensor as T
     # TODO: Replace all theano and T calls with shim equivalents
 
 # DEBUG ?
-debug_flags = {}
+debug_flags = {} # options: 'nanguard', 'print grads'
 
 def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     """
@@ -99,7 +99,8 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     else:
         grads = grad_fn(cost, params)
 
-    # DEBUG ?
+    # DEBUG ? This is useful for finding which gradients are returning NaN,
+    # but is this the best place / way ?
     if 'print grads' in debug_flags:
         for i, p in enumerate(params):
             if (debug_flags['print grads'] is True
