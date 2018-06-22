@@ -99,7 +99,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     else:
         grads = grad_fn(cost, params)
 
-    # DEBUG ? This is useful for finding which gradients are returning NaN,
+    # DEBUG This is useful for finding which gradients are returning NaN,
     # but is this the best place / way ?
     if 'print grads' in debug_flags:
         for i, p in enumerate(params):
