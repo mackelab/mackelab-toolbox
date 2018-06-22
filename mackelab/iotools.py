@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import dill
 from inspect import isclass
+from parameters import ParameterSet
 logger = logging.getLogger('mackelab.iotools')
 
 Format = namedtuple("Format", ['ext'])
@@ -209,6 +210,44 @@ def save(file, data, format='npr', overwrite=False):
         os.makedirs(dirname, exist_ok=True)
 
     output_paths = []
+
+    # If data provides a "save" method, use that
+    # This overrides the "format" argument – only exception is if save fails,
+    # then we reset it to what it was and try the other formats
+    if isinstance(data, ParameterSet):
+        # Special case of data with `save` attribute
+        _selected_formats_back = selected_formats
+        selected_formats = []  # Don't save to another format if successful
+        with output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
+            # Close the file since Parameters only accepts urls as filenames
+            # FIXME: This introduces a race condition; should use `f` to save
+            #        This would require fixing the parameters package to
+            #        accept file objects in `save()`
+            pass
+        try:
+            logger.info("Saving ParameterSet using its own `save` method...")
+            data.save(output_path, expand_urls=True)
+        except (AttributeError, PermissionError) as e:
+            logger.warning("Calling the data's `save` method failed with '{}'."
+                           .format(str(e)))
+            selected_formats = _selected_formats_back
+        else:
+            output_paths.append(output_path)
+    elif hasattr(data, 'save'):
+        _selected_formats_back = selected_formats
+        selected_formats = []  # Don't save to another format if successful
+        with output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
+            # TODO: Use `f` if possible, and only `output_path` if it fails.
+            pass
+        try:
+            logger.info("Saving data using its own `save` method...")
+            data.save(output_path)
+        except (AttributeError, PermissionError) as e:
+            logger.warning("Calling the data's `save` method failed with '{}'."
+                           .format(str(e)))
+            selected_formats = _selected_formats_back
+        else:
+            output_paths.append(output_path)
 
     # Save data in as numpy representation
     if 'npr' in selected_formats:
