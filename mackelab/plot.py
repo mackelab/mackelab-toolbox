@@ -87,6 +87,106 @@ class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
                                                              base=base, exponent=exponent)))
 
 # ====================================
+# Axis label placement
+
+def add_corner_ylabel(ax, label, axcoordx=-0.03, axcoordy=1, fracsize=0.81):
+    # TODO: Use ax.yaxis.set_label_coords() instead of ax.text()
+    #       Allow right, left options
+    #       Combine with add_corner_xlabel
+    """
+    Place the y label in the top left corner, along the axis. Erases part of
+    the axis tick labels to make space; how many of the labels are erased
+    depends on `fracsize`.
+
+    ..Note: Avoid resetting tick locations after calling this functions.
+
+    Parameters
+    ----------
+    ax: mpl.Axes
+        Axes on which to add the label.
+    label: str
+        Label to add.
+    axcoordx: float
+        X position of the label
+    axcoordy: float
+        Y position of the label
+    fracsize: float between [0, 1]
+        Fractional size of the label. Tick labels within this size are hidden
+        to make way for the text label
+    """
+    if ax is None or ax == '':
+        ax = plt.gca()
+
+    # TODO: Data pos option. Allow specifying position by data coordinate,
+    #       using ax.transform to convert coordinates
+    ax.text(axcoordx, axcoordy,label,
+            fontproperties=mpl.font_manager.FontProperties(size='medium', weight='bold'),
+            transform=ax.transAxes,
+            horizontalalignment='right',
+            verticalalignment='top')
+
+    # Now remove ticks overlapping with the axis label
+    ax.draw(ax.get_figure().canvas.get_renderer())
+        # Force drawing of ticks and ticklabels
+    transform = ax.yaxis.get_transform()
+    ylim, yticks = transform.transform(ax.get_ylim()), transform.transform(ax.get_yticks())
+    if len(yticks) >= 2:
+        yticklabels = ax.get_yticklabels()
+        for i in range(len(yticks)-1, 1, -1):
+            if (yticks[i] - ylim[0]) / (ylim[1] - ylim[0]) > fracsize:
+                yticklabels = yticklabels[:i] + [""] + yticklabels[i+1:]
+    ax.set_yticklabels(yticklabels)
+
+def add_corner_xlabel(ax, label, axcoordx=1, axcoordy=-0.08, fracsize=0.69):
+    # TODO: Use ax.yaxis.set_label_coords() instead of ax.text()
+    #       Allow right, left options
+    #       Combine with add_corner_ylabel
+    """
+    Place the x label in the top left corner, along the axis. Erases part of
+    the axis tick labels to make space; how many of the labels are erased
+    depends on `fracsize`.
+
+    ..Note: Avoid resetting tick locations after calling this functions.
+
+    Parameters
+    ----------
+    ax: mpl.Axes
+        Axes on which to add the label.
+    label: str
+        Label to add.
+    axcoordx: float
+        X position of the label
+    axcoordy: float
+        Y position of the label
+    fracsize: float between [0, 1]
+        Fractional size of the label. Tick labels within this size are hidden
+        to make way for the text label
+    """
+    if ax is None or ax == '':
+        ax = plt.gca()
+
+    # TODO: Data pos option. Allow specifying position by data coordinate,
+    #       using ax.transform to convert coordinates
+    ax.text(axcoordx, axcoordy,label,
+            fontproperties=mpl.font_manager.FontProperties(size='medium', weight='bold'),
+            transform=ax.transAxes,
+            horizontalalignment='right',
+            verticalalignment='top')
+
+    # Now remove ticks overlapping with the axis label
+    ax.draw(ax.get_figure().canvas.get_renderer())
+        # Force drawing of ticks and ticklabels
+    transform = ax.xaxis.get_transform()
+    xlim, xticks = transform.transform(ax.get_xlim()), transform.transform(ax.get_xticks())
+    if len(xticks) >= 2:
+        xticklabels = ax.get_xticklabels()
+        for i in range(len(xticks)-1, 1, -1):
+            if (xticks[i] - xlim[0]) / (xlim[1] - xlim[0]) > fracsize:
+                xticklabels = xticklabels[:i] + [""] + xticklabels[i+1:]
+    ax.set_xticklabels(xticklabels)
+
+
+# ====================================
 # Tick placement
 
 class LinearTickLocator(mpl.ticker.LinearLocator):
@@ -205,4 +305,3 @@ def plot(data, **kwargs):
     else:
         logger.warning("Plotting of {} data is not currently supported."
                        .format(type(data)))
-
