@@ -9,6 +9,7 @@ Created on Tue Nov 28 2017
 """
 
 from collections import Iterable, Callable, OrderedDict
+import math
 
 def flatten(l, terminate=()):
     """
@@ -36,6 +37,52 @@ def flatten(l, terminate=()):
             yield from flatten(el, terminate=terminate)
         else:
             yield el
+
+def sciformat(num, sigdigits=1, minpower=None):
+    """
+    Return a string representation of `num` with a given
+    number of significant digits.
+    Use scientific notation if it is larger than `10^minpower`.
+
+    Parameters
+    ----------
+    num: number
+        number to convert to string
+    sigdigits: int >= 1
+        number of significant digits to keep
+    minpower: int | None
+        Minimum power to use scientific notation. Default value of None
+        forces scientific notation.
+    """
+    if sigdigits < 1:
+        logger.warning("`sciformat`: Number of significant digits should be "
+                       "greater or eqal to 1.")
+    p = int(math.floor(math.log10(num)))
+        # Note if we use 'np' instead of 'math':
+        # don't use `astype(int)` here, as otherwise 10**p fails with p<0
+    if minpower is not None and p < minpower:
+        decimal_positions = sigdigits - p - 1
+        numstr = round(num, decimal_positions)
+        if decimal_positions >= 0:
+            return str(int(num))
+        else:
+            return str(num)
+    m = round(num / 10**p, sigdigits)
+    if sigdigits == 1:
+        m = int(m)
+    if m == 1:
+        mstring = ""
+    else:
+        mstring = str(m)
+    if p != 0:
+        pstring = "10^{{{}}}".format(p)
+    else:
+        pstring = "10^{{{}}}".format(p)
+    if mstring != "" and pstring != "":
+        dotstr = " \\cdot "
+    else:
+        dotstr = ""
+    return mstring + dotstr + pstring
 
 class SanitizedDict(dict):
     def __init__(self, *args, **kwargs):
