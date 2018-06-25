@@ -16,12 +16,14 @@ from parameters import ParameterSet
 logger = logging.getLogger('mackelab.iotools')
 
 Format = namedtuple("Format", ['ext'])
+    # TODO: Allow multiple extensions per format
     # TODO: Extend Format to include load/save functions
 defined_formats = OrderedDict([
     # List of formats known to the load/save functions
     # The order of these formats also defines a preference, for when two types might be used
     ('npr',  Format('npr')),
     ('repr', Format('repr')),
+    ('brepr', Format('brepr')), # Binary version of 'repr'
     ('dill', Format('dill'))
     ])
 
@@ -139,17 +141,17 @@ text (False) output. Default is to open for byte output, which
                       .format(path))
 
 def save(file, data, format='npr', overwrite=False):
-    """Save `data`. By default, only the 'numpy_repr' representation is saved, if the.
-    Not only is the raw format more future-proof, but it can be an order of
-    magnitude more compact.
-    If the raw save is unsuccessful (possibly because 'data' does not provide a
-    'raw' method), than save falls back to saving a plain (dill) pickle of 'data'.
+    """Save `data`. By default, only the 'numpy_repr' representation is saved,
+    if `data` defines a numpy representation.
+    Not only is the numpy representation format more future-proof, it can be an
+    order of magnitude more compact.
+    If the numpy_repr save is unsuccessful (possibly because 'data' does not provide a
+    `numpy_repr` method), than save falls back to saving a plain (dill) pickle of 'data'.
 
     Parameters
     ----------
     file: str
-        Path name or file handle
-        TODO: Currently only path names are supported. File handles raise NotImplementedError.
+        Path name or file object
     data: Python object
         Data to save
     format: str
@@ -196,13 +198,79 @@ def save(file, data, format='npr', overwrite=False):
             # sort out the files later.
             format = '+'.join(format_names)
 
+    get_output = None
+    def set_str_file(filename):
+        def _get_output(filename, ext, bytes, overwrite):
+            return output(filename, ext, bytes, overwrite)
+        get_output = _get_output
+
     # Check argument - file
     if isinstance(file, io.IOBase):
-        # TODO: Implement
-        raise NotImplementedError
+        thisfilename = os.path.realpath(file.name)
+        if 'luigi' in os.path.basename(thisfilename):
+            # 'file' is actually a Luigi temporary file
+            luigi = True
+        else:
+            luigi = False
+        filename = thisfilename  # thisfilename used to avoid name clashes
+        if not any(c in file.mode for c in ['w', 'x', 'a', '+']):
+            logger.warning("File {} not open for writing; closing and reopening.")
+            file.close()
+            set_str_file(thisfilename)
+        else:
+            def _get_output(filename, ext, bytes, overwrite):
+                # Check that the file object is compatible with the arguments,
+                # and if succesful, just return the file object unmodified.
+                # If it is not successful, revert to opening a file as though
+                # a filename was passed to `save`.
+                # TODO: Put checks in `dummy_file_context`
+                fail = False
+                if (os.path.splitext(os.path.realpath(filename))[0]
+                    != os.path.splitext(os.path.realpath(thisfilename))[0]):
+                    logger.warning("[iotools.save] Given filename and file object differ.")
+                    fail = True
+                thisext = os.path.splitext(thisfilename)[1].replace('.', '')
+                if not luigi and thisext != ext.replace('.', ''):
+                    # Luigi adds 'luigi' to extensions of temporary files; we
+                    # don't want that to trigger closing the file
+                    logger.warning("[iotools.save] File object has wrong extension.")
+                    fail = True
+                if (bytes and 'b' not in file.mode
+                    or not bytes and 'b' in file.mode):
+                    if luigi:
+                        # Luigi's LocalTarget always saves to bytes, and it's
+                        # the Format class that takes care of converting data
+                        # (possibly text) to and back from bytes.
+                        logger.warning("\n"
+                            "WARNING [iotools]: Attempted to save a 'luigi' target with the wrong "
+                            "mode (binary or text). Note that Luigi targets "
+                            "always use the same mode internally; use the "
+                            "`format` argument to convert to/from in your code. "
+                            "In particular, LocalTarget writes in binary. "
+                            "Consequently, the file will not be saved as {}, "
+                            "but as {}; specify the correct value to `bytes` "
+                            "to avoid this message.\n"
+                            .format("bytes" if bytes else "text",
+                                    "text" if bytes else "bytes"))
+                    else:
+                        logger.warning("[iotools.save] File object has incorrect byte mode.")
+                        fail = True
+                if (overwrite and 'a' in file.mode):
+                    # Don't check for `not overwrite`: in that case the damage is already done
+                    logger.warning("[iotools.save] File object unable to overwrite.")
+                    fail = True
+                if fail:
+                    logger.warning("[iotools.save] Closing and reopening file object.")
+                    file.close()
+                    set_str_file(thisfilename)
+                    return output(filename, ext, bytes, overwrite)
+                else:
+                    return dummy_file_context(file)
+            get_output = _get_output
     else:
         assert(isinstance(file, str))
         filename = file
+        set_str_file(file)
 
     # Ensure target directory exists
     dirname = os.path.dirname(filename)
@@ -218,7 +286,7 @@ def save(file, data, format='npr', overwrite=False):
         # Special case of data with `save` attribute
         _selected_formats_back = selected_formats
         selected_formats = []  # Don't save to another format if successful
-        with output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
+        with get_output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
             # Close the file since Parameters only accepts urls as filenames
             # FIXME: This introduces a race condition; should use `f` to save
             #        This would require fixing the parameters package to
@@ -236,7 +304,7 @@ def save(file, data, format='npr', overwrite=False):
     elif hasattr(data, 'save'):
         _selected_formats_back = selected_formats
         selected_formats = []  # Don't save to another format if successful
-        with output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
+        with get_output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
             # TODO: Use `f` if possible, and only `output_path` if it fails.
             pass
         try:
@@ -249,12 +317,12 @@ def save(file, data, format='npr', overwrite=False):
         else:
             output_paths.append(output_path)
 
-    # Save data in as numpy representation
+    # Save data as numpy representation
     if 'npr' in selected_formats:
         fail = False
         ext = defined_formats['npr'].ext
         try:
-            with output(filename, ext, True, overwrite) as (f, output_path):
+            with get_output(filename, ext, True, overwrite) as (f, output_path):
                 try:
                     logger.info("Saving data to 'npr' format...")
                     np.savez(f, **data.repr_np)
@@ -273,7 +341,10 @@ def save(file, data, format='npr', overwrite=False):
                 selected_formats.add('dill')
 
     # Save data as representation string
-    if 'repr' in selected_formats:
+    for format in [format
+                   for format in selected_formats
+                   if format in ('repr', 'brepr')]:
+        bytes = False if format == 'repr' else True
         fail = False
         if data.__repr__ is object.__repr__:
             # Non-informative repr -- abort
@@ -281,7 +352,7 @@ def save(file, data, format='npr', overwrite=False):
         else:
             ext = defined_formats['repr'].ext
             try:
-                with output(filename, ext, False, overwrite) as (f, output_path):
+                with get_output(filename, ext=ext, bytes=bytes, overwrite=overwrite) as (f, output_path):
                     try:
                         logger.info("Saving data to plain-text 'repr' format'")
                         f.write(repr(data))
@@ -302,7 +373,7 @@ def save(file, data, format='npr', overwrite=False):
     if 'dill' in selected_formats:
         ext = defined_formats['dill'].ext
         try:
-            with output(filename, ext, True, overwrite) as (f, output_path):
+            with get_output(filename, ext, True, overwrite) as (f, output_path):
                 logger.info("Saving data as a dill pickle.")
                 dill.dump(data, f)
                 output_paths.append(output_path)
@@ -482,3 +553,14 @@ class output():
 
     def __exit__(self, type, value, traceback):
         self.f.close()
+
+class dummy_file_context:
+    def __init__(self, file):
+        self.f = file
+
+    def __enter__(self):
+        return self.f, os.path.realpath(self.f.name)
+
+    def __exit__(self, type, value, traceback):
+        # Since the file was not created in this context, don't close it
+        pass
