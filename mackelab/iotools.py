@@ -229,8 +229,8 @@ def save(file, data, format='npr', overwrite=False):
                     != os.path.splitext(os.path.realpath(thisfilename))[0]):
                     logger.warning("[iotools.save] Given filename and file object differ.")
                     fail = True
-                thisext = os.path.splitext(thisfilename)[1].replace('.', '')
-                if not luigi and thisext != ext.replace('.', ''):
+                thisext = os.path.splitext(thisfilename)[1].strip('.')
+                if not luigi and thisext != ext.strip('.'):
                     # Luigi adds 'luigi' to extensions of temporary files; we
                     # don't want that to trigger closing the file
                     logger.warning("[iotools.save] File object has wrong extension.")
@@ -385,9 +385,9 @@ def save(file, data, format='npr', overwrite=False):
     return output_paths
 
 
-def load(filename, types=None, load_function=None, format=None, input_format=None):
+def load(file, types=None, load_function=None, format=None, input_format=None):
     """
-    Load file at `filename`. How the data is loaded is determined by the input format,
+    Load file at `file`. How the data is loaded is determined by the input format,
     which is inferred from the filename extension. It can also be given by `input_format`
     explicitly.
     If `load_function` is provided, it is be applied to the loaded data. Otherwise,
@@ -405,7 +405,7 @@ def load(filename, types=None, load_function=None, format=None, input_format=Non
 
     Parameters
     ----------
-    filename: str | file object (TODO)
+    file: str | file object (TODO)
 
     types: dict
         (Optional)
@@ -427,71 +427,95 @@ def load(filename, types=None, load_function=None, format=None, input_format=Non
     else:
         types = _load_types
 
-    basepath, ext = os.path.splitext(filename)
-    dirname, basename = os.path.split(basepath)
-    if dirname == '':
-        dirname = '.'
-
     if format is not None:
         input_format = format
 
-    if len(ext) == 0 and input_format is None:
-        #raise ValueError("Filename has no extension. Please specify input format.")
-        # Try every file whose name without extension matches `filename`
-        match = lambda fname: os.path.splitext(fname)[0] == basename
-        fnames = [name for name in os.listdir(dirname) if match(name)]
-        # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
-        # We do not attempt to load other extensions, since we don't know the format
-        ordered_fnames = []
-        for formatext in defined_formats:
-            name = basename + '.' + formatext
-            if name in fnames:
-                ordered_fnames.append(name)
-        # Try to load every file name in sequence. Terminate after the first success.
-        for fname in ordered_fnames:
-            try:
-                data = load(os.path.join(dirname, fname),
-                            types, load_function)
-            except (FileNotFoundError):
-                # Basically only possible to reach here with a race condition, where
-                # file is deleted after having been listed
-                # TODO: Also catch loading errors ?
-                continue
-            else:
-                return data
-        # No file was found
-        raise FileNotFoundError("No file with base name '{}' was found."
-                                .format(basename))
+    if isinstance(file, str):
+        basepath, ext = os.path.splitext(file)
+        dirname, basename = os.path.split(basepath)
+        if dirname == '':
+            dirname = '.'
+
+        if len(ext) == 0 and input_format is None:
+            #raise ValueError("Filename has no extension. Please specify input format.")
+            # Try every file whose name without extension matches `file`
+            match = lambda fname: os.path.splitext(fname)[0] == basename
+            fnames = [name for name in os.listdir(dirname) if match(name)]
+            # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
+            # We do not attempt to load other extensions, since we don't know the format
+            ordered_fnames = []
+            for formatext in defined_formats:
+                name = basename + '.' + formatext
+                if name in fnames:
+                    ordered_fnames.append(name)
+            # Try to load every file name in sequence. Terminate after the first success.
+            for fname in ordered_fnames:
+                try:
+                    # Recursively call `load`
+                    data = load(os.path.join(dirname, fname),
+                                types, load_function)
+                except (FileNotFoundError):
+                    # Basically only possible to reach here with a race condition, where
+                    # file is deleted after having been listed
+                    # TODO: Also catch loading errors ?
+                    continue
+                else:
+                    return data
+            # No file was found
+            raise FileNotFoundError("No file with base name '{}' and a "
+                                    "recognized extension was found."
+                                    .format(basename))
+
+        if os.path.exists(file):
+            openfilename = file
+        else:
+            openfilename = basepath + "." + defined_formats[input_format].ext.strip('.')
+    elif isinstance(file, io.IOBase):
+        ext = os.path.splitext(file.name)[1]
+    elif hasattr(file, 'fn'):
+        # Treats Luigi LocalTarget
+        ext = os.path.splitext(file.fn)[1]
+    else:
+        raise TypeError("[iotools.load] File '{}' is of unrecognized type '{}'."
+                        .format(file, type(file)))
+
     if input_format is None:
         input_format = ext[1:]
     if input_format not in defined_formats:
         raise ValueError("Unrecognized format '{}'.".format(input_format))
 
-    if os.path.exists(filename):
-        openfilename = filename
-    else:
-        openfilename = basepath + "." + defined_formats[input_format].ext.strip('.')
     if input_format == 'npr':
-        data = np.load(filename)
-        if load_function is False:
-            pass
-        elif load_function is not None:
-            data = load_function(data)
-        elif 'type' in data:
-            # 'type' stored as a 0D array
-            if (data['type'].ndim == 0
-                and data['type'].dtype.kind in {'S', 'U'}
-                and str(data['type']) in types) :
-                # make sure it's really 0D
-                cls = types[str(data['type'])]
-                if hasattr(cls, 'from_repr_np'):
-                    data = cls.from_repr_np(data)
-            else:
-                # TODO: Error message
+        with wrapped_open(file, 'rb') as f:
+            data = np.load(f)
+                # np.load provides dict access to the file object;
+                # but doesn't load it to memory. We must make sure it's in
+                # memory before we exit `with` block.
+            in_memory = False
+            if load_function is False:
                 pass
+            elif load_function is not None:
+                data = load_function(data)
+                # Is it safe to assume that `load_function` always puts data in memory ?
+                in_memory = True
+            elif 'type' in data:
+                # 'type' stored as a 0D array
+                if (data['type'].ndim == 0
+                    and data['type'].dtype.kind in {'S', 'U'}
+                    and str(data['type']) in types) :
+                    # make sure it's really 0D
+                    cls = types[str(data['type'])]
+                    if hasattr(cls, 'from_repr_np'):
+                        data = cls.from_repr_np(data)
+                        in_memory = True
+                else:
+                    # TODO: Error message
+                    pass
+            if not in_memory:
+                # Since it's still not in memory, just load it as a dictionary.
+                data = dict(data)
 
     elif input_format == 'repr':
-        with open(openfilename, 'r') as f:
+        with wrapped_open(openfilename, 'r') as f:
             data = f.read()
         if load_function is False:
             pass
@@ -511,13 +535,12 @@ def load(filename, types=None, load_function=None, format=None, input_format=Non
                         if hasattr(cls, 'from_repr'):
                             data = cls.from_repr(data)
     elif input_format == 'dill':
-        with open(openfilename, 'rb') as f:
+        with wrapped_open(openfilename, 'rb') as f:
             try:
                 data = dill.load(f)
             except EOFError:
-                logger.warning("File {} is corrupted or empty. A new "
-                               "one is being computed, but you should "
-                               "delete this one.".format(filename))
+                logger.warning("File {} is corrupted or empty. You should "
+                               "delete it to prevent confusion.".format(file))
                 raise FileNotFoundError
 
     return data
@@ -564,3 +587,34 @@ class dummy_file_context:
     def __exit__(self, type, value, traceback):
         # Since the file was not created in this context, don't close it
         pass
+
+class wrapped_open:
+    # Acts like `open`, but if given a file object, just returns the object.
+    def __init__(self, file, mode):
+        self.file = file
+        self.mode = mode
+        self.exit = None
+
+    def __enter__(self):
+        if isinstance(self.file, io.IOBase):
+            if self.file.mode != mode:
+                logger.warning("Already open file object has mode '{}', but "
+                               " '{}' is expected."
+                               .format(self.file.mode, self.mode))
+            self.f = self.file
+            self.exit = False  # Don't close a file we didn't open
+        elif hasattr(self.file, 'open'):
+            # Treats Luigi LocalTarget
+            self.f = self.file.open(self.mode)
+            self.exit = True
+        else:
+            self.f = open(self.file, self.mode)
+            self.exit = True
+        return self .f
+
+    def __exit__(self, type, value, traceback):
+        if self.exit is None:
+            logger.warning("ERROR [iotools.wrapped_open]: `self.exit()` was "
+                           "never set.")
+        if self.exit:
+            self.f.__exit__()
