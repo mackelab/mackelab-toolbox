@@ -200,6 +200,7 @@ def save(file, data, format='npr', overwrite=False):
 
     get_output = None
     def set_str_file(filename):
+        nonlocal get_output
         def _get_output(filename, ext, bytes, overwrite):
             return output(filename, ext, bytes, overwrite)
         get_output = _get_output
@@ -436,6 +437,8 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
         if dirname == '':
             dirname = '.'
 
+        if len(ext) > 0 and input_format is None:
+            input_format = ext.strip('.')
         if len(ext) == 0 and input_format is None:
             #raise ValueError("Filename has no extension. Please specify input format.")
             # Try every file whose name without extension matches `file`
