@@ -8,11 +8,15 @@ import theano.tensor as T
 # DEBUG ?
 debug_flags = {} # options: 'nanguard', 'print grads'
 
-def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
+def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=10, grad_fn=None):
     """
     Adam optimizer. Returns a set of gradient descent updates.
     This is ported from the GitHub Gist by Alec Radford
     https://gist.github.com/Newmu/acb738767acb4788bac3 (MIT License).
+
+    TODO: Track which parameter(s) triggers the rescaling. This would help
+    debugging / setting fitting parameters: if it's always the same parameter
+    triggering clipping, its learning rate should probably be reduced.
 
     Parameters
     ----------
@@ -28,6 +32,26 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
         is to be set to zero.
 
     […]
+
+    clip: positive float
+        Clip gradients such that no components are greater than this value.
+        ADAM provides some automatic adjustment of the gradient based. For cases
+        where the cost exhibits cliffs however (as is common with RNNs), this
+        might not be sufficient, as very large gradients can overpower ADAM's
+        adaptation. In this case clipping the final gradient can help stabilize
+        the optimization algorithm. Clipping is done on the gradient's L∞ norm,
+        so the direction is conserved. Specifically, the gradient for each
+        parameter `p` is independently divided by `clip`; the largest
+        of these ratios, if it exceeds 1, is used to rescale the whole gradient.
+        This allows us to have different learning rates for different parameters,
+        and for the clipping to scale reasonably with the number of parameters.
+        Clip value can be chosen by what we think is the maximum reasonable
+        parameter change in one iteration, since this is roughly bounded by
+        `lr` x `clip`.
+        Note that we clip the raw gradient, so the internal `m` and `v`
+        variables are updated with the clipped gradient. This is also why
+        we say "roughly bounded" above.
+        Setting `clip` to `None` disables clipping completely.
 
     grad_fn: function
         If specified, use this instead of `T.grad` to compute the cost's gradient.
@@ -93,24 +117,47 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
     params = tmpparams
 
     updates = OrderedDict()
+    gs = {}
+    lrs = {}
 
     if grad_fn is None:
         grads = T.grad(cost, params)
     else:
         grads = grad_fn(cost, params)
 
+    # Clip gradients
+    if clip is not None:
+        # Rescale is set by the component which most exceeds `clip`
+        rescale = T.max([1] + [T.max(abs(g / clip)) for g in grads])
+        rescale.name = "rescale"
+        # rescale = shim.print(rescale)
+        for i in range(len(grads)):
+            grads[i] /= rescale
+
     # DEBUG This is useful for finding which gradients are returning NaN,
     # but is this the best place / way ?
+    newp = {p: p for p in params}  # Need to keep handle to original shared var
+                                   # which may be overwritten by print
     if 'print grads' in debug_flags:
         for i, p in enumerate(params):
             if (debug_flags['print grads'] is True
                 or p.name in debug_flags['print grads']):
-                grads[i] = shim.print(grads[i], 'gradient ' + p.name)
+                newp[p] = shim.print(p)
+                grads[i] = shim.ifelse(shim.eq(rescale, 1),
+                                       shim.print(grads[i], 'gradient ' + p.name),
+                                       shim.print(grads[i], 'gradient ' + p.name + ' RESCALED'))
+    # for p in params:
+    #     gs[p] = shim.ifelse(shim.eq(rescale, 1),
+    #                         shim.print(gs[p], 'g_t (' + p.name + ')'),
+    #                         shim.print(gs[p], 'g_t (' + p.name + ') RESCALED')
+    #                         )
+
     # Mask out the gradient for parameters we aren't fitting
-    for i, m in enumerate(param_masks):
-        if m is not None:
-            grads[i] = grads[i]*m
-                # m is an array of ones and zeros
+    for i, mask in enumerate(param_masks):
+        if mask is not None:
+            grads[i] = grads[i]*mask
+                # `mask` is an array of ones and zeros
+
     i = theano.shared(shim.cast_floatX(0.), name='adam_i')
     i_t = i + 1.
     fix1 = 1. - (1. - b1)**i_t
@@ -128,7 +175,8 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
             namem = 'adam_' + p.name + '_m'
             namev = 'adam_' + p.name + '_v'
         else:
-            namen = namep = None
+            p.name = ""
+            namem = namev = None
         if hasattr(p, 'broadcastable'):
             m = theano.shared(initval, broadcastable=p.broadcastable, name=namem)
             v = theano.shared(initval, broadcastable=p.broadcastable, name=namev)
@@ -136,15 +184,25 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, grad_fn=None):
             m = theano.shared(initval, name=namem)
             v = theano.shared(initval, name=namev)
         m_t = (b1 * g) + ((1. - b1) * m)
+        # m_t = shim.print(m_t, 'm_t (' + p.name + ')')
         v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
         g_t = m_t / (T.sqrt(v_t) + e)
-        p_t = p - (lr_t * g_t)
+        # ms[p] = [m, m_t]
+        # vs[p] = [v, v_t]
         updates[m] = m_t
         updates[v] = v_t
+        # lrs[p] = lr_t
+        # gs[p] = g_t
+
+        # lr_t = shim.print(lr_t, 'lr_t (' + p.name + ')')
+        p_t = newp[p] - (lr_t * g_t)
+            # Using newp allows printing, if it was requested
+        if newp[p] != p:
+            # We printed p, so also print the updated value
+            p_t = shim.print(p_t, p.name + ' (updated)')
         updates[p] = shim.cast(p_t, p.dtype)
     updates[i] = i_t
     return updates
-
 
 
 class NPAdam:
