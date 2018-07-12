@@ -12,6 +12,7 @@ logger = logging.getLogger(__file__)
 try:
     import pandas as pd
     pandas_loaded = True
+    pd.set_option('display.max_rows', 15)  # Truncate summary dataframes
 except ImportError:
     pandas_loaded = False
 
