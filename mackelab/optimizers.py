@@ -8,7 +8,7 @@ import theano.tensor as T
 # DEBUG ?
 debug_flags = {} # options: 'nanguard', 'print grads'
 
-def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=10, grad_fn=None):
+def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=None):
     """
     Adam optimizer. Returns a set of gradient descent updates.
     This is ported from the GitHub Gist by Alec Radford
@@ -46,12 +46,16 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=10, grad_fn=Non
         This allows us to have different learning rates for different parameters,
         and for the clipping to scale reasonably with the number of parameters.
         Clip value can be chosen by what we think is the maximum reasonable
-        parameter change in one iteration, since this is roughly bounded by
-        `lr` x `clip`.
+        parameter change in one iteration, since this change is roughly
+        bounded by `lr` x `clip`.
         Note that we clip the raw gradient, so the internal `m` and `v`
-        variables are updated with the clipped gradient. This is also why
-        we say "roughly bounded" above.
-        Setting `clip` to `None` disables clipping completely.
+        variables are updated with the clipped gradient; this is why
+        we say "roughly bounded" above. We do this because `m` and `v` are
+        momentum variable, and so should reflect the actual movement of the
+        'particle'. We haven't however made extensive tests to check whether
+        this is the most reasonable choice in practice.
+        Setting `clip` to `None` disables clipping completely. This is the
+        default.
 
     grad_fn: function
         If specified, use this instead of `T.grad` to compute the cost's gradient.
