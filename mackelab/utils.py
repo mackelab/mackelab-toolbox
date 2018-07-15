@@ -10,6 +10,7 @@ Created on Tue Nov 28 2017
 
 from collections import Iterable, Callable, OrderedDict
 import math
+from enum import Enum
 
 def flatten(l, terminate=()):
     """
@@ -83,6 +84,28 @@ def sciformat(num, sigdigits=1, minpower=None):
     else:
         dotstr = ""
     return mstring + dotstr + pstring
+
+class OrderedEnum(Enum):
+    """
+    Copied from python docs:
+    https://docs.python.org/3.6/library/enum.html#orderedenum
+    """
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value >= other.value
+        return NotImplemented
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        return NotImplemented
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value <= other.value
+        return NotImplemented
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
 
 class SanitizedDict(dict):
     def __init__(self, *args, **kwargs):
