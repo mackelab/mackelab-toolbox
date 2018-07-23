@@ -948,7 +948,28 @@ class RecordListSummary(OrderedDict):
     def _repr_html_(self):
         """Used by Jupyter Notebook to display a nicely formatted table."""
         df = self.dataframe()
-        return df._repr_html_()
+        # Instead of letting `_repr_html` truncate long lines, add hard line
+        # breaks to the data (`self.dataframe()` returns a copy)
+        colwidth = pd.get_option('display.max_colwidth')
+        df.transform(self._add_newlines, colwidth=colwidth)
+        pd.set_option('display.max_colwidth', -1)
+            # Deactivate line truncation for call to `_repr_html_`
+        df_html = df._repr_html_()
+        pd.set_option('display.max_colwidth', colwidth)
+            # Return `max_colwidth` to previous value
+        return df_html
+
+    @staticmethod
+    def _add_newlines(val, colwidth):
+        # TODO: Preferentially break on whitespace, '_'
+        if isinstance(val, pd.Series):
+            return val.transform(RecordListSummary._add_newlines,
+                                 colwidth=colwidth)
+        s = str(val)
+        l = colwidth
+        nlines = int(np.ceil(len(s) / l))
+        return '\n'.join([s[i*l:(i+1)*l] for i in range(nlines)])
+
 
     def array(self, fields=('reason', 'tags', 'main_file', 'duration'),
                   parameters=()):
