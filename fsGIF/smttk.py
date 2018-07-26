@@ -852,11 +852,30 @@ class RecordList:
 import re
 import pandas as pd
 class RecordListSummary(OrderedDict):
-    def __init__(self, recordlist):
+    def __init__(self, recordlist, base=None):
+        """
+        Parameters
+        ----------
+        recordlist: RecordList | None
+            Record list to summarizes. Records whose labels differ by only a
+            suffix are combined.
+            Set to `None` creates an empty summary, unless `base` is not None.
+        base: None | OrderedDict
+            Initialize the summary with this dictionary. If `None`, summary
+            is initialized as an empty dictionary to which the entries of
+            `recordlist` are then added.
+        """
         lbltest = re.compile('^\d{8,8}-\d{6,6}$')
             # RegEx for the standard label format YYYYMMDD-HHMMSS
-        super().__init__()
-            # Empty initialization – we enter the entries ourselves below
+        if base is None: base = ()  # Empty initialization
+        elif not isinstance(base, OrderedDict):
+            raise ValueError("`base` argument to `RecordListSummary` most be "
+                             "an OrderedDict or a derived class, like "
+                              "RecordListSummary.")
+        super().__init__(base)
+
+        if recordlist is None:
+            return  # Skip iteration over `recordlist`
         for r in recordlist:
             # For labels following the standard format, merge records whose
             # labels differ only by a suffix
@@ -876,15 +895,42 @@ class RecordListSummary(OrderedDict):
                 else:
                     self[lbl_timestamp] = [r]
 
-    # TODO: __str__, __repr__ and DataFrame-printing
-
     def __call__(self, *args, **kwargs):
         """
         Call `.dataframe()` with the given arguments
         """
         return self.dataframe(*args, **kwargs)
 
-    def dataframe(self, fields=('reason', 'tags', 'main_file', 'duration'),
+    def __str__(self):
+        return str(self.dataframe())
+    def __repr__(self):
+        """Used to display the variable in text-based interpreters."""
+        return repr(self.dataframe())
+    def _repr_html_(self):
+        """Used by Jupyter Notebook to display a nicely formatted table."""
+        df = self.dataframe()
+        # Instead of letting `_repr_html` truncate long lines, add hard line
+        # breaks to the data (`self.dataframe()` returns a copy)
+        colwidth = pd.get_option('display.max_colwidth')
+        df.transform(self._add_newlines, colwidth=colwidth)
+        pd.set_option('display.max_colwidth', -1)
+            # Deactivate line truncation for call to `_repr_html_`
+        df_html = df._repr_html_()
+        pd.set_option('display.max_colwidth', colwidth)
+            # Return `max_colwidth` to previous value
+        return df_html
+
+    def head(self, nrows):
+        headkeys = itertools.islice(self.keys(), nrows)
+        headrecs = OrderedDict( (key, self[key]) for key in headkeys )
+        return RecordListSummary(None, headrecs)
+    def tail(self, nrows):
+        nkeys = len(self.keys())
+        tailkeys = itertools.islice(self.keys(), nkeys-nrows, None)
+        tailrecs = OrderedDict( (key, self[key]) for key in tailkeys )
+        return RecordListSummary(None, tailrecs)
+
+    def dataframe(self, fields=('reason', 'outcome', 'tags', 'main_file', 'duration'),
                   parameters=(), hash_parameter_sets=True):
         def combine(recs, attr):
             # Combine the values from different records in a single entry
@@ -946,24 +992,13 @@ class RecordListSummary(OrderedDict):
             logger.info("Pandas library not loaded; returning plain Numpy array.")
             return data
 
-    def __str__(self):
-        return str(self.dataframe())
-    def __repr__(self):
-        """Used to display the variable in text-based interpreters."""
-        return repr(self.dataframe())
-    def _repr_html_(self):
-        """Used by Jupyter Notebook to display a nicely formatted table."""
-        df = self.dataframe()
-        # Instead of letting `_repr_html` truncate long lines, add hard line
-        # breaks to the data (`self.dataframe()` returns a copy)
-        colwidth = pd.get_option('display.max_colwidth')
-        df.transform(self._add_newlines, colwidth=colwidth)
-        pd.set_option('display.max_colwidth', -1)
-            # Deactivate line truncation for call to `_repr_html_`
-        df_html = df._repr_html_()
-        pd.set_option('display.max_colwidth', colwidth)
-            # Return `max_colwidth` to previous value
-        return df_html
+    def array(self, fields=('reason', 'tags', 'main_file', 'duration'),
+                  parameters=()):
+        """
+        Return the summary as a NumPy array.
+        NOTE: Not implemented yet
+        """
+        raise NotImplementedError
 
     @staticmethod
     def _add_newlines(val, colwidth):
@@ -976,14 +1011,6 @@ class RecordListSummary(OrderedDict):
         nlines = int(np.ceil(len(s) / l))
         return '\n'.join([s[i*l:(i+1)*l] for i in range(nlines)])
 
-
-    def array(self, fields=('reason', 'tags', 'main_file', 'duration'),
-                  parameters=()):
-        """
-        Return the summary as a NumPy array.
-        NOTE: Not implemented yet
-        """
-        raise NotImplementedError
 
 ##################################
 #
