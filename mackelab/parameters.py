@@ -287,8 +287,12 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
 
     Parameters
     ----------
-    params: ParameterSet
-        Filename will be based on these parameters
+    params: ParameterSet or iterable of ParameterSets
+        Filename will be based on these parameters. Parameter keys starting with
+        an underscore are ignored.
+        Can also be give a list of parameter sets; the name in this case will
+        depend on the order of the list.
+        Could also arbitrarily nested lists of parameter sets.
 
     suffix: str or None
         If not None, an underscore ('_') and then the value of `suffix` are
@@ -298,46 +302,62 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
         If true, the parameters are normalized by using the result of
         `params_to_arrays(params)` to calculate the filename.
     """
-    if not isinstance(params, ParameterSet):
-        logger.warning("'get_filename()' requires an instance of ParameterSet. "
-                       "Performing an implicit conversion.")
-        params = ParameterSet(params)
-    if convert_to_arrays:
-        params = params_to_arrays(params)
-    if params == '':
-        basename = ""
-    else:
-        if np.__version__ < '1.14' and _filename_printoptions['legacy'] != '1.13':
-            logger.warning("You are running Numpy v{}. Numpy's string representation "
-                           "algorithm was changed in v.1.14, meaning that computed "
-                           "filenames will not be consistent with those computed on "
-                           "more up-to-date systems. To ensure consistent filenames, "
-                           "either update to 1.14, or set `mackelab.parameters._filename_printoptions['legacy']` "
-                           "to '1.13'. Note that setting the 'legacy' option may not "
-                           "work in all cases.".format(np.__version__))
-        # Remove printoptions that are not supported in this Numpy version
-        printoptions = _filename_printoptions.copy()
-        for version in (v for v in _new_printoptions if v > np.__version__):
-            for key in _new_printoptions[version]:
-                del printoptions[key]
-
-        # Standardize the numpy print options, which affect output from str()
-        stored_printoptions = np.get_printoptions()
-        np.set_printoptions(**printoptions)
-        # We need a sorted dictionary of parameters, so that the hash is consistent
-        flat_params = params_to_arrays(params).flatten()
-            # flatten avoids need to sort recursively
-            # _params_to_arrays normalizes the data
-        sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-        s = repr(sorted_params)
-        if _remove_whitespace_for_filenames:
-            # Removing whitespace makes the result more reliable; e.g. between
-            # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
-            s = ''.join(s.split())
-        basename = hashlib.sha1(bytes(s, 'utf-8')).hexdigest()
+    if (not isinstance(params, (ParameterSet, str))
+        and isinstance(params, Iterable)):
+        # Get a hash for each ParameterSet, and rehash them together
+        basenames = [get_filename(p, None, convert_to_arrays) for p in params]
+        basename = hashlib.sha1(bytes(''.join(filenames), 'utf-8')).hexdigest()
         basename += '_'
-        # Reset the saved print options
-        np.set_printoptions(**stored_printoptions)
+
+    else:
+        if not isinstance(params, ParameterSet):
+            logger.warning("'get_filename()' requires an instance of ParameterSet. "
+                           "Performing an implicit conversion.")
+            params = ParameterSet(params)
+        if convert_to_arrays:
+            params = params_to_arrays(params)
+        if params == '':
+            basename = ""
+        else:
+            if (np.__version__ < '1.14'
+                and _filename_printoptions['legacy'] != '1.13'):
+                logger.warning(
+                    "You are running Numpy v{}. Numpy's string representation "
+                    "algorithm was changed in v.1.14, meaning that computed "
+                    "filenames will not be consistent with those computed on "
+                    "more up-to-date systems. To ensure consistent filenames, "
+                    "either update to 1.14, or set  `mackelab.parameters._filename_printoptions['legacy']` "
+                    "to '1.13'. Note that setting the 'legacy' option may not "
+                    "work in all cases.".format(np.__version__))
+            # Remove printoptions that are not supported in this Numpy version
+            printoptions = _filename_printoptions.copy()
+            for version in (v for v in _new_printoptions if v > np.__version__):
+                for key in _new_printoptions[version]:
+                    del printoptions[key]
+
+            # Standardize the numpy print options, which affect output from str()
+            stored_printoptions = np.get_printoptions()
+            np.set_printoptions(**printoptions)
+            # We need a sorted dictionary of parameters, so that the hash is consistent
+            params = params_to_arrays(params)
+            flat_params = params.flatten()
+                # flatten avoids need to sort recursively
+                # _params_to_arrays normalizes the data
+            # HACK Force dereferencing of '->' in my ParameterSet
+            #      Should be innocuous for normal ParameterSets
+            flat_params = {key: params[key] for key in flat_params}
+            sorted_params = OrderedDict( (key, flat_params[key])
+                                         for key in sorted(flat_params)
+                                         if key[0] != '_' )
+            s = repr(sorted_params)
+            if _remove_whitespace_for_filenames:
+                # Removing whitespace makes the result more reliable; e.g. between
+                # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
+                s = ''.join(s.split())
+            basename = hashlib.sha1(bytes(s, 'utf-8')).hexdigest()
+            basename += '_'
+            # Reset the saved print options
+            np.set_printoptions(**stored_printoptions)
     if isinstance(suffix, str):
         suffix = suffix.lstrip('_')
     if suffix is None or suffix == "":
