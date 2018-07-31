@@ -572,6 +572,57 @@ def make_paramrecs(params, labels=None):
     assert(i == len(labels)) # Check that we used all names
     return recs
 
+def _isndarray(a):
+    """
+    Test if a is an Numpy array, without having to import Numpy.
+    Will also return True if `a` looks like an array. (Specifically,
+    if it implements the `all` and `any` methods.)
+    """
+    # A selection of attributes sufficiently specific
+    # for us to treat `a` as a Numpy array.
+    array_attrs = {'all', 'any'}
+    return array_attrs.issubset(dir(a))
+
+def _dict_diff(a, b):
+    """
+    Ported from sumatra.parameters to allow comparing arrays and lists.
+    """
+    a_keys = set(a.keys())
+    b_keys = set(b.keys())
+    intersection = a_keys.intersection(b_keys)
+    difference1 = a_keys.difference(b_keys)
+    difference2 = b_keys.difference(a_keys)
+    result1 = dict([(key, a[key]) for key in difference1])
+    result2 = dict([(key, b[key]) for key in difference2])
+    # Now need to check values for intersection....
+    for item in intersection:
+        if isinstance(a[item], dict):
+            if not isinstance(b[item], dict):
+                result1[item] = a[item]
+                result2[item] = b[item]
+            else:
+                d1, d2 = _dict_diff(a[item], b[item])
+                if d1:
+                    result1[item] = d1
+                if d2:
+                    result2[item] = d2
+        else:
+            if _isndarray(a[item]) or _isndarray(b[item]):
+                equal = (a[item] == b[item]).all()
+            elif isinstance(a[item], Iterable):
+                equal = ( isinstance(b[item], Iterable)
+                          and all(x == y for x, y in zip(a[item], b[item]))
+                          and len(list(a[item])) == len(list(b[item])) )
+                    # len() == len() tests for different length generators
+            else:
+                equal = (a[item] == b[item])
+            if not equal:
+                result1[item] = a[item]
+                result2[item] = b[item]
+    if len(result1) + len(result2) == 0:
+        assert a == b, "Error in _dict_diff()"
+    return result1, result2
+
 def _param_diff(params1, params2, name1="", name2=""):
     KeyDiff = namedtuple('KeyDiff', ['name1', 'name2', 'keys'])
     NestingDiff = namedtuple('NestingDiff', ['key', 'name'])
