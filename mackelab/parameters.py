@@ -37,6 +37,10 @@ import simpleeval
 import ast
 import operator
 
+# HACK: Use to revert to old calculation of filenames. Should only use this
+# to compute old filenames in order to add links from the new filenames to them
+# legacy_filenames = False
+
 class Transform:
     # Replace the "safe" operators with their standard forms
     # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
@@ -281,6 +285,15 @@ _new_printoptions = {'1.14': ['floatmode', 'sign', 'legacy']}
     # This allows removing keywords when using an older version
 _remove_whitespace_for_filenames = True
 
+# # HACK: Remove this once we don't need to fix old filenames
+# def subinput_hack(params):
+#     for key, val in params.items():
+#         if key == 'input' and ('type' in val and 'theano' in params):
+#             # Only input entries for spike & activity generation were changed
+#             params[key] = val.params
+#         elif isinstance(val, ParameterSet):
+#             subinput_hack(val)
+
 def get_filename(params, suffix=None, convert_to_arrays=True):
     """
     Generate a unique filename by hashing a parameter file.
@@ -340,9 +353,14 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
             np.set_printoptions(**printoptions)
             # We need a sorted dictionary of parameters, so that the hash is consistent
             params = params_to_arrays(params)
+            # if legacy_filenames:
+            #     # HACK Convert new input format to old
+            #     # TODO: Remove when no longer needed
+            #     subinput_hack(params)
             flat_params = params.flatten()
                 # flatten avoids need to sort recursively
                 # _params_to_arrays normalizes the data
+            # if not legacy_filenames:
             # HACK Force dereferencing of '->' in my ParameterSet
             #      Should be innocuous for normal ParameterSets
             flat_params = {key: params[key] for key in flat_params}
