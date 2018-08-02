@@ -351,8 +351,21 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
             # Standardize the numpy print options, which affect output from str()
             stored_printoptions = np.get_printoptions()
             np.set_printoptions(**printoptions)
-            # We need a sorted dictionary of parameters, so that the hash is consistent
+
+            # HACK Force dereferencing of '->' in my ParameterSet
+            #      Should be innocuous for normal ParameterSets
+            def dereference(paramset):
+                for key in paramset:
+                    paramset[key] = paramset[key]
+                    if isinstance(paramset[key], ParameterSet):
+                        dereference(paramset[key])
+            dereference(params)
+
+            # Standardize the parameters by converting them all to arrays
+            # -> `[1, 0]` and `np.array([1, 0])` should give same file name
             params = params_to_arrays(params)
+
+            # We need a sorted dictionary of parameters, so that the hash is consistent
             # if legacy_filenames:
             #     # HACK Convert new input format to old
             #     # TODO: Remove when no longer needed
@@ -360,13 +373,12 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
             flat_params = params.flatten()
                 # flatten avoids need to sort recursively
                 # _params_to_arrays normalizes the data
-            # if not legacy_filenames:
-            # HACK Force dereferencing of '->' in my ParameterSet
-            #      Should be innocuous for normal ParameterSets
-            flat_params = {key: params[key] for key in flat_params}
+            # flat_params = {key: params[key] for key in flat_params}
             sorted_params = OrderedDict( (key, flat_params[key])
                                          for key in sorted(flat_params)
                                          if key[0] != '_' )
+
+            # Now that the parameterset is standardized, hash its string repr
             s = repr(sorted_params)
             if _remove_whitespace_for_filenames:
                 # Removing whitespace makes the result more reliable; e.g. between
