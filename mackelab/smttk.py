@@ -1297,7 +1297,7 @@ if click_loaded:
                     continue
                 else:
                     # Just delete the old link, since data is preserved in the dump folder
-                    assert(not os.path.islink(move['old path']))
+                    # assert(not os.path.islink(move['old path']))
                     os.remove(move['new path'])
                     print("Removed previous link to file '{}'"
                             .format(move['old path']))
