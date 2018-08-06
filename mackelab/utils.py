@@ -39,6 +39,15 @@ def flatten(l, terminate=()):
         else:
             yield el
 
+def strip_comments(s, comment_mark='#'):
+    """
+    Remove single line comments from plain text.
+    Searches for `comment_mark` and removes everything follows,
+    up to but excluding the next newline.
+    """
+    return '\n'.join(line.partition(comment_mark)[0].rstrip()
+                     for line in s.splitlines())
+
 def sciformat(num, sigdigits=1, minpower=None):
     """
     Return a string representation of `num` with a given

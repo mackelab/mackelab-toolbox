@@ -27,7 +27,7 @@ try:
     smttk_loaded = True
 except (NameError, ImportError):
     smttk_loaded = False
-from .utils import flatten
+from .utils import flatten, strip_comments
 
 ##########################
 # Transformed parameters
@@ -298,6 +298,11 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
     """
     Generate a unique filename by hashing a parameter file.
 
+    ..Note:
+    Parameters whose names start with '_' are ignored. This means that two
+    parameter sets A, B with `A['_x'] == 1` and `B['_x'] == 2` will be
+    assigned the same name.
+
     Parameters
     ----------
     params: ParameterSet or iterable of ParameterSets
@@ -366,14 +371,13 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
             params = params_to_arrays(params)
 
             # We need a sorted dictionary of parameters, so that the hash is consistent
+            # Also remove keys starting with '_'
             # if legacy_filenames:
             #     # HACK Convert new input format to old
             #     # TODO: Remove when no longer needed
             #     subinput_hack(params)
             flat_params = params.flatten()
                 # flatten avoids need to sort recursively
-                # _params_to_arrays normalizes the data
-            # flat_params = {key: params[key] for key in flat_params}
             sorted_params = OrderedDict( (key, flat_params[key])
                                          for key in sorted(flat_params)
                                          if key[0] != '_' )
@@ -422,7 +426,7 @@ def params_to_arrays(params):
             params[name] = np.array(val)
     return ParamType(params)
 
-def params_to_nonarrays(params):
+def params_to_lists(params):
     """
     Recursively call `tolist()` on all NumPy array values in a ParameterSet.
     This allows exporting arrays as nested lists, which are more readable
@@ -439,6 +443,7 @@ def params_to_nonarrays(params):
         elif isinstance(val, np.ndarray):
             params[name] = val.tolist()
     return ParamType(params)
+params_to_nonarrays = params_to_lists
 
 ###########################
 # Manipulating ParameterSets
@@ -803,6 +808,10 @@ def expand_params(param_str, fail_on_unexpanded=False, parser=None):
 
     if parser is None:
         parser = Parser()
+    param_str = expand_urls(param_str)
+        # TODO: Expanding urls as we expand blocks, rather than all
+        #       at once at the beginning, would allow to apply expansion
+        #       to parameter sets.
     param_strs = [strip_comments(param_str)]
     done = False
     while not done:
@@ -861,12 +870,32 @@ def expand_param_file(param_path, output_path,
         # TODO: Use logging
     return pathnames
 
-def strip_comments(s):
-    return '\n'.join(line.partition('#')[0].rstrip()
-                     for line in s.splitlines())
+def expand_urls(s):
+    """
+    Expand url specifications following the ParameterSet format.
+    This operation is performed on the raw string, so the string does not
+    need to be a valid ParameterSet definition.
+    This also means that no validation is performed (e.g. urls in keys will
+    be blindly expanded rather throw an error).
+    """
+    start = 0
+    while True:
+        start = s.find('url(', start)
+        if start >= 0:
+            stop = s.find(')', start)
+            if stop is None:
+                raise SyntaxError("`url(` has no matching closing parenthesis.")
+            url = s[start+4:stop].strip("'\"")
+            with open(url) as f:
+                substr = strip_comments(f.read())
+            s = s[:start] + substr + s[stop+1:]
+        else:
+            break
+    return s
 
 def _expand(s, fail_on_unexpanded, parser):
-    #param_strs = [s]  # Start with a single parameter string
+    # TODO: Allow multicharacter expansion tokens. Then we can use
+    # this to exand `url()`
     blocks = parser.extract_blocks(s)
     for i, c in enumerate(s):
         if c in parser.expanders:
