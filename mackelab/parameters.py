@@ -30,6 +30,11 @@ except (NameError, ImportError):
 from .utils import flatten, strip_comments
 
 ##########################
+# Module variables
+debug_store = {}
+    # Functions can store values in here to help debugging
+
+##########################
 # Transformed parameters
 ##########################
 
@@ -284,6 +289,13 @@ _new_printoptions = {'1.14': ['floatmode', 'sign', 'legacy']}
     # Lists of printoptions keywords, keyed by the NumPy version where they were introduced
     # This allows removing keywords when using an older version
 _remove_whitespace_for_filenames = True
+_type_compress = OrderedDict((
+    (np.float, np.float64),
+    (np.int, np.int64)
+))
+    # When normalizing types (currently only in `get_filename`), numpy types
+    # matching the key (left) are converted to the type on the right.
+    # First matching entry is used, so more specific types should come first.
 
 # # HACK: Remove this once we don't need to fix old filenames
 # def subinput_hack(params):
@@ -294,6 +306,18 @@ _remove_whitespace_for_filenames = True
 #         elif isinstance(val, ParameterSet):
 #             subinput_hack(val)
 
+def normalize_type(value):
+    """
+    Apply the type conversions given by `_type_compress`. This reduces the space
+    of possible types, helping make filenames more consistent.
+    """
+    if isinstance(value, np.ndarray):
+        for cmp_dtype, conv_dtype in _type_compress.items():
+            if np.issubdtype(value.dtype, cmp_dtype):
+                return value.astype(conv_dtype)
+    # No conversion match was found: return value unchanged
+    return value
+
 def get_filename(params, suffix=None, convert_to_arrays=True):
     """
     Generate a unique filename by hashing a parameter file.
@@ -302,6 +326,13 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
     Parameters whose names start with '_' are ignored. This means that two
     parameter sets A, B with `A['_x'] == 1` and `B['_x'] == 2` will be
     assigned the same name.
+
+    ..Debugging:
+    If two parameter sets should give the same filename but don't, check the
+    value of `debug_store['get_filename']['hashed_string']`. This module-wide
+    stores the most recently hashed string representation of a parameter set.
+    Filename hashes will be the same if and only if these string represenations
+    are the same.
 
     Parameters
     ----------
@@ -372,18 +403,19 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
 
             # We need a sorted dictionary of parameters, so that the hash is consistent
             # Also remove keys starting with '_'
-            # if legacy_filenames:
-            #     # HACK Convert new input format to old
-            #     # TODO: Remove when no longer needed
-            #     subinput_hack(params)
+            # Types need to be normalized, because if we save values as Python
+            # plain types, this can throw away some Numpy type information.
+            # To make sure filenames are consistent when we read the parameters
+            # back, we use one type per Python type (1 for floats, 1 for ints)
             flat_params = params.flatten()
                 # flatten avoids need to sort recursively
-            sorted_params = OrderedDict( (key, flat_params[key])
+            sorted_params = OrderedDict( (key, normalize_type(flat_params[key]))
                                          for key in sorted(flat_params)
                                          if key[0] != '_' )
 
             # Now that the parameterset is standardized, hash its string repr
             s = repr(sorted_params)
+            debug_store['get_filename'] = {'hashed_string': s}
             if _remove_whitespace_for_filenames:
                 # Removing whitespace makes the result more reliable; e.g. between
                 # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
