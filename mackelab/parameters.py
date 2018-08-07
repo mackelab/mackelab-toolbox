@@ -912,6 +912,10 @@ def expand_urls(s):
     """
     start = 0
     while True:
+        # Remove comments at every iteration, since every time we expand a
+        # url it may contain comments. In particular, we want to avoid expanding
+        # commented out urls.
+        s = strip_comments(s)
         start = s.find('url(', start)
         if start >= 0:
             stop = s.find(')', start)
