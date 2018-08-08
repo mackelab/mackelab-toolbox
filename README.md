@@ -10,6 +10,15 @@ After cloning the repository, call:
 python setup.py develop --user
 ```
 
+Possible setup call after navigating to location where directory was cloned:
+```bash
+pip install -e .[all]
+```
+Possible install options are
+  - `smt`: Install dependencies for the `Sumatra` toolbox
+  - `pymc3`: Install dependencies for the `PyMC3` toolbox
+  - `all` Install dependencies for all toolboxes
+
 ### Usage
 
 See `demo` folder for notebooks illustrating functions included in this repository.

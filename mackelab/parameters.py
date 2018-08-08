@@ -42,10 +42,6 @@ import simpleeval
 import ast
 import operator
 
-# HACK: Use to revert to old calculation of filenames. Should only use this
-# to compute old filenames in order to add links from the new filenames to them
-# legacy_filenames = False
-
 class Transform:
     # Replace the "safe" operators with their standard forms
     # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
@@ -290,8 +286,8 @@ _new_printoptions = {'1.14': ['floatmode', 'sign', 'legacy']}
     # This allows removing keywords when using an older version
 _remove_whitespace_for_filenames = True
 _type_compress = OrderedDict((
-    (np.float, np.float64),
-    (np.int, np.int64)
+    (np.floating, np.float64),
+    (np.integer, np.int64)
 ))
     # When normalizing types (currently only in `get_filename`), numpy types
     # matching the key (left) are converted to the type on the right.
