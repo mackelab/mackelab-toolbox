@@ -10,11 +10,14 @@ setup(
         'theano_shim >= 0.2',
         'simpleeval',
         'dill',
-        'tqdm'
+        'tqdm',
+        'pandas'
     ],
     dependency_links=[
-        'git+ssh://git@github.com:alcrene/parameters.git',
+        #'git+ssh://git@github.com:alcrene/parameters.git',
+        'https://github.com/alcrene/parameters'
     ],
+    # use with --process-dependency_links
 
     extras_require = {
         'smt': [
