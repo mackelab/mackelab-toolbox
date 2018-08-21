@@ -203,8 +203,26 @@ class LinearTickLocator(mpl.ticker.LinearLocator):
     def __call__(self):
         'Return the locations of the ticks'
         default_vmin, default_vmax = self.axis.get_view_interval()
-        vmin = max(self.vmin, default_vmin) if self.vmin is not None else default_vmin
-        vmax = min(self.vmax, default_vmax) if self.vmax is not None else defalut_vmax
+        if self.vmin is not None: vmin = max(self.vmin, vmin)
+        if self.vmax is not None: vmax = min(self.vmax, vmax)
+        return self.tick_values(vmin, vmax)
+
+class MaxNTickLocator(mpl.ticker.MaxNLocator):
+    """
+    Identical to the standard MaxNLocator, except that we provide additional
+    arguments to set tick min/max limits, (in LinearLocator these are hardcoded
+    to the viewport's limits).
+    """
+    def __init__(self, nbins, vmin=None, vmax=None, **kwargs):
+        super().__init__(nbins, **kwargs)
+        self.vmin = vmin
+        self.vmax = vmax
+
+    def __call__(self):
+        'Return the locations of the ticks'
+        vmin, vmax = self.axis.get_view_interval()
+        if self.vmin is not None: vmin = max(self.vmin, vmin)
+        if self.vmax is not None: vmax = min(self.vmax, vmax)
         return self.tick_values(vmin, vmax)
 
 # ====================================
