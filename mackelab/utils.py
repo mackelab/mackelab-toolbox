@@ -8,8 +8,9 @@ Created on Tue Nov 28 2017
 @author: alex
 """
 
+# To keep keep this module as light as possible, imports required for specific
+# functions are kept within that function
 from collections import Iterable, Callable, OrderedDict
-import math
 from enum import Enum
 
 def flatten(l, terminate=()):
@@ -48,6 +49,26 @@ def strip_comments(s, comment_mark='#'):
     return '\n'.join(line.partition(comment_mark)[0].rstrip()
                      for line in s.splitlines())
 
+def min_scalar_type(x):
+    """
+    Custom version of `numpy.min_scalar_type` which will not downcast a float
+    unless it can be done without loss of precision.
+    """
+    import numpy as np  # Only import numpy if needed
+    if np.issubdtype(x, np.floating):
+        if x == np.float16(x):
+            return np.dtype('float16')
+        elif x == np.float32(x):
+            return np.dtype('float32')
+        else:
+            return np.dtype('float64')
+    elif np.issubdtype(x, np.complexfloating):
+        raise NotImplementedError
+    elif np.issubdtype(x, np.integer):
+        return np.min_scalar_type(x)
+    else:
+        raise TypeError("Unsupported type '{}'.".format(type(x)))
+
 def sciformat(num, sigdigits=1, minpower=None):
     """
     Return a string representation of `num` with a given
@@ -64,6 +85,7 @@ def sciformat(num, sigdigits=1, minpower=None):
         Minimum power to use scientific notation. Default value of None
         forces scientific notation.
     """
+    import math
     if sigdigits < 1:
         logger.warning("`sciformat`: Number of significant digits should be "
                        "greater or eqal to 1.")
