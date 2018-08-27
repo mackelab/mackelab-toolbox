@@ -69,6 +69,23 @@ def min_scalar_type(x):
     else:
         raise TypeError("Unsupported type '{}'.".format(type(x)))
 
+class PDF:
+    """
+    Create an object from a pdf file which allows it to be viewed in a notebook.
+    Also exports well to latex with nbconvert.
+    https://stackoverflow.com/a/19470377
+    """
+    def __init__(self, pdf, size=(200,200)):
+        self.pdf = pdf
+        self.size = size
+
+    def _repr_html_(self):
+        return ('<iframe src={0} width={1[0]} height={1[1]}></iframe>'
+                .format(self.pdf, self.size))
+
+    def _repr_latex_(self):
+        return r'\includegraphics[width=1.0\textwidth]{{{0}}}'.format(self.pdf)
+
 def sciformat(num, sigdigits=1, minpower=None):
     """
     Return a string representation of `num` with a given
@@ -139,8 +156,9 @@ class OrderedEnum(Enum):
         return NotImplemented
 
 class SanitizedDict(dict):
-    def __init__(self, *args, **kwargs):
-        logger.warning("mackelab.utils.SanitizedDict is not implemented")
+    def __init__(self, *args, _warn=True, **kwargs):
+        if _warn:
+            logger.warning("mackelab.utils.SanitizedDict is not implemented")
         super().__init__(*args, **kwargs)
 
 class SanitizedOrderedDict(OrderedDict, SanitizedDict):
@@ -181,7 +199,7 @@ class SanitizedOrderedDict(OrderedDict, SanitizedDict):
                 return s
             self.sanitize = f
 
-        return super().__init__(*args, **kwargs)
+        return super().__init__(*args, _warn=False, **kwargs)
 
     def __setitem__(self, key, value):
         if isinstance(key, Iterable) and not isinstance(key, (str, bytes)):
