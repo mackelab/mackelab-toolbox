@@ -1,3 +1,5 @@
+import os
+import logging
 import datetime
 from collections import namedtuple, Callable
 import math
@@ -10,6 +12,8 @@ from matplotlib.ticker import is_close_to_int
 from subprocess import check_output
 
 from parameters import ParameterSet
+
+logger = logging.getLogger('mackelab.plot')
 
 # =====================================
 # Archival helper functions
@@ -54,6 +58,56 @@ def saverep(basename, comment=None, pdf=True, png=True):
 
     with open(basename + '.txt', 'w') as textfile:
         textfile.write(info_str)
+
+# ====================================
+# Plotting styles
+
+class style:
+    """
+    Provides some wrappers around methods in `pyplot.style`.
+    """
+
+    @staticmethod
+    def use(style):
+        """
+        Simply calls `pyplot.style.use`.
+        If the call fails, checks to see if it's because the mackelab styles
+        weren't yet installed; if that's the case, prints a more useful error
+        message.
+        """
+        try:
+            plt.style.use(style)
+        except OSError as e:
+            # Check if the style just needs to be installed
+            if isinstance(style, str):
+                style = [style]
+            elif isinstance(style, dict):
+                # dicts don't represent style files, so problem is not uninstalled styles
+                raise(e)
+            libpath = os.path.dirname(os.path.dirname(__file__))
+            for st in style:
+                try:
+                    plt.style.use(st)
+                except OSError:
+                    # Check if this is a mackelab style
+                    stylename, styleext = os.path.splitext(st)
+                    if styleext not in ('', '.mplstyle'):
+                        raise ValueError("Unrecognized plot style extension '{}'.".format(styleext))
+                    stylename += '.mplstyle'
+                    for dirpath, dirnames, filenames in os.walk(os.path.join(libpath, 'mackelab/stylelib')):
+                        if '__pycache__' in dirnames: dirnames.remove('__pycache__')
+                        if stylename not in filenames:
+                            # At least one unfound style is not a mackelab style
+                            raise(e)
+            # If we made it here, the only problems are uninstalled mackelab styles
+            script = os.path.join(libpath, 'install_styles.py')
+            logger.warning("The mackelab plot styles were not found, so the produced plots "
+                           "will look different than in the paper.\n"
+                           "To install the styles, run the following:\n"
+                           "shell:    python {}\nnotebook: %run {}\n"
+                           "If you are running a kernel (e.g. within a "
+                           "notebook), it with will need to be restarted."
+                           .format(script, script))
 
 # ====================================
 # Tick label formatting
