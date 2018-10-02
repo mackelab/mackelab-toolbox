@@ -23,7 +23,8 @@ setup(
         'smt': [
             'Click',
             'sumatra[git]',
-            'docutils', 'PyYAML', 'httplib2'  # Required by Sumatra
+            'docutils', 'PyYAML', 'httplib2',  # Required by Sumatra
+	        'psycopg2'    # Required for using PostgreSQL Sumatra record stores
         ],
         'pymc3': [
             'pymc3'
