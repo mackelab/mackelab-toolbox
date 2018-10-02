@@ -56,7 +56,7 @@ def get_record(recordstore, project, label):
         raise RuntimeError("More than one record was found. Specify a unique label.")
     return res[0]
 
-def get_records(recordstore, project, label=None,
+def get_records(recordstore, project, labels=None,
                 script=None,
                 before=None, after=None,
                 min_data=1,
@@ -72,9 +72,12 @@ def get_records(recordstore, project, label=None,
     """
     # TODO: Use database backend so that not all records need to be loaded into memory just
     #       to filter them.
-    if label is not None:
+    if labels is not None:
         # RecordStore has builtin functions for searching on labels
-        lbl_gen = (fulllabel for fulllabel in recordstore.labels(project) if label in fulllabel)
+        if isinstance(labels, str):
+            labels = [labels]
+        lbl_gen = (fulllabel for fulllabel in recordstore.labels(project)
+                   if any(label in fulllabel for label in labels))
         record_list = [recordstore.get(project, fulllabel) for fulllabel in lbl_gen]
     else:
         record_list = recordstore.list(project)
@@ -1087,6 +1090,9 @@ if click_loaded:
         def __init__(self):
             self.moves = {}
 
+        def __len__(self):
+            return len(self.moves)
+
         def __iter__(self):
             return ({'new path': key, 'old path': val['old path'],
                     'timestamp': val['timestamp']}
@@ -1266,7 +1272,7 @@ if click_loaded:
 
         create_links(move_list)
 
-    def create_links(move_list):
+    def create_links(move_list, verbose=True):
         """
         Iterate through a MoveList representing a set of links and create them.
         If a file already exists where we want to place a link, we do the
@@ -1275,6 +1281,8 @@ if click_loaded:
           - If it's a link that points to another location, replace it
           - If it's an actual file, append a number to its filename before
             creating the link.
+        Set `verbose` to `False` to prevent printing output for every link
+        created or modified.
         """
         for move in move_list:
             # if os.path.islink(move['old path']):
@@ -1288,14 +1296,16 @@ if click_loaded:
                     # Just delete the old link, since data is preserved in the dump folder
                     # assert(not os.path.islink(move['old path']))
                     os.remove(move['new path'])
-                    print("Removed previous link to file '{}'"
-                            .format(move['old path']))
+                    if verbose:
+                        print("Removed previous link to file '{}'"
+                                .format(move['old path']))
             if os.path.exists(move['new path']):
                 assert(not os.path.islink(move['new path']))
                 # Rename the path so as to not lose data
                 renamed_path = rename_to_free_file(move['new path'])
-                print("Previous file '{}' was renamed to '{}'"
-                        .format(move['new path'], renamed_path))
+                if verbose:
+                    print("Previous file '{}' was renamed to '{}'"
+                            .format(move['new path'], renamed_path))
             else:
                 # Make sure the directory hierarchy exists
                 os.makedirs(os.path.dirname(move['new path']), exist_ok=True)
@@ -1303,8 +1313,9 @@ if click_loaded:
             rel_old_path = os.path.relpath(move['old path'],
                                             os.path.dirname(move['new path']))
             os.symlink(rel_old_path, move['new path'])
-            print("Link to '{}' in the common directory."
-                    .format(move['old path']))
+            if verbose:
+                print("Link to '{}' in the common directory."
+                        .format(move['old path']))
 
     cli.add_command(addlinks)
 
@@ -1374,6 +1385,18 @@ if click_loaded:
         argv_list = [ "-m {} {} --label {}_{} {} {}"
                       .format(script, shared_options, label, i, " ".join(args), param_file)
                       for i, param_file in enumerate(param_paths, start=1)]
+
+        # for i, param_file in enumerate(param_paths, start=1):
+        #     with open(param_file) as f:
+        #         s = f.read()
+        #         s2 = s.encode('utf8', 'replace').decode('utf8')
+        #         for j, (c, c2) in enumerate(zip(s, s2)):
+        #             if c != c2:
+        #                 import pdb; pdb.set_trace()
+        #                 print(j, c, c2)
+        #                 return
+        # print("No problems found")
+        # return
 
         # Process idx array. Used to assign a unique index to each concurrently
         # running process
