@@ -1,79 +1,13 @@
 from collections import namedtuple
 import logging
+logger = logging.getLogger('sinn.analyze.stylelib.color_schemes')
 
 import numpy as np
 from cycler import cycler
 import matplotlib as mpl
+import matplotlib.cm
 
-logger = logging.getLogger('sinn.analyze.stylelib.color_schemes')
-
-def monochrome_palette(basecolor, nstops, s_range=(1, 0.3), v_range=(1, 1.3), absolute=False):
-    """
-    Produce an array of variations on the base colour by changing the
-    saturation and/or the value. The result is a set of colours that have
-    the same hue but different brightness.
-    The `basecolor` is internally converted to HSV, where the S and V
-    components are varied. The result is returned as RGB hex strings.
-
-    Parameters
-    ----------
-    n_steps: int
-        Number of colour stops to create in the palette.
-    s_range: tuple of floats
-        (begin, end) values for the *saturation* component of the palette.
-        Range is inclusive.
-        The values specified are relative to the base color's, so values greater than
-        1 may be possible. Typical usage however has the base color as the brightest,
-        which is achieved be setting `begin` to 1.
-        Default: (1, 0.3)
-    v_range: tuple of floats
-        (begin, end) values for the *value* component of the palette.
-        Range is inclusive.
-        Values are relative, same as for `s_range`.
-        Default: (1, 1.3)
-    absolute: bool
-        If True, range values are absolute rather than relative. In this case
-        the saturation and value of the `basecolor` are discarded, and range values
-        must be between 0 and 1.
-
-    Examples
-    --------
-    Palette that varies towards white (Default):
-        `s_range` = (1, 0.3)
-        `v_range` = (1, 1.3)
-
-    Palette that varies towards black:
-        `s_range` = (1, 1)
-        `v_range` = (1, 0.4)
-    """
-    def clip(val, varname):
-        if val < 0:
-            val = 0
-            logger.warning("[monochrome_palette]: " + varname +
-                           " was smaller than 0 and was clipped.")
-        elif val > 1:
-            val = 1
-            logger.warning("[monochrome_palette]: " + varname +
-                           " was greater than 1 and was clipped.")
-        return val
-
-    if isinstance(basecolor, tuple):
-        if any( v>1 for v in basecolor ):
-            raise ValueError("If you are defining the basecolor by an "
-                             "RGB tuple, the values must be between 0 and 1. "
-                             "Specified basecolor: {}.".format(str(basecolor)))
-    basergb = mpl.colors.to_rgb(basecolor)
-    h, s, v = mpl.colors.rgb_to_hsv(basergb)
-    if absolute:
-        s = 1; v = 1
-    s_range = (clip(s_range[0] * s, 'saturation'), clip(s_range[1] * s, 'saturation'))
-    v_range = (clip(v_range[0] * v, 'value'),      clip(v_range[1] * v, 'value'))
-
-    slist = [a*s for a in np.linspace(s_range[0], s_range[1], nstops)]
-    vlist = [a*v for a in np.linspace(v_range[0], v_range[1], nstops)]
-    clist = [mpl.colors.to_hex(mpl.colors.hsv_to_rgb((h, s_el, v_el)))
-                                                     for s_el, v_el in zip(slist, vlist)]
-    return clist
+from mackelab.colors import monochrome_palette
 
 property_cycles = {
     'dark pastel': ['#1e6ea7', '#9d3a11']
