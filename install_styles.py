@@ -27,3 +27,10 @@ for stylefile in os.listdir(stylelib_path):
                        os.path.join(configdir, "stylelib", stylefile))
         except FileExistsError:
             pass
+
+# TODO: Delete stale links (can happen if style names change)
+
+print("Styles make use of the CM Bright font; make sure it is installed.")
+print("    SUSE: `sudo zypper install texlive-cmbright`.")
+print("After installation, you should delete matplotlib's font cache.")
+print("    Linux: ~/.cache/matplotlib/fontList.json")
