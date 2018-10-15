@@ -1402,9 +1402,24 @@ if click_loaded:
         basename, _ = os.path.splitext(os.path.basename(script))
         # TODO: Get extension from parameter path
         tmpparam_path = os.path.join(tmp_dir, basename + ".ntparameterset")
+
+        # Scan `args` to see if it contains indicator for multiple parametersets
+        pflag = "params:"
+        if pflag in args:
+            i = args.index(pflag)
+            if pflag in args[i+1:]:
+                raise ArgumentError("You can only pass a single 'params:' "
+                                    "indicator.")
+            params = args[i+1:] + (params,)
+            args = args[:i]
+        else:
+            params = (params,)
+
         # FIXME: Parameter expansion does not work with nested files
-        param_paths = mackelab.parameters.expand_param_file(
-            params, tmpparam_path, max_files=max_tasks)
+        param_paths = itertools.chain.from_iterable(
+            mackelab.parameters.expand_param_file(
+                paramfile, tmpparam_path, max_files=max_tasks)
+            for paramfile in params)
 
         # We need to generate our own label, as Sumatra's default is to use a timestamp
         # which is only precise up to seconds. Thus jobs launched simultaneously would have the
