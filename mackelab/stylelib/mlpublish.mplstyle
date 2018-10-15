@@ -1,4 +1,4 @@
-# Use as plt.style.use(['default','publish'])
+# Use as plt.style.use(['mldefault','publish'])
 # Official docs on exporting proper LaTeX plots
 # https://matplotlib.org/users/pgf.html
 # Some possibly useful SO questions:
@@ -6,10 +6,13 @@
 # https://stackoverflow.com/a/41453758
 
 lines.linewidth: 0.75
+lines.markersize: 2
 
 font.size: 9
   # Relative font size are based on font.size. They are
-  # xx-small, x-small, medium, large, x-large, xx-large, larger, smaller
+  # xx-small, x-small, small, medium, large, x-large, xx-large, larger, smaller
+
+savefig.pad_inches : 0.03  # 2-point margin around figures. PLOS recommendation
 
 # Rendered LaTeX labels approach
 # text.usetex : True
@@ -28,3 +31,4 @@ font.size: 9
 pgf.rcfonts: False
 pgf.texsystem: xelatex
 pgf.preamble: \usepackage{cmbright} \usepackage{unicode-math}
+#pgf.preamble: \usepackage{unicode-math}
