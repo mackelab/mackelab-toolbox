@@ -1,5 +1,6 @@
 import os
 import logging
+logger = logging.getLogger('mackelab.plot')
 import datetime
 from collections import namedtuple, Callable
 import math
@@ -13,7 +14,7 @@ from subprocess import check_output
 
 from parameters import ParameterSet
 
-logger = logging.getLogger('mackelab.plot')
+φ = 1.61803  # Golden ratio. Good default for plot aspect ratio
 
 # =====================================
 # Archival helper functions
@@ -62,10 +63,15 @@ def saverep(basename, comment=None, pdf=True, png=True):
 # ====================================
 # Plotting styles
 
-class style:
+class _Style:
+    # TODO: Make singleton class
     """
     Provides some wrappers around methods in `pyplot.style`.
     """
+
+    def __getattr__(self, attr):
+        """Redirect calls with no special handlers to pyplot.style."""
+        return getattr(plt.style, attr)
 
     @staticmethod
     def use(style):
@@ -106,8 +112,25 @@ class style:
                            "To install the styles, run the following:\n"
                            "shell:    python {}\nnotebook: %run {}\n"
                            "If you are running a kernel (e.g. within a "
-                           "notebook), it with will need to be restarted."
+                           "notebook), reload the style library with "
+                           "`plt.style.reload_library`."
                            .format(script, script))
+
+style = _Style()
+
+# ====================================
+# Editing plot elements
+
+def set_legend_linewidth(linewidth, ax=None, legend=None):
+    if ax is not None and legend is not None:
+        logger.warning("Both `ax` and `legend` were specified. Ignoring `ax`.")
+    if legend is None:
+        if ax is not None:
+            legend = ax.get_legend()
+        else:
+            legend = plt.gca().get_legend()
+    for line in legend.legendHandles:
+        line.set_linewidth(linewidth)
 
 # ====================================
 # Tick label formatting
@@ -143,7 +166,7 @@ class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
 # ====================================
 # Axis label placement
 
-def add_corner_ylabel(ax, label, axcoordx=-0.03, axcoordy=1, fracsize=0.81):
+def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None):
     # TODO: Use ax.yaxis.set_label_coords() instead of ax.text()
     #       Allow right, left options
     #       Combine with add_corner_xlabel
@@ -171,8 +194,28 @@ def add_corner_ylabel(ax, label, axcoordx=-0.03, axcoordy=1, fracsize=0.81):
     if ax is None or ax == '':
         ax = plt.gca()
 
+    fig = ax.get_figure()
+    renderer = fig.canvas.get_renderer()
+
+    # Draw then remove dummy text to get its dimensions
+    text = ax.text(0, 1, label, transform=ax.transAxes)
+    textbbox = text.get_window_extent(renderer)
+    axbbox = ax.get_window_extent()
+    if fracsize is None:
+        fracsize = axcoordy - 1.5 * textbbox.height / axbbox.height
+            # 1.1 is a somewhat arbitrary margin
+    if axcoordx is None:
+        # TODO: Can't we just get the ticklabel padding ?
+        tickline = ax.yaxis.get_ticklines()[-1]
+        ticklinewidth = tickline.get_markersize() / 72. * fig.dpi
+            # /72 * dpi is how matplotlib does it: https://matplotlib.org/_modules/matplotlib/lines.html#Line2D.get_window_extent
+        axcoordx = - 1.7*ticklinewidth / axbbox.width
+             # 1.7 to provide some margin
+    text.remove()
+
     # TODO: Data pos option. Allow specifying position by data coordinate,
     #       using ax.transform to convert coordinates
+    # TODO: Use ylabel instead of text: allows overwriting by later ylabel call
     ax.text(axcoordx, axcoordy,label,
             fontproperties=mpl.font_manager.FontProperties(size='medium', weight='bold'),
             transform=ax.transAxes,
@@ -180,7 +223,7 @@ def add_corner_ylabel(ax, label, axcoordx=-0.03, axcoordy=1, fracsize=0.81):
             verticalalignment='top')
 
     # Now remove ticks overlapping with the axis label
-    ax.draw(ax.get_figure().canvas.get_renderer())
+    ax.draw(renderer)
         # Force drawing of ticks and ticklabels
     transform = ax.yaxis.get_transform()
     ylim, yticks = transform.transform(ax.get_ylim()), transform.transform(ax.get_yticks())
@@ -219,6 +262,8 @@ def add_corner_xlabel(ax, label, axcoordx=1, axcoordy=-0.08, fracsize=0.69):
     if ax is None or ax == '':
         ax = plt.gca()
 
+    # TODO: Port improvements in add_corner_ylabel using dummy text.
+
     # TODO: Data pos option. Allow specifying position by data coordinate,
     #       using ax.transform to convert coordinates
     ax.text(axcoordx, axcoordy,label,
@@ -239,6 +284,144 @@ def add_corner_xlabel(ax, label, axcoordx=1, axcoordy=-0.08, fracsize=0.69):
                 xticklabels = xticklabels[:i] + [""] + xticklabels[i+1:]
     ax.set_xticklabels(xticklabels)
 
+def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0):
+    """
+    offset in inches
+    """
+    if ax is None:
+        ax = plt.gca()
+    if color is None:
+        color = mpl.rcParams['axes.edgecolor']
+    fig = ax.get_figure()
+    fontsize = plt.rcParams['font.size']
+    dpi = fig.dpi
+    ax.set_xticks([])  # Remove ticks
+
+    x0, xn = ax.get_xlim()
+    y0, yn = ax.get_ylim()
+    xmargin, ymargin = ax.margins()
+    if hasattr(fig.canvas, 'renderer'):
+        bbox = ax.get_tightbbox(fig.canvas.renderer)
+             # More precise ? But in any case necessary for inset axes
+    else:
+        # Before drawing a figure, it has no renderer, so we end up here
+        bbox = ax.get_window_extent()
+    dwidth = bbox.width
+    dheight = bbox.height
+    xwidth = xn - x0
+    yheight = yn - y0
+    # Convert xshift, yshift into data coords
+    data_xshift = xshift * xwidth/dwidth
+    data_yshift = yshift * yheight/dheight
+    data_offset = offset * yheight/dheight
+    data_linewidth = scalelinewidth * yheight/dheight
+
+
+    spine = ax.spines['bottom']
+    spine.set_visible(True)
+    x = x0 + data_xshift
+    y = y0 - offset - data_yshift - data_linewidth
+    spine.set_bounds(x, x+length)
+    spine.set_linewidth(scalelinewidth)
+    spine.set_position(('data', y))
+    spine.set_color(color)
+
+    #y -= fontsize/dpi * yheight/dheight
+    data_fontheight = fontsize/dpi * yheight/dheight  # FIXME: too small
+    y -= data_linewidth - 1.0*data_fontheight
+    ax.xaxis.set_label_coords(x, y, transform=ax.transData)
+    ax.xaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='top')
+
+def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0):
+    """
+    offset in inches
+    """
+    if ax is None:
+        ax = plt.gca()
+    if color is None:
+        color = mpl.rcParams['axes.edgecolor']
+    fig = ax.get_figure()
+    fontsize = plt.rcParams['font.size']
+    dpi = fig.dpi
+    ax.set_yticks([])  # Remove ticks
+
+    x0, xn = ax.get_xlim()
+    y0, yn = ax.get_ylim()
+    xmargin, ymargin = ax.margins()
+    if hasattr(fig.canvas, 'renderer'):
+        bbox = ax.get_tightbbox(fig.canvas.renderer)
+             # More precise ? But in any case necessary for inset axes
+    else:
+        # Before drawing a figure, it has no renderer, so we end up here
+        bbox = ax.get_window_extent()
+    dwidth = bbox.width  # display width and height
+    dheight = bbox.height
+    xwidth = xn - x0
+    yheight = yn - y0
+    x0, xn = ax.get_xlim()
+    # Convert xshift, yshift into data coords
+    data_xshift = xshift * xwidth/dwidth
+    data_yshift = yshift * yheight/dheight
+    data_offset = offset * xwidth/dwidth
+    data_linewidth = scalelinewidth/dpi * yheight/dheight
+
+    spine = ax.spines['left']
+    spine.set_visible(True)
+    x = x0 - offset - data_xshift
+    y = y0 - data_yshift + data_linewidth
+    spine.set_bounds(y, y+length)
+    spine.set_linewidth(scalelinewidth)
+    spine.set_position(('data', x))
+    spine.set_color(color)
+
+    # TODO: Get rid of fudge factor
+    #x -= 0 * fontsize/dpi * xwidth/dwidth
+    ax.yaxis.set_label_coords(x, y, transform=ax.transData)
+    ax.yaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='bottom')
+
+def subreflabel(ax=None, s="", x=0.04, y=1, transform=None, fontdict=None, **kwargs):
+    """
+    Wraps `ax.text` with some sane default for a figure subref label.
+    By default `x` and `y` define axis fractions.
+    Defaults:
+        - `x`: 0.04
+        - `y`: 1
+        - `transform`: `ax.transAxes`
+        - `fontdict`:  `{'weight': 'bold', 'size': 'large'}`
+        - `verticalalignment`: `'top'`
+        - 'zorder': 10
+    To make the label background transparent, pass the keyword argument `backgroundcolor = None`.
+    """
+    default_fontdict = {
+        'weight': 'bold',
+        'size': 'large'
+    }
+    if ax is None:
+        ax = plt.gca()
+    if transform is None:
+        transform = ax.transAxes
+    if fontdict is None:
+        fontdict = default_fontdict
+    else:
+        # Don't throw away default values if they aren't overridden by fontdict
+        default_fontdict.update(fontdict)
+        fontdict = default_fontdict
+    zorder = kwargs.pop('zorder', 10)  # In almost all cases, we want the label on top
+    backgroundcolor = kwargs.pop('backgroundcolor', '#FFFFFF')
+    if backgroundcolor is None:
+        backgroundcolor = '#FFFFFF00'
+    else:
+        backgroundcolor = ml.colors.alpha(backgroundcolor, 0.8)
+    bbox = kwargs.pop('bbox', {})
+    if 'ec' not in bbox and 'edgecolor' not in bbox:
+        bbox['ec'] = backgroundcolor
+    if 'fc' not in bbox and 'facecolor' not in bbox:
+        bbox['fc'] = backgroundcolor
+    if 'pad' not in bbox:
+        bbox['pad'] = 0
+
+    text = ax.text(x, y, s, transform=transform, fontdict=fontdict, verticalalignment='top', zorder=zorder,
+                   backgroundcolor=backgroundcolor, bbox=bbox, **kwargs)
 
 # ====================================
 # Tick placement
