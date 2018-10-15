@@ -14,6 +14,10 @@ from subprocess import check_output
 
 from parameters import ParameterSet
 
+from . import colors
+from . import utils
+from .rcparams import rcParams
+
 φ = 1.61803  # Golden ratio. Good default for plot aspect ratio
 
 # =====================================
@@ -379,18 +383,45 @@ def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     ax.yaxis.set_label_coords(x, y, transform=ax.transData)
     ax.yaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='bottom')
 
-def subreflabel(ax=None, s="", x=0.04, y=1, transform=None, fontdict=None, **kwargs):
+def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, fontdict=None, format=True, **kwargs):
     """
     Wraps `ax.text` with some sane default for a figure subref label.
-    By default `x` and `y` define axis fractions.
-    Defaults:
-        - `x`: 0.04
-        - `y`: 1
-        - `transform`: `ax.transAxes`
-        - `fontdict`:  `{'weight': 'bold', 'size': 'large'}`
-        - `verticalalignment`: `'top'`
-        - 'zorder': 10
+
     To make the label background transparent, pass the keyword argument `backgroundcolor = None`.
+
+    By default the label is placed outside the figure, requiring
+
+    Label is a added to the axes with a `zorder` of `10`, because we almost always want it on top
+    of everything else. To place a figure element on top of the label, give it a larger `zorder`.
+
+    Parameters
+    ----------
+    ax: axes instance
+        If omitted, obtained with `pyplot.gca()`
+    s: str
+        Label string.
+    x: float (default: `ml.rcParams['plot.subrefx']`)
+        x position of the label, by default the left edge.
+    y: float (default: `ml.rcParams['plot.subrefy']`)
+        y position of the label, by default the bottom edge.
+    transform: matplotlib bbox transform (default: `ax.transAxes`)
+        Defines the units for the (x,y) coordinates. Defaults to axes units, meaning that they
+        range from 0 to 1.
+    inside: bool  (default: `ml.rcParams['plot.subrefinside']`)
+        Whether to place the label inside or outside the plot. All this does is add the
+        'verticalalignment' keyword to `**kwargs`, setting to `bottom` (if `inside` is false)
+        or 'top' (if `inside` is true).
+        Defaults to the value of `ml.rcParams['plots.subrefinside']`.
+        Ignored if the 'verticalalignment' keyword is provided.
+    fontdict: dict
+        Passed on to the call to `ax.text`. Default value: `{'weight': 'bold', 'size': 'large'}`
+    format: bool
+        Whether to format the string label according to the format string
+        `ml.rcParams['plot.subrefformat']`. The `ml.utils.ExtendedFormatter` is used, to allow
+        format strings to specify whether labels should be upper or lower case.
+    **kwargs
+        Additional keyword arguments are passed on to `ax.text()`. These can be used e.g. to set
+        text alignment, to place the label inside the figure.
     """
     default_fontdict = {
         'weight': 'bold',
@@ -400,18 +431,18 @@ def subreflabel(ax=None, s="", x=0.04, y=1, transform=None, fontdict=None, **kwa
         ax = plt.gca()
     if transform is None:
         transform = ax.transAxes
-    if fontdict is None:
-        fontdict = default_fontdict
-    else:
-        # Don't throw away default values if they aren't overridden by fontdict
-        default_fontdict.update(fontdict)
-        fontdict = default_fontdict
+    if x is None: x = rcParams['plot.subrefx']
+    if y is None: y = rcParams['plot.subrefy']
+    if fontdict is None: fontdict = {}
+    # Don't throw away default values if they aren't overridden by fontdict
+    default_fontdict.update(fontdict)
+    fontdict = default_fontdict
     zorder = kwargs.pop('zorder', 10)  # In almost all cases, we want the label on top
     backgroundcolor = kwargs.pop('backgroundcolor', '#FFFFFF')
     if backgroundcolor is None:
         backgroundcolor = '#FFFFFF00'
     else:
-        backgroundcolor = ml.colors.alpha(backgroundcolor, 0.8)
+        backgroundcolor = colors.alpha(backgroundcolor, 0.8)
     bbox = kwargs.pop('bbox', {})
     if 'ec' not in bbox and 'edgecolor' not in bbox:
         bbox['ec'] = backgroundcolor
@@ -420,7 +451,20 @@ def subreflabel(ax=None, s="", x=0.04, y=1, transform=None, fontdict=None, **kwa
     if 'pad' not in bbox:
         bbox['pad'] = 0
 
-    text = ax.text(x, y, s, transform=transform, fontdict=fontdict, verticalalignment='top', zorder=zorder,
+    if format:
+        label = utils.format(rcParams['plot.subrefformat'], label)
+
+    if 'verticalalignment' not in kwargs and 'va' not in kwargs:
+        if inside is None: inside = rcParams['plot.subrefinside']
+            # Setting default value here instead of function def allows to check
+            # for clash with kwargs
+        kwargs['va'] = 'top' if inside else 'bottom'
+    else:
+        if inside is not None:
+            logger.warning("You specified both the `inside` argument and a vertical alignment. "
+                           "`inside` will be ignored.")
+
+    text = ax.text(x, y, label, transform=transform, fontdict=fontdict, verticalalignment='top', zorder=zorder,
                    backgroundcolor=backgroundcolor, bbox=bbox, **kwargs)
 
 # ====================================
