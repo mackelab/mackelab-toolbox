@@ -69,6 +69,42 @@ def min_scalar_type(x):
     else:
         raise TypeError("Unsupported type '{}'.".format(type(x)))
 
+def int_if_close(x, tol=100, npint=None):
+    """
+    Similar to numpy's `real_if_close`, casts the value to an int if it close
+    to an integer value.
+
+    Parameters
+    ----------
+    x : numerical value
+        Input array.
+    tol : float
+        Tolerance in machine epsilons.
+    npint: numpy type
+        Integer type to use for numpy inputs. Defaults to `numpy.int64`.
+    Returns
+    -------
+    out : int | float
+    """
+    from numbers import Number, Integral, Real
+    import numpy as np
+
+    if npint is None: npint = np.int64
+    if ( isinstance(x, Integral)
+         or (hasattr(x, 'dtype') and np.issubdtype(x.dtype, np.integer)) ):
+        return x
+    if isinstance(x, np.ndarray):
+        cond = (abs(x - np.rint(x)) < tol * np.finfo(x.dtype.type).eps).all()
+    else:
+        cond = abs(x - np.rint(x)) < tol * np.finfo(x).eps
+    if cond:
+        if isinstance(x, (np.ndarray, np.number)):
+            return np.rint(x).astype(npint)
+        else:
+            return int(round(x))
+    else:
+        return x
+
 class PDF:
     """
     Create an object from a pdf file which allows it to be viewed in a notebook.
@@ -286,3 +322,107 @@ class StringFunction:
                       + e.args[1:])
             raise
         return res
+
+class SkipCounter(int):
+    """
+    An integer counter which automatically skips certain values.
+
+    The original use case for this class was for building arrays of plots:
+    `plt.subplot` indexes plots left-to-right, top-to-bottom,
+    making it inconvenient to arrange multiple sequences as columns.
+    With a SkipCounter, we can define which grid indices to leave blank,
+    and simply increment by 1 for each plot.
+
+    Usage example
+    -------------
+    from scipy import stats
+    # Create a list of four distributions
+    dists = [stats.norm(0, 1), stats.norm(3, 1),
+             stats.gamma(a=1), stats.gamma(a=3)]
+    x = np.linspace(-3, 5)
+    ys = [d.pdf(x) for d in dists]
+
+    # Plot the distributions on a 3x3 grid, skipping middle and corners
+    k = SkipCounter(0, skips=(1, 3, 5, 7, 9))
+    for y in ys:
+        k += 1
+        plt.subplot(3, 3, k)
+        plt.bar(x, y, width=1)
+
+    # TODO: Find a better example for the corners
+    k = SkipCounter(0, skips=(2, 4, 5, 6, 8))
+    for y in ys:
+        k += 1
+        plt.subplot(3, 3, k)
+        plt.plot(x, y)
+    """
+    def __new__(cls, value=0, skips=None, low=None, high=None,
+                *args, **kwargs):
+        counter = super().__new__(cls, value)
+        counter.skips = skips if skips is not None else ()
+        if not isinstance(counter.skips, Iterable):
+            counter.skips = (counter.skips,)
+        counter.low = low if low is not None else value
+        counter.high = high
+        return counter
+
+    def __repr__(self):
+        return "<SkipCounter (skips: {}) @ {}>".format(self.skips,
+                                                       self)
+
+    def _get_new_value(self, i):
+        value = int(self)
+        step = np.sign(i)
+        high = (self.high if self.high is not None
+                else value + abs(i) + len(self.skips))
+        while i != 0:
+            value += step
+            if value not in self.skips:
+                i -= step
+            # Safety assertions to avoid infinite loops
+            assert(value >= self.low)
+            assert(value <= high)
+        return value
+
+    def __add__(self, i):
+        return SkipCounter(self._get_new_value(i),
+                           self.skips, self.low, self.high)
+
+    def __sub__(self, i):
+        return self + -i
+
+from string import Formatter
+class ExtendedFormatter(Formatter):
+    """An extended format string formatter
+
+    Formatter with extended conversion symbols for upper/lower case and
+    capitalization.
+
+    Source: https://stackoverflow.com/a/46160537
+    """
+    def convert_field(self, value, conversion):
+        """ Extend conversion symbol
+        Following additional symbol has been added
+        * l: convert to string and low case
+        * u: convert to string and up case
+
+        default are:
+        * s: convert with str()
+        * r: convert with repr()
+        * a: convert with ascii()
+        """
+
+        if conversion == "u":
+            return str(value).upper()
+        elif conversion == "l":
+            return str(value).lower()
+        elif conversion == "c":
+            return str(value).capitalize()
+        # Do the default conversion or raise error if no matching conversion found
+        super().convert_field(value, conversion)
+
+        # return for None case
+        return value
+formatter = ExtendedFormatter()
+def format(s, *args, **kwargs):
+    return formatter.format(s, *args, **kwargs)
