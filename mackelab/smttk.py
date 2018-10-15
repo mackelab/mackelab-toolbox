@@ -44,6 +44,9 @@ class RecordNotFound(Exception):
 ##################################
 
 # TODO: Make these methods of a "RecordStoreView class"
+# TODO: Make `get_records` return a lazy, filterable query, to avoid loading
+#       all records every time.
+#       This might be possible by using Django's LazyQuery(?).
 
 def get_record(recordstore, project, label):
     """
@@ -676,6 +679,13 @@ class RecordFilter:
     def label(self, label):
         return RecordList(rec for rec in self.reclst if label in rec.label)
 
+    def reason(self, reason):
+        return RecordList(rec for rec in self.reclst if reason in rec.reason)
+
+    def outputpath(self, output):
+        return RecordList(rec for rec in self.reclist
+                          if any(output in path for path in rec.outputpath))
+
 class RecordList:
     """
     This class ensures that all elements of an iterable are RecordViews; it
@@ -724,6 +734,34 @@ class RecordList:
             return RecordView(rec)
         else:
             raise ValueError("RecordList may only be composed of sumatra records.")
+
+    @property
+    def latest(self):
+        """
+        Return the record with the latest timestamp.
+        """
+        latest = None
+        for rec in self:
+            if latest is None:
+                latest = rec
+            elif latest.timestamp < rec.timestamp:
+                latest = rec
+        return latest
+
+    @property
+    def earliest(self):
+        """
+        Return the record with the earliest timestamp.
+        """
+        earliest = None
+        for rec in self:
+            if earliest is None:
+                earliest = rec
+            elif earliest.timestamp >= rec.timestamp:
+                # > would also work, but >= makes this a better opposite
+                # operation to `earliest`
+                earliest = rec
+        return earliest
 
     @property
     def list(self):
