@@ -2,7 +2,7 @@ import os
 import logging
 logger = logging.getLogger('mackelab.plot')
 import datetime
-from collections import namedtuple, Callable
+from collections import namedtuple, Callable, Iterable
 import math
 import numpy as np
 import matplotlib as mpl
@@ -468,7 +468,56 @@ def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, 
                    backgroundcolor=backgroundcolor, bbox=bbox, **kwargs)
 
 # ====================================
-# Tick placement
+# Axes and tick placement
+
+def detach_spines(ax=None, amount=0.04,
+                  spines=['top', 'right', 'left', 'bottom']):
+    """
+    Detach a plot's axes (which matplotlib calls 'spines'), i.e. place
+    them a little outside the plot and truncate the bounds so they end
+    at a tick.
+    This is a quick way to get nicer looking axes.
+
+    This function assumes that ticks won't change (e.g. because of
+    rescaling), and so should be called after any functions which
+    change the axes limits or ticks.
+
+    Parameters
+    ----------
+    ax: matplotlib Axes instance
+    amount: float
+        Amount by which to move the spine[s] outwards.
+        Can also be a list of floats, specifying a different amount for each
+        spine. In this case it should have the same length as `spines`.
+    spines: list of strings
+        List the spines to move outward. By default all visible spines
+        are detached.
+
+    Example
+    -------
+    >>>> import numpy as np
+    >>>> import matplotlib.pyplot as plt
+    >>>> from mackelab.plot import detach_spines
+    >>>>
+    >>>> ax = plt.subplot(111)
+    >>>> ax.scatter(np.random.normal(0, 1, 100), np.random.normal(0,1, 100))
+    >>>> detach_spines(ax)
+    """
+    if ax is None:
+        ax = plt.gca()
+    if not isinstance(amount, Iterable):
+        amount = (amount,) * len(spines)
+    assert(all(spine in ['top', 'right', 'left', 'bottom'] for spine in spines))
+    for spine in spines:
+        if spine in ['top', 'bottom']:
+            lims = ax.get_xlim()
+            ticks = ax.get_xticks()
+        else:
+            lims = ax.get_ylim()
+            ticks = ax.get_yticks()
+        ticks = [t for t in ticks if lims[0] <= t <= lims[1]]
+        ax.spines[spine].set_position(('outward', amount[0]))
+        ax.spines[spine].set_bounds(ticks[0], ticks[-1])
 
 class LinearTickLocator(mpl.ticker.LinearLocator):
     """
