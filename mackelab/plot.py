@@ -170,7 +170,8 @@ class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
 # ====================================
 # Axis label placement
 
-def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None):
+def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None,
+                      fontdict=None, **kwargs):
     # TODO: Use ax.yaxis.set_label_coords() instead of ax.text()
     #       Allow right, left options
     #       Combine with add_corner_xlabel
@@ -194,9 +195,18 @@ def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None):
     fracsize: float between [0, 1]
         Fractional size of the label. Tick labels within this size are hidden
         to make way for the text label
+    fontdict: dict
+        Keyword arguments used to construct a `FontProperties` object, which
+        is then passed on to `ax.text()`.
+        Default:
+          {'size': 'medium',
+           'weight': 'bold'}
+    **kwargs
+        Extra keyword arguments are passed on to the `ax.text()` call.
     """
     if ax is None or ax == '':
         ax = plt.gca()
+    if fontproperties is None: fontproperties = {}
 
     fig = ax.get_figure()
     renderer = fig.canvas.get_renderer()
@@ -217,14 +227,23 @@ def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None):
              # 1.7 to provide some margin
     text.remove()
 
+    _fontdict = {'size': 'medium', 'weight': 'bold'}  # Defaults
+    _fontdict.update(fontdict)  # Overwrite with arguments
+    fontproperties = mpl.font_manager.FontProperties(**_fontdict)
+    # I don't know why the following options would be passed as keyword,
+    # but just in case.
+    if 'horizontalalignment' not in kwargs and 'ha' not in kwargs:
+        kwargs['ha'] = 'right'
+    if 'verticalalignment' not in kwargs and 'va' not in kwargs:
+        kwargs['va'] = 'top'
+    if 'transform' not in kwargs:
+        kwargs['transform'] = ax.transAxes
     # TODO: Data pos option. Allow specifying position by data coordinate,
     #       using ax.transform to convert coordinates
     # TODO: Use ylabel instead of text: allows overwriting by later ylabel call
     ax.text(axcoordx, axcoordy,label,
-            fontproperties=mpl.font_manager.FontProperties(size='medium', weight='bold'),
-            transform=ax.transAxes,
-            horizontalalignment='right',
-            verticalalignment='top')
+            fontproperties=fontproperties
+            **kwargs)
 
     # Now remove ticks overlapping with the axis label
     ax.draw(renderer)
@@ -385,43 +404,54 @@ def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
 
 def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, fontdict=None, format=True, **kwargs):
     """
-    Wraps `ax.text` with some sane default for a figure subref label.
+    Wraps `ax.text` with some sane default for a subfigure label (e.g. '(a)').
 
-    To make the label background transparent, pass the keyword argument `backgroundcolor = None`.
+    Formatting such as size and weight can be set by passing `fontdict`, which
+    is passed on to `ax.text`
+    Additional formatting (such as wrapping the label with parentheses or
+    making it upper case) can be configured by setting
+    `mackelab.rcParams['plot.subrefformat']`.
 
-    By default the label is placed outside the figure, requiring
+    To make the label background transparent, pass the keyword argument
+    `backgroundcolor = None`.
 
-    Label is a added to the axes with a `zorder` of `10`, because we almost always want it on top
-    of everything else. To place a figure element on top of the label, give it a larger `zorder`.
+    By default the label is placed outside the figure, requiring the use of
+    `plt.subplots_adjust` or similar to add a top margin.
+
+    Label is a added to the axes with a `zorder` of `10`, because we almost
+    always want it on top of everything else. To place a figure element on top
+    of the label, give it a larger `zorder`.
 
     Parameters
     ----------
     ax: axes instance
         If omitted, obtained with `pyplot.gca()`
-    s: str
+    label: str
         Label string.
     x: float (default: `ml.rcParams['plot.subrefx']`)
         x position of the label, by default the left edge.
     y: float (default: `ml.rcParams['plot.subrefy']`)
         y position of the label, by default the bottom edge.
     transform: matplotlib bbox transform (default: `ax.transAxes`)
-        Defines the units for the (x,y) coordinates. Defaults to axes units, meaning that they
-        range from 0 to 1.
+        Defines the units for the (x,y) coordinates. Defaults to axes units,
+        meaning that they range from 0 to 1.
     inside: bool  (default: `ml.rcParams['plot.subrefinside']`)
-        Whether to place the label inside or outside the plot. All this does is add the
-        'verticalalignment' keyword to `**kwargs`, setting to `bottom` (if `inside` is false)
-        or 'top' (if `inside` is true).
+        Whether to place the label inside or outside the plot. All this does is
+        add the 'verticalalignment' keyword to `**kwargs`, setting to `bottom`
+        (if `inside` is false) or 'top' (if `inside` is true).
         Defaults to the value of `ml.rcParams['plots.subrefinside']`.
         Ignored if the 'verticalalignment' keyword is provided.
     fontdict: dict
-        Passed on to the call to `ax.text`. Default value: `{'weight': 'bold', 'size': 'large'}`
+        Passed on to the call to `ax.text`.
+        Default value: `{'weight': 'bold', 'size': 'large'}`
     format: bool
         Whether to format the string label according to the format string
-        `ml.rcParams['plot.subrefformat']`. The `ml.utils.ExtendedFormatter` is used, to allow
-        format strings to specify whether labels should be upper or lower case.
+        `ml.rcParams['plot.subrefformat']`. The `ml.utils.ExtendedFormatter` is
+        used, to allow format strings to specify whether labels should be upper
+        or lower case.
     **kwargs
-        Additional keyword arguments are passed on to `ax.text()`. These can be used e.g. to set
-        text alignment, to place the label inside the figure.
+        Additional keyword arguments are passed on to `ax.text()`. These can be
+        used e.g. to set text alignment, to place the label inside the figure.
     """
     default_fontdict = {
         'weight': 'bold',
