@@ -680,10 +680,11 @@ class RecordFilter:
         return RecordList(rec for rec in self.reclst if label in rec.label)
 
     def reason(self, reason):
-        return RecordList(rec for rec in self.reclst if reason in rec.reason)
+        return RecordList(rec for rec in self.reclst
+                              if any(reason in line for line in rec.reason))
 
     def outputpath(self, output):
-        return RecordList(rec for rec in self.reclist
+        return RecordList(rec for rec in self.reclst
                           if any(output in path for path in rec.outputpath))
 
 class RecordList:
@@ -733,7 +734,9 @@ class RecordList:
         elif isinstance(rec, Record):
             return RecordView(rec)
         else:
-            raise ValueError("RecordList may only be composed of sumatra records.")
+            raise ValueError("A RecordList may only be composed of sumatra "
+                             "records, but this one contains element(s) of "
+                             "type '{}'".format(type(rec)))
 
     @property
     def latest(self):
@@ -749,7 +752,7 @@ class RecordList:
         return latest
 
     @property
-    def earliest(self):
+    def earlist(self):
         """
         Return the record with the earliest timestamp.
         """
