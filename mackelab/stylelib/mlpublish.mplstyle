@@ -28,7 +28,7 @@ savefig.pad_inches : 0.03  # 2-point margin around figures. PLOS recommendation
 # This means the figure shown in the notebook is not exactly the one exported;
 # the latter is pgf code compiled with xelatex, and so should provide consistent
 # fonts when imported into a latex document.
-pgf.rcfonts: False
+pgf.rcfonts: True  # Required for greek characters outside math environments
 pgf.texsystem: xelatex
 pgf.preamble: \usepackage{cmbright} \usepackage{unicode-math}
 #pgf.preamble: \usepackage{unicode-math}
