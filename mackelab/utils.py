@@ -69,7 +69,7 @@ def min_scalar_type(x):
     else:
         raise TypeError("Unsupported type '{}'.".format(type(x)))
 
-def int_if_close(x, tol=100, npint=None):
+def int_if_close(x, tol=100, npint=None, allow_power10=True):
     """
     Similar to numpy's `real_if_close`, casts the value to an int if it close
     to an integer value.
@@ -82,6 +82,9 @@ def int_if_close(x, tol=100, npint=None):
         Tolerance in machine epsilons.
     npint: numpy type
         Integer type to use for numpy inputs. Defaults to `numpy.int64`.
+    allow_power10: bool
+        If True, will also try to round to a power of 10, so e.g. 0.009999998
+        would be replaced with 0.01.
     Returns
     -------
     out : int | float
@@ -92,18 +95,29 @@ def int_if_close(x, tol=100, npint=None):
     if npint is None: npint = np.int64
     if ( isinstance(x, Integral)
          or (hasattr(x, 'dtype') and np.issubdtype(x.dtype, np.integer)) ):
-        return x
+        #return x
+        pass
     if isinstance(x, np.ndarray):
         cond = (abs(x - np.rint(x)) < tol * np.finfo(x.dtype.type).eps).all()
     else:
         cond = abs(x - np.rint(x)) < tol * np.finfo(x).eps
     if cond:
         if isinstance(x, (np.ndarray, np.number)):
-            return np.rint(x).astype(npint)
+            #return np.rint(x).astype(npint)
+            x = np.rint(x).astype(npint)
         else:
-            return int(round(x))
+            #return int(round(x))
+            x = int(round(x))
     else:
-        return x
+        #return x
+        pass
+
+    if allow_power10:
+        pwr = int_if_close(np.log10(x), tol, npint, allow_power10=False)
+        if isinstance(pwr, Integral):
+            x = 10**int(pwr)   # Need `int()` b/c numpy doesn't allow neg. pwr
+
+    return x
 
 class PDF:
     """
