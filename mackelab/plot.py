@@ -3,6 +3,7 @@ import logging
 logger = logging.getLogger('mackelab.plot')
 import datetime
 from collections import namedtuple, Callable, Iterable
+from operator import sub
 import math
 import numpy as np
 import matplotlib as mpl
@@ -168,6 +169,46 @@ class LogFormatterSciNotation(mpl.ticker.LogFormatterSciNotation):
                                                              base=base, exponent=exponent)))
 
 # ====================================
+# Retrieve and convert axes dimensions and units
+
+def get_display_bbox(ax=None):
+    "Return the bbox in display points of the given axes."
+    if ax is None: ax = plt.gca()
+    fig = ax.get_figure()
+    if hasattr(fig.canvas, 'renderer'):
+        bbox = ax.get_tightbbox(fig.canvas.renderer)
+             # More precise ? But in any case necessary for inset axes
+    else:
+        # Before drawing a figure, it has no renderer, so we end up here
+        bbox = ax.get_window_extent()
+    return bbox
+
+def x_to_inches(x, ax=None):
+    if ax is None: ax = plt.gca()
+    inwidth = get_display_bbox(ax).width / ax.get_figure().dpi
+    # Probably not perfect, because excludes the space for spines
+    datawidth = abs(sub(*ax.get_xlim()))
+    return x * inwidth/datawidth
+def y_to_inches(y, ax=None):
+    if ax is None: ax = plt.gca()
+    inheight = get_display_bbox(ax).height / ax.get_figure().dpi
+    # Probably not perfect, because excludes the space for spines
+    dataheight = abs(sub(*ax.get_ylim()))
+    return y * inheight/dataheight
+def inches_to_x(x_inches, ax=None):
+    if ax is None: ax = plt.gca()
+    inwidth = get_display_bbox(ax).width / ax.get_figure().dpi
+    # Probably not perfect, because excludes the space for spines
+    datawidth = abs(sub(*ax.get_xlim()))
+    return x_inches * datawidth/inwidth
+def inches_to_y(y_inches, ax=None):
+    if ax is None: ax = plt.gca()
+    inheight = get_display_bbox(ax).height / ax.get_figure().dpi
+    # Probably not perfect, because excludes the space for spines
+    dataheight = abs(sub(*ax.get_ylim()))
+    return y_inches * dataheight/inheight
+
+# ====================================
 # Axis label placement
 
 def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None,
@@ -206,7 +247,7 @@ def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None,
     """
     if ax is None or ax == '':
         ax = plt.gca()
-    if fontproperties is None: fontproperties = {}
+    if fontdict is None: fontdict = {}
 
     fig = ax.get_figure()
     renderer = fig.canvas.get_renderer()
@@ -242,7 +283,7 @@ def add_corner_ylabel(ax, label, axcoordx=None, axcoordy=1, fracsize=None,
     #       using ax.transform to convert coordinates
     # TODO: Use ylabel instead of text: allows overwriting by later ylabel call
     ax.text(axcoordx, axcoordy,label,
-            fontproperties=fontproperties
+            fontproperties=fontproperties,
             **kwargs)
 
     # Now remove ticks overlapping with the axis label
@@ -323,12 +364,7 @@ def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     x0, xn = ax.get_xlim()
     y0, yn = ax.get_ylim()
     xmargin, ymargin = ax.margins()
-    if hasattr(fig.canvas, 'renderer'):
-        bbox = ax.get_tightbbox(fig.canvas.renderer)
-             # More precise ? But in any case necessary for inset axes
-    else:
-        # Before drawing a figure, it has no renderer, so we end up here
-        bbox = ax.get_window_extent()
+    bbox = get_display_bbox(ax)
     dwidth = bbox.width
     dheight = bbox.height
     xwidth = xn - x0
@@ -501,7 +537,7 @@ def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, 
 # Axes and tick placement
 
 def detach_spines(ax=None, amount=0.04,
-                  spines=['top', 'right', 'left', 'bottom']):
+                  spines=('top', 'right', 'left', 'bottom')):
     """
     Detach a plot's axes (which matplotlib calls 'spines'), i.e. place
     them a little outside the plot and truncate the bounds so they end
@@ -537,6 +573,8 @@ def detach_spines(ax=None, amount=0.04,
         ax = plt.gca()
     if not isinstance(amount, Iterable):
         amount = (amount,) * len(spines)
+    if isinstance(spines, str):
+        spines = (spines,)
     assert(all(spine in ['top', 'right', 'left', 'bottom'] for spine in spines))
     for spine in spines:
         if spine in ['top', 'bottom']:

@@ -1428,10 +1428,10 @@ if click_loaded:
         param_paths = mackelab.parameters.expand_param_file(
             params, tmpparam_path, max_files=max_tasks)
 
-        # We need to generate our own label, as Sumatra's default is to use a timestamp
-        # which is only precise up to seconds. Thus jobs launched simultaneously would have the
-        # same label. To avoid this, we generate our own label by appending a run-specific
-        # number to the default time stamp label
+        # Sumatra's default is to use a timestamp which is only precise up to
+        # seconds. Thus jobs launched simultaneously would have the
+        # same label. To avoid this, we generate our own label by appending a
+        # run-specific number to the default time stamp label
 
         # Generate a timestamp label same as Sumatra's default
         timestamp = datetime.now()
