@@ -27,7 +27,7 @@ try:
     smttk_loaded = True
 except (NameError, ImportError):
     smttk_loaded = False
-from .utils import flatten, strip_comments
+from .utils import isinstance, flatten, strip_comments
 
 ##########################
 # Module variables
@@ -1240,7 +1240,7 @@ class ParameterSampler:
             shapes = [()]
             pop_pattern = ()
                 # pop_pattern indicates which dimensions are sampled with
-                # differente parameters for each population
+                # different parameters for each population
             for s in desc.shape:
                 if not isinstance(s, str):
                     shapes = [ r + (s,) for r in shapes ]
@@ -1256,7 +1256,10 @@ class ParameterSampler:
                                for r in shapes
                                for psize in pop_sizes ]
 
-            pop_samplers = type(self).PopSampler(desc)
+            pop_samplers = type(self).PopSampler(desc, popnames)
+            self._popnames = popnames
+            self._pop_samplers = pop_samplers
+                # Used as a hacky handle to recover the sampler params
 
             def key(*poplabels):
                 return ','.join(poplabels)
@@ -1311,9 +1314,10 @@ class ParameterSampler:
     # =======
     class PopSampler:
         """Retrieval interface for the different block samplers in ParameterSampler"""
-        def __init__(self, distparams):
+        def __init__(self, distparams, popnames):
             self.distparams = distparams
             self.key = None
+            self.popnames = popnames
 
         def __getitem__(self, key):
             self.key = key    # Used in __getattr__
@@ -1351,7 +1355,18 @@ class ParameterSampler:
         # parameter, or fall back to the global one if the first
         # isn't given
         def __getattr__(self, attr):
-            if self.key is not NoPops and attr in self.distparams[self.key]:
+            if self.key is None:
+                # Not called from within __getitem__: return a value
+                # for each population
+                if self.popnames is not None:
+                    return [self.distparams
+                              .get(α, self.distparams)
+                              .get(attr, getattr(self.distparams, attr, None))
+                             for α in self.popnames]
+                else:
+                    return getattr(self.distparams, attr)
+
+            elif self.key is not NoPops and attr in self.distparams[self.key]:
                 return getattr(self.distparams[self.key], attr)
             else:
                 return getattr(self.distparams, attr, None)
