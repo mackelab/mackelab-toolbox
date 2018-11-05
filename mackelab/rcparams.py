@@ -14,7 +14,7 @@ rcParams = {
         # - `!u`: Convert to uppercase
         # - `!l`: Convert to lower case
         # - `!c`: Capitalize the string
-    'plot.subrefinside' : True,
+    'plot.subrefinside' : False,
         # Whether to place subref labels inside or outside a plot by default.
     'plot.subrefx': 0.04,
     'plot.subrefy': 1,
