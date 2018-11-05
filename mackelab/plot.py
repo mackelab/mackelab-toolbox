@@ -207,6 +207,87 @@ def inches_to_y(y_inches, ax=None):
     # Probably not perfect, because excludes the space for spines
     dataheight = abs(sub(*ax.get_ylim()))
     return y_inches * dataheight/inheight
+def inches_to_xaxes(x_inches, ax=None):
+    if ax is None: ax = plt.gca()
+    inwidth = get_display_bbox(ax).width / ax.get_figure().dpi
+    return x_inches / inwidth
+def inches_to_yaxes(y_inches, ax=None):
+    if ax is None: ax = plt.gca()
+    inheight = get_display_bbox(ax).height / ax.get_figure().dpi
+    return y_inches / inheight
+
+
+# ====================================
+# Margins and spacing
+
+def subplots_adjust_margins(
+        fig=None, margin=None, spacing=None, *args,
+        left=None, bottom=None, right=None, top=None, wspace=None, hspace=None,
+        unit='inches'):
+    """
+    Wraps `pyplot.subplots_adjust` to allow specifying spacing values in measure
+    values, which don't change when the plot is resized. This allows to add
+    fixed spacing, e.g. to make space for a legend or axis labels.
+
+    ..Note: In contrast to `subplots_adjust`, values are specified as margins,
+    so to have 0.1 margins on left and right, specify `left=0.1, right=0.1`,
+    rather than `left=0.1, right=0.9`.
+
+    Parameters
+    ----------
+    fig: matplotlib Figure instance
+        If `None`, uses `plt.gca()`.
+    margin: float
+        Sets the value for `left`, `bottom`, `right`, `top`.
+    spacing: float
+        Sets the value for `wspace`, `hspace`.
+    left, bottom, right, top, wspace, hspace: float
+        Values, in inches, of the margins and inter-axes spacing.
+        Correspond to the same arguments for `subplots_adjust`, except that
+        values are interpreted in inches rather than axes units.
+        Override value set by `margin` and `spacing`.
+    unit: 'inches'
+        Currently only 'inches' is supported.
+    """
+    if fig is None: fig = plt.gcf()
+    vals = {'left': left, 'bottom':bottom, 'right':right, 'top':top, 'wspace':wspace, 'hspace':hspace}
+    if margin is not None:
+        for k in ['left', 'bottom', 'right', 'top']:
+            if vals[k] is None: vals[k] = margin
+    if spacing is not None:
+        for k in ['wspace', 'hspace']:
+            if vals[k] is None: vals[k] = spacing
+
+    bbox = fig.get_window_extent()  # Returns in display points
+    width_inches = bbox.width / fig.dpi
+    height_inches = bbox.height / fig.dpi
+    # `subplots_adjust()` uses the average axes dimensions for hspace & wspace
+    avg_width_inches = (np.mean([ax.get_window_extent().width
+                        for ax in fig.axes]) / fig.dpi)
+    avg_height_inches = (np.mean([ax.get_window_extent().height
+                         for ax in fig.axes]) / fig.dpi)
+    if unit == 'inches':
+        # TODO: Use transformations to support different units ?
+        for k in ['left', 'right']:
+            v = vals[k]
+            if v is not None: vals[k] = vals[k] / width_inches
+        for k in ['top', 'bottom']:
+            v = vals[k]
+            if v is not None: vals[k] = v / height_inches
+        for k in ['wspace']:
+            v = vals[k]
+            if v is not None: vals[k] = vals[k] / avg_width_inches
+        for k in ['hspace']:
+            v = vals[k]
+            if v is not None: vals[k] = vals[k] / avg_height_inches
+        for k in ['top', 'right']:
+            # Convert margin to 'distance from left/bottom'
+            v = vals[k]
+            if v is not None: vals[k] = 1 - v
+    else:
+        raise NotImplementedError
+
+    fig.subplots_adjust(**vals)
 
 # ====================================
 # Axis label placement
