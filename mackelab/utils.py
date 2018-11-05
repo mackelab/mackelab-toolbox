@@ -10,8 +10,37 @@ Created on Tue Nov 28 2017
 
 # To keep keep this module as light as possible, imports required for specific
 # functions are kept within that function
+import logging
+logger = logging.getLogger(__file__)
+import builtins
 from collections import Iterable, Callable, OrderedDict
 from enum import Enum
+
+########################
+# Functions imported by __init__.py into top level
+
+def isinstance(obj, class_or_tuple):
+    """
+    Wraps `isinstance` with an extra check to detect if a return value of
+    `False` is due to a reimported module.
+    """
+    r = builtins.isinstance(obj, class_or_tuple)
+    if not r:
+        same_name = False
+        if builtins.isinstance(class_or_tuple, Iterable):
+            same_name = any(type(obj).__name__ == cls.__name__
+                            for cls in class_or_tuple)
+        else:
+            same_name = (type(obj).__name__ == class_or_tuple.__name__)
+        if same_name:
+            logger.warning(
+                "Object type does not match any of those given, but has the "
+                "same name. You may have imported different classes with "
+                "the same name, or imported the same one more than once. "
+                "This can happen when you use `importlib.reload()`.")
+    return r
+
+########################
 
 def flatten(l, terminate=()):
     """
