@@ -71,6 +71,20 @@ def flatten(l, terminate=()):
         else:
             yield el
 
+class FixedGenerator:
+    """
+    Generator object which knows its length. Note this class is intended for use
+    with iterables that don't provide their length (e.g. generators), and as
+    such cannot check that the provided length is correct.
+    """
+    def __init__(self, iterable, length):
+        self.iterable = iterable
+        self.length = length
+    def __iter__(self):
+        return iter(self.iterable)
+    def __len__(self):
+        return self.length
+
 def strip_comments(s, comment_mark='#'):
     """
     Remove single line comments from plain text.
