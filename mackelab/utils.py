@@ -34,10 +34,12 @@ def isinstance(obj, class_or_tuple):
             same_name = (type(obj).__name__ == class_or_tuple.__name__)
         if same_name:
             logger.warning(
-                "Object type does not match any of those given, but has the "
-                "same name. You may have imported different classes with "
-                "the same name, or imported the same one more than once. "
-                "This can happen when you use `importlib.reload()`.")
+                "Object type does not match any of those given, but shares its "
+                "name '{}' with at least one of them. You may have imported "
+                " different classes with the same name, or imported the same "
+                " one more than once. "
+                "This can happen when you use `importlib.reload()`."
+                .format(type(obj).__name__))
     return r
 
 ########################
