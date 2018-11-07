@@ -23,10 +23,6 @@ axes.spines.top : False
 axes.spines.right : False
 axes.titlesize : medium
 axes.titleweight : bold
-axes.labelsize : small
-xtick.labelsize : small
-ytick.labelsize : small
-legend.fontsize : small
 legend.framealpha : 0
 legend.labelspacing: 0.2   # Default: 0.5
 legend.handlelength: 1.4   # In font-size units; default: 2.0

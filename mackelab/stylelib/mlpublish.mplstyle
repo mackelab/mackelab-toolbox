@@ -11,6 +11,10 @@ lines.markersize: 2
 font.size: 9
   # Relative font size are based on font.size. They are
   # xx-small, x-small, small, medium, large, x-large, xx-large, larger, smaller
+axes.labelsize : small
+xtick.labelsize : small
+ytick.labelsize : small
+legend.fontsize : small
 
 savefig.pad_inches : 0.03  # 2-point margin around figures. PLOS recommendation
 

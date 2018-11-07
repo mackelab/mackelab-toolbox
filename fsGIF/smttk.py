@@ -459,6 +459,11 @@ class ParameterSetFilter:
         paramset: ParameterSet
         """
         def test(paramset, key, value):
+            if not isinstance(paramset, ParameterSet):
+                logger.debug("ParameterSetFilter: skipping record whose "
+                             "`parameters` attribute is of type '{}'."
+                             .format(type(paramset)))
+                return False
             try:
                 fullkey = self.join_keys(self.key, key)
                 if fullkey is None:
