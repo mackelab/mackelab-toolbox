@@ -327,8 +327,78 @@ class SanitizedOrderedDict(SanitizedDict, OrderedDict):
         """
         return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
 
-# TODO: Find a way to pre-evaluate strings to some more efficient expresison, so
-#       we don't need to parse the string every time.
+from collections import OrderedDict, deque
+from collections.abc import MutableSequence, MutableSet, MutableMapping
+from copy import deepcopy
+class Stash:
+    """
+    Classes which use variables to record internal state be in a situation
+    where they need to be in a fresh default state for an operation, but
+    rather than flushing their state before the operation, we would rather
+    reinstate when we are done.
+    We store the variables to stash as string names rather than pointers to
+    the variables themselves, because pointers can change.
+
+    Usage
+    -----
+    Instantiate:
+        stash = Stash({vars to stash: default values})
+    Stash:
+        stash()
+    Pop:
+        stash.pop()
+    """
+    def __init__(self, obj, *stash_attrs):
+        """
+        Parameters
+        ----------
+        obj: class instance
+            The object to which we want to attach the stash.
+        stash_attrs: iterable of tuples
+            Each `(attrname, default, [string])` tuple is expanded and passed to
+            `add_stash_attr`.
+        """
+        self._obj = obj
+        self._stash_attrs = OrderedDict()
+        self._stash = deque()
+        for t in stash_attrs:
+            self.add_stash_attr(*t)
+
+    def add_stash_attr(self, attr, default, default_is_string=False):
+        """
+        Parameters
+        ----------
+        attr: str
+            Class attribute name
+        default: str | variable
+            If string, interpreted as a class attribute name. To prevent this
+            and treat the default as a plain string, set `default_is_string`.
+            Otherwise, treated as a default value (e.g. `True` or `0` and set
+            as is.
+        default_is_string: bool
+            Set to true to treat the default value as a string instead of an
+            attribute name. Has no effect if `default` is not a string.
+        """
+        if isinstance(default, (MutableSequence, MutableSet, MutableMapping)):
+            default = deepcopy(default)
+        self._stash_attrs[attr] = (default, default_is_string)
+
+    def __call__(self):
+        self._stash.append(
+            [getattr(self._obj, attr) for attr in self._stash_attrs])
+        for attr, (default, default_is_string) in self._stash_attrs.items():
+            if isinstance(default, str) and not default_is_string:
+                setattr(self._obj, attr, getattr(self._obj, default))
+            else:
+                setattr(self._obj, attr, default)
+
+    def pop(self):
+        for attr, val in zip(self._stash_attrs, self._stash.pop()):
+            setattr(self._obj, attr, val)
+
+
+# TODO: Pre-evaluate strings to some more efficient expresison, so
+#       we don't need to parse the string every time. simpleeval can do this
 import simpleeval
 import ast
 import operator
