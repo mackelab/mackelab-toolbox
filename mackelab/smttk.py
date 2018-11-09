@@ -200,19 +200,19 @@ class RecordView:
         return self._record.tags,
     @property
     def diff(self):
-        return self._records.diff
+        return self._record.diff
     @property
     def user(self):
-        return self._records.user
+        return self._record.user
     @property
     def on_changed(self):
         return self._record.on_changed
     @property
     def stdout_stderr(self):
-        return self._records.stdout_stderr
+        return self._record.stdout_stderr
     @property
     def repeats(self):
-        return self._records.repeats
+        return self._record.repeats
 
     # Reproduce the Record interface; database writing functions are deactivated.
     def __nowrite(self):
