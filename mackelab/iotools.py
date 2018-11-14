@@ -485,7 +485,7 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     if input_format is None:
         input_format = ext[1:]
     if input_format not in defined_formats:
-        raise ValueError("Unrecognized format '{}'.".format(input_format))
+        raise ValueError("Unrecognized format `{}`.".format(input_format))
 
     if input_format == 'npr':
         with wrapped_open(file, 'rb') as f:
