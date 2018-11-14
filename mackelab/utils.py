@@ -164,6 +164,20 @@ def int_if_close(x, tol=100, npint=None, allow_power10=True):
 
     return x
 
+def less_close(x1, x2, rtol=1e-5, atol=1e-8):
+    """
+    'less than or equal' test where 'isclose' is used to test
+    equality. `atol` and `rtol` are parameters for `isclose`.
+    """
+    return x1 < x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
+
+def greater_close(x1, x2, rtol=1e-5, atol=1e-8):
+    """
+    'greater than or equal' test where 'isclose' is used to test
+    equality. `atol` and `rtol` are parameters for `isclose`.
+    """
+    return x1 > x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
+
 class PDF:
     """
     Create an object from a pdf file which allows it to be viewed in a notebook.
