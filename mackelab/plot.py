@@ -136,7 +136,25 @@ assert(plt.style.use is mpl.style.use)
 # ====================================
 # Editing plot elements
 
-def set_legend_linewidth(linewidth, ax=None, legend=None):
+def set_legend_linewidth(linewidth=1.5, ax=None, legend=None):
+    """
+    Change the linewidth of legend handles.
+    By default the lines used to label the legend are the same width as in
+    the plot, which can make them quite thin.
+    If plot lines use different width, this can also be used to set their
+    label lines to the same width.
+
+    Parameters
+    ----------
+    linewidth: float
+        Line width to which to set the legend label lines.
+    ax: axis instance (optional)
+    legend: legend instance (optional)
+        Legend whose handles we want to change.
+        Only one of `ax` and `legend` should be provided. If neither
+        is given, `plt.gca().get_legend()` is used to retrieve the
+        legend of the current axes.
+    """
     if ax is not None and legend is not None:
         logger.warning("Both `ax` and `legend` were specified. Ignoring `ax`.")
     if legend is None:
