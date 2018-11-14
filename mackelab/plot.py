@@ -5,6 +5,7 @@ import datetime
 from collections import namedtuple, Callable, Iterable
 from operator import sub
 import math
+import itertools
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ from parameters import ParameterSet
 
 from . import colors
 from . import utils
+from .utils import less_close, greater_close
 from .rcparams import rcParams
 
 φ = 1.61803  # Golden ratio. Good default for plot aspect ratio
@@ -68,60 +70,68 @@ def saverep(basename, comment=None, pdf=True, png=True):
 # ====================================
 # Plotting styles
 
-class _Style:
-    # TODO: Make singleton class
+# Inject a wrapper around `mpl.style.use`, which checks if a missing
+# style just needs to be installed.
+
+# class _Style:
+#     # TODO: Make singleton class
+#     """
+#     Provides some wrappers around methods in `pyplot.style`.
+#     """
+#
+#     def __getattr__(self, attr):
+#         """Redirect calls with no special handlers to pyplot.style."""
+#         return getattr(plt.style, attr)
+#
+#     @staticmethod
+#     def use(style):
+#         return use_style(style)
+# style = _Style()
+
+mpl_use_style = mpl.style.use
+def use_style(style):
     """
-    Provides some wrappers around methods in `pyplot.style`.
+    Simply calls `pyplot.style.use`.
+    If the call fails, checks to see if it's because the mackelab styles
+    weren't yet installed; if that's the case, prints a more useful error
+    message.
     """
-
-    def __getattr__(self, attr):
-        """Redirect calls with no special handlers to pyplot.style."""
-        return getattr(plt.style, attr)
-
-    @staticmethod
-    def use(style):
-        """
-        Simply calls `pyplot.style.use`.
-        If the call fails, checks to see if it's because the mackelab styles
-        weren't yet installed; if that's the case, prints a more useful error
-        message.
-        """
-        try:
-            plt.style.use(style)
-        except OSError as e:
-            # Check if the style just needs to be installed
-            if isinstance(style, str):
-                style = [style]
-            elif isinstance(style, dict):
-                # dicts don't represent style files, so problem is not uninstalled styles
-                raise(e)
-            libpath = os.path.dirname(os.path.dirname(__file__))
-            for st in style:
-                try:
-                    plt.style.use(st)
-                except OSError:
-                    # Check if this is a mackelab style
-                    stylename, styleext = os.path.splitext(st)
-                    if styleext not in ('', '.mplstyle'):
-                        raise ValueError("Unrecognized plot style extension '{}'.".format(styleext))
-                    stylename += '.mplstyle'
-                    for dirpath, dirnames, filenames in os.walk(os.path.join(libpath, 'mackelab/stylelib')):
-                        if '__pycache__' in dirnames: dirnames.remove('__pycache__')
-                        if stylename not in filenames:
-                            # At least one unfound style is not a mackelab style
-                            raise(e)
-            # If we made it here, the only problems are uninstalled mackelab styles
-            script = os.path.join(libpath, 'install_styles.py')
-            logger.warning("The mackelab plot styles were not found, so the produced plots "
-                           "will look different than in the paper.\n"
-                           "To install the styles, run the following:\n"
-                           "shell:    python {}\nnotebook: %run {}\n"
-                           "If you are running a kernel (e.g. within a "
-                           "notebook), reload the style library with "
-                           "`plt.style.reload_library`."
-                           .format(script, script))
-
-style = _Style()
+    try:
+        mpl_use_style(style)
+    except OSError as e:
+        # Check if the style just needs to be installed
+        if isinstance(style, str):
+            style = [style]
+        elif isinstance(style, dict):
+            # dicts don't represent style files, so problem is not uninstalled styles
+            raise(e)
+        libpath = os.path.dirname(os.path.dirname(__file__))
+        for st in style:
+            try:
+                plt.style.use(st)
+            except OSError:
+                # Check if this is a mackelab style
+                stylename, styleext = os.path.splitext(st)
+                if styleext not in ('', '.mplstyle'):
+                    raise ValueError("Unrecognized plot style extension '{}'.".format(styleext))
+                stylename += '.mplstyle'
+                for dirpath, dirnames, filenames in os.walk(os.path.join(libpath, 'mackelab/stylelib')):
+                    if '__pycache__' in dirnames: dirnames.remove('__pycache__')
+                    if stylename not in filenames:
+                        # At least one unfound style is not a mackelab style
+                        raise(e)
+        # If we made it here, the only problems are uninstalled mackelab styles
+        script = os.path.join(libpath, 'install_styles.py')
+        logger.warning("The mackelab plot styles were not found, so the produced plots "
+                       "will look different than intended.\n"
+                       "To install the styles, run the following:\n"
+                       "shell:    python {}\nnotebook: %run {}\n"
+                       "If you are running a kernel (e.g. within a "
+                       "notebook), reload the style library with "
+                       "`plt.style.reload_library`."
+                       .format(script, script))
+mpl.style.use = use_style
+assert(plt.style.use is mpl.style.use)
 
 # ====================================
 # Editing plot elements
@@ -216,6 +226,13 @@ def inches_to_yaxes(y_inches, ax=None):
     inheight = get_display_bbox(ax).height / ax.get_figure().dpi
     return y_inches / inheight
 
+def inches_to_points(a, fig=None):
+    if fig is None: fig = plt.gcf()
+    return a * fig.dpi
+def points_to_inches(a, fig=None):
+    if fig is None: fig = plt.gcf()
+    return a / fig.dpi
+
 
 # ====================================
 # Margins and spacing
@@ -236,7 +253,7 @@ def subplots_adjust_margins(
     Parameters
     ----------
     fig: matplotlib Figure instance
-        If `None`, uses `plt.gca()`.
+        If `None`, uses `plt.gcf()`.
     margin: float
         Sets the value for `left`, `bottom`, `right`, `top`.
     spacing: float
@@ -617,8 +634,8 @@ def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, 
 # ====================================
 # Axes and tick placement
 
-def detach_spines(ax=None, amount=0.04,
-                  spines=('top', 'right', 'left', 'bottom')):
+def detach_spines(ax=None, amount=0.03,
+                  spines=('top', 'right', 'bottom', 'left')):
     """
     Detach a plot's axes (which matplotlib calls 'spines'), i.e. place
     them a little outside the plot and truncate the bounds so they end
@@ -636,6 +653,7 @@ def detach_spines(ax=None, amount=0.04,
         Amount by which to move the spine[s] outwards.
         Can also be a list of floats, specifying a different amount for each
         spine. In this case it should have the same length as `spines`.
+        Amounts are specified in inches.
     spines: list of strings
         List the spines to move outward. By default all visible spines
         are detached.
@@ -653,19 +671,36 @@ def detach_spines(ax=None, amount=0.04,
     if ax is None:
         ax = plt.gca()
     if not isinstance(amount, Iterable):
-        amount = (amount,) * len(spines)
+        amount = [amount]
+    Δs = itertools.cycle(inches_to_points(a) for a in amount)
+        # Allow specifying e.g. only 2 amounts
     if isinstance(spines, str):
         spines = (spines,)
+    ε = np.finfo(np.float32).eps
     assert(all(spine in ['top', 'right', 'left', 'bottom'] for spine in spines))
-    for spine in spines:
+    for spine, Δ in zip(spines, Δs):
+        if not ax.spines[spine].get_visible():
+            continue
         if spine in ['top', 'bottom']:
             lims = ax.get_xlim()
-            ticks = ax.get_xticks()
+            _ticks = ax.get_xticks()
         else:
             lims = ax.get_ylim()
-            ticks = ax.get_yticks()
-        ticks = [t for t in ticks if lims[0] <= t <= lims[1]]
-        ax.spines[spine].set_position(('outward', amount[0]))
+            _ticks = ax.get_yticks()
+        ticks = [t for t in _ticks
+                   if (less_close(lims[0], t, atol=0)
+                       and less_close(t, lims[1], atol=0))]
+        # HACK because 0 in particular tends to be just outside the limits,
+        # but close enough to still be displayed.
+        # Factor of 1% is chosen arbitrarily
+        if 0 in _ticks and 0 not in ticks:
+            d = abs(lims[1] - lims[0])
+            if 0 < lims[0] and abs(lims[0]) < 0.01*d:
+                ticks = [0] + ticks
+            elif 0 > lims[-1] and abs[lims[-1]] < 0.01*d:
+                ticks = ticks + [0]
+
+        ax.spines[spine].set_position(('outward', Δ))
         ax.spines[spine].set_bounds(ticks[0], ticks[-1])
 
 class LinearTickLocator(mpl.ticker.LinearLocator):
