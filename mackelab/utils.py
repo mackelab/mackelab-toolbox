@@ -44,7 +44,7 @@ def isinstance(obj, class_or_tuple):
 
 ########################
 
-def flatten(l, terminate=()):
+def flatten(*l, terminate=(str, bytes)):
     """
     Flatten any Python iterable. Taken from https://stackoverflow.com/a/2158532.
 
@@ -57,6 +57,7 @@ def flatten(l, terminate=()):
         list of dictionaries, specifying `terminate=dict` or `terminate=(dict,)`
         would ensure that the dictionaries are treated as atomic elements and
         not expanded.
+        Default terminates on `str` and `bytes` types.
     """
     # Normalize `terminate` argument
     if not isinstance(terminate, Iterable):
@@ -66,8 +67,9 @@ def flatten(l, terminate=()):
     # Flatten `l`
     for el in l:
         if (isinstance(el, Iterable)
-            and not isinstance(el, (str, bytes) + terminate)):
-            yield from flatten(el, terminate=terminate)
+            and not isinstance(el, terminate)):
+            for ell in el:
+                yield from flatten(ell, terminate=terminate)
         else:
             yield el
 
@@ -93,6 +95,25 @@ def strip_comments(s, comment_mark='#'):
     """
     return '\n'.join(line.partition(comment_mark)[0].rstrip()
                      for line in s.splitlines())
+
+def stablehash(o):
+    """
+    Builtin `hash` is not stable across sessions for security reasons.
+    This function can be used when consistency of a hash is required, e.g.
+    for on-disk caches.
+    """
+    import hashlib
+    return hashlib.sha1(_tobytes(o)).hexdigest()
+
+def _tobytes(o):
+    if isinstance(o, bytes):
+        return o
+    elif isinstance(o, str):
+        return o.encode('utf8')
+    elif isinstance(o, Iterable):
+        return b''.join(_tobytes(oi) for oi in o)
+    else:
+        return bytes(o)
 
 def min_scalar_type(x):
     """
