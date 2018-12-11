@@ -76,10 +76,43 @@ def monochrome_palette(basecolor, nstops, s_range=(1, 0.3), v_range=(1, 1.3), ab
                                                      for s_el, v_el in zip(slist, vlist)]
     return clist
 
+def invert_value(c):
+    """
+    Return a color which has same hue and saturation but inverted value
+    (i.e. lightness). So dark colors become light and vice-versa.
+
+    Parameters
+    ----------
+    c: matplotlib color (any format)
+        Can also be a list of colors.
+
+    Returns
+    -------
+    out: matplotlib color | list
+        If `c` is a list, returns a list of colors.
+    """
+    try:
+        rgba = mpl.colors.to_rgba(c)
+    except ValueError:
+        if isinstance(c, Iterable):
+            return [invert_value(color) for color in c]
+        else:
+            raise
+    else:
+        r, g, b, a = rgba
+        h, s, v = mpl.colors.rgb_to_hsv((r,g,b))
+        v = 1 - v
+        rgb = tuple(mpl.colors.hsv_to_rgb((h, s, v)))
+        if a == 1:
+            new_c = mpl.colors.to_hex(rgb)
+        else:
+            new_c = rgb + (a,)
+        return new_c
 
 def darken(c, amount=0.1, relative=False):
     """
-    Note: Unless we trigger clipping, `darken(lighten(c))` returns `c`.
+    ..Note:: Unless we trigger clipping, `darken(lighten(c))` returns `c` when
+    `relative` is `False`.
 
     Parameters
     ----------
@@ -93,25 +126,36 @@ def darken(c, amount=0.1, relative=False):
         (black).
         Note that `darken(lighten(c, relative=True), relative=True)` does
         not equal `c`.
+
     Returns
     -------
     out: matplotlib color | list
         If `c` is a list, returns a list of colors.
     """
     assert(0 <= amount <= 1)
-    if (not isinstance(c, (str, bytes))
-        and isinstance(c, Iterable)):
-        return [darken(color, amount, relative) for color in c]
+    try:
+        rgba = mpl.colors.to_rgba(c)
+    except ValueError:
+        if isinstance(c, Iterable):
+            return [darken(color, amount, relative) for color in c]
+        else:
+            raise
     else:
-        rgb = mpl.colors.to_rgb(c)
-        h, s, v = mpl.colors.rgb_to_hsv(rgb)
+        r, g, b, a = rgba
+        h, s, v = mpl.colors.rgb_to_hsv((r,g,b))
         if relative:
             amount = amount * v
         v = np.clip( v-amount, 0, 1 )
-        return mpl.colors.to_hex(mpl.colors.hsv_to_rgb((h, s, v)))
+        rgb = tuple(mpl.colors.hsv_to_rgb((h, s, v)))
+        if a == 1:
+            new_c = mpl.colors.to_hex(rgb)
+        else:
+            new_c = rgb + (a,)
+        return new_c
 
 def lighten(c, amount=0.1, relative=False):
     """
+    TODO: Update following `darken` pattern.
     Note: Unless we trigger clipping, `darken(lighten(c))` returns `c`.
 
     Parameters
@@ -120,6 +164,7 @@ def lighten(c, amount=0.1, relative=False):
     amount: float
         Number between 0 and 1. Will be added to the color's value,
         clipping to keep the result between 0 and 1.
+
     Returns
     -------
     out: matplotlib color | list
