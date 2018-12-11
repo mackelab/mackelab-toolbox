@@ -134,6 +134,28 @@ mpl.style.use = use_style
 assert(plt.style.use is mpl.style.use)
 
 # ====================================
+# Standard sets of style changes
+
+def invert_color_values(props=None):
+    if isinstance(props, str):
+        props = [props]
+    if props is None:
+        props = ['axes.edgecolor', 'axes.labelcolor',
+                'xtick.color', 'ytick.color',
+                'text.color',
+                'axes.prop_cycle']
+    prop_keys = [k for k in props if 'cycle' not in k]
+    cycle_keys = [k for k in props if 'cycle' in k]
+
+    for key in prop_keys:
+        mpl.rcParams[key] = colors.invert_value(mpl.rcParams[key])
+
+    for key in cycle_keys:
+        cycle_dict = mpl.rcParams[key].by_key()
+        cycle_dict['color'] = colors.invert_value(cycle_dict['color'])
+        mpl.rcParams[key] = mpl.cycler(**cycle_dict)
+
+# ====================================
 # Editing plot elements
 
 def set_legend_linewidth(linewidth=1.5, ax=None, legend=None):
@@ -464,9 +486,10 @@ def add_corner_xlabel(ax, label, axcoordx=1, axcoordy=-0.08, fracsize=0.69):
                 xticklabels = xticklabels[:i] + [""] + xticklabels[i+1:]
     ax.set_xticklabels(xticklabels)
 
-def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0):
+def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
     """
     offset in inches
+    **kwargs passed on to ax.xaxis.set_label_text
     """
     if ax is None:
         ax = plt.gca()
@@ -505,11 +528,12 @@ def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     data_fontheight = fontsize/dpi * yheight/dheight  # FIXME: too small
     y -= data_linewidth - 1.0*data_fontheight
     ax.xaxis.set_label_coords(x, y, transform=ax.transData)
-    ax.xaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='top')
+    ax.xaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='top', **kwargs)
 
-def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0):
+def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
     """
     offset in inches
+    **kwargs passed on to ax.yaxis.set_label_text.
     """
     if ax is None:
         ax = plt.gca()
@@ -552,7 +576,7 @@ def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     # TODO: Get rid of fudge factor
     #x -= 0 * fontsize/dpi * xwidth/dwidth
     ax.yaxis.set_label_coords(x, y, transform=ax.transData)
-    ax.yaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='bottom')
+    ax.yaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='bottom', **kwargs)
 
 def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, fontdict=None, format=True, **kwargs):
     """
@@ -678,13 +702,14 @@ def detach_spines(ax=None, amount=0.03,
 
     Example
     -------
-    >>>> import numpy as np
-    >>>> import matplotlib.pyplot as plt
-    >>>> from mackelab.plot import detach_spines
-    >>>>
-    >>>> ax = plt.subplot(111)
-    >>>> ax.scatter(np.random.normal(0, 1, 100), np.random.normal(0,1, 100))
-    >>>> detach_spines(ax)
+
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+    >>> from mackelab.plot import detach_spines
+    >>>
+    >>> ax = plt.subplot(111)
+    >>> ax.scatter(np.random.normal(0, 1, 100), np.random.normal(0,1, 100))
+    >>> detach_spines(ax)
     """
     if ax is None:
         ax = plt.gca()
@@ -855,3 +880,55 @@ def plot(data, **kwargs):
     else:
         logger.warning("Plotting of {} data is not currently supported."
                        .format(type(data)))
+
+
+# =================================
+# Changing the property cycler
+
+from cycler import cycler
+
+def adjust_cycler(prop, f, cycle=None):
+    """
+    Adjust a property cycler by calling a function on every step.
+
+    Parameters
+    ----------
+    prop: str
+        Name of the property to change.
+    f: function
+        Function taking a property value and returning another. The return
+        value should be compatible with the format expected of a property
+        `prop`.
+    cycle: property cycler (optional)
+        The property cycler we wish to adjust. If not specified, use the
+        matplotlib default.
+
+    Returns
+    -------
+    A copy of `cycle` with the applied modifications.
+    """
+    if cycle is None:
+        cycle = mpl.rcParams['axes.prop_cycle']
+    to_rgba = mpl.colors.ColorConverter().to_rgba
+    props = {}
+    for proplist in cycle:
+        for propname, val in proplist.items():
+            if propname == prop:
+                val = f(val)
+            if propname not in props:
+                props[propname] = []
+            props[prop].append(val)
+    return cycler(**props)
+
+def set_cycler_alpha(alpha, cycle=None):
+    """
+    Set the alpha (transparency) of the colours in the property cycler.
+    If none is provided, use the current one.
+
+    Returns
+    -------
+    Property cycler
+    """
+    def set_alpha(c):
+        return mpl.colors.ColorConverter().to_rgba(c, alpha)
+    return adjust_cycler('color', set_alpha, cycle)
