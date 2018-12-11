@@ -1,3 +1,6 @@
+# Uncomplete / deprecated tests
+tests/stash/*
+
 # Development files and python cache
 /*.pyc
 /*.egg
