@@ -27,7 +27,7 @@ def using_gpu():
 import shelve
 import builtins
 import inspect
-from collections import Counter
+from collections import Counter, OrderedDict
 import theano_shim as shim
 from . import utils
 class CachingError(RuntimeError):
@@ -66,10 +66,15 @@ class GraphCache:
         `GraphCache([cachename], [classes], foo)`.
     """
     on_cache_fail = 'warn'  # One of 'ignore', 'warn', 'raise'
+    num_dep_caches = 5  # Keep caches for this many different dependency hashes
+                        # Least recently used dependencies are dropped when
+                        # their number exceeds `num_dep_caches`
 
     def __init__(self, cachename, *Classes, modules=()):
         self.cachename = cachename
 
+        if type(self) not in Classes:
+            Classes += (type(self),)
         # Compute a hash based on all the class dependencies
         classhashes = []
         for cls in Classes:
@@ -110,15 +115,33 @@ class GraphCache:
         dependencyhash = utils.stablehash(classhashes+modulehashes)
 
         # Open the cache (`shelve` will create it if needed) and check
-        # if the dependency hash is the same as before
-        # If it isn't, flush the cache
+        # if the dependency hash is new. If it is and the we already have
+        # the maximum number of caches, delete the oldest.
+        # Dependency hashes are used as keys: for each dependency, we store
+        # a dictionary of cached objects. Hashes are also stored in the
+        # 'dependencyhashes' entry in a list. Every time we use a hash,
+        # it is moved to the end of the list, such that the first element
+        # is always the least recently used.
         with shelve.open(self.cachename) as cache:
-            if 'dependencyhash' not in cache:
-                cache['dependencyhash'] = dependencyhash
-            elif cache['dependencyhash'] != dependencyhash:
-                logger.debug("Clearing stale symbolic graph cash.")
-                cache.clear()
-                cache['dependencyhash'] = dependencyhash
+            if 'dependencyhashes' not in cache:
+                cache['dependencyhashes'] = []
+            dephashes = cache['dependencyhashes']
+
+            if dependencyhash in cache['dependencyhashes']:
+                dephashes.remove(dependencyhash)
+                    # Remove from list; we'll add it back to the end
+            elif len(dephashes) > self.num_dep_caches:
+                logger.debug("Maximum number of caches exceeded; clearing "
+                             "oldest.")
+                oldest = dephashes[0]
+                if oldest in cache:
+                    del cache[oldest]  # Remove caches for this dependency
+                del dephashes[0]   # Remove dependency from dep. list
+            dephashes.append(dependencyhash)
+            # All dependency hashes should be unique
+            assert len(dephashes) == len(set(dephashes))
+            cache['dependencyhashes'] = dephashes
+            cache[dependencyhash] = {}
 
     def __str__(self):
         with shelve.open(self.cachename) as cache:
@@ -189,7 +212,7 @@ class GraphCache:
     def associate_by_name(targets, sources):
         return GraphCache.associate_by_attr(targets, sources, 'name')
 
-    def get(self, graph, updates, other_inputs=(), rng=None):
+    def get(self, graph, updates=None, other_inputs=(), rng=None):
         """
         Cache key is a combination of :param:graph and :param:updates.
         Since the cached graphs are typically manipulated versions of the keys,
@@ -215,11 +238,14 @@ class GraphCache:
         rng: random stream object (shim.RandomStreams or symbolic equivalent)
             If graphs depend on random numbers, the source RNG must be provided.
         """
-        graphs = [graph] if isinstance(graph, shim.cf.GraphType) else graph
+        graphs = [graph] if isinstance(graph, shim.cf.GraphTypes) else graph
+        if updates is None: updates = OrderedDict()
         all_graphs = (graphs + list(updates.keys())
                       + list(updates.values()) + list(other_inputs))
         inputs = shim.graph.symbolic_inputs(all_graphs)
         with shelve.open(self.cachename) as cache:
+            cache = cache[cache['dependencyhashes'][-1]]
+                # Latest dependency hash is always the current one
             graphhash = self.get_graph_hash(graph)
             updateshash = self.get_graph_hash(updates.items())
             r = cache.get(graphhash+updateshash, None)
@@ -319,24 +345,43 @@ class GraphCache:
         """
         # Check that argument types are correct
         if val_graph is None:
-            assert isinstance(key_graph, tuple)
-            assert isinstance(key_updates, tuple)
-            assert val_graph is None
+            # key, val are either packaged as tuples, or consist of only
+            # a graph.
             assert val_updates is None
-            if len(val_graph) == 2:
-                val_graph, val_updates = val_graph
-            elif len(val_graph) == 3:
-                assert rng is None
-                val_graph, val_updates, rng = val_graph
+            assert rng is None
+            val_graph = key_updates
+            if (isinstance(key_graph, shim.cf.GraphTypes)
+                or (isinstance(key_graph, (list, tuple)) and
+                    all(isinstance(g, shim.cf.GraphTypes) for g in key_graph))):
+                key_updates = OrderedDict()
             else:
-                raise TypeError("If setting a cached value with a tuple, it "
-                                "must be of the form `(graph, updates)` or "
-                                "`(graph, updates, rng)`.")
-            if len(key_graph) == 2:
-                key_graph, key_updates = key_graph
+                assert isinstance(key_graph, tuple)
+                if len(key_graph) == 1:
+                    key_graph = key_graph[0]
+                    key_updates = OrderedDict()
+                elif len(key_graph) == 2:
+                    key_graph, key_updates = key_graph
+                else:
+                    raise TypeError("If using a tuple for a cache key, it "
+                                    "must be of the form `(graph, updates)`.")
+            if (isinstance(val_graph, shim.cf.GraphTypes)
+                or (isinstance(val_graph, (list, tuple)) and
+                    all(isinstance(g, shim.cf.GraphTypes) for g in val_graph))):
+                val_updates = OrderedDict()
             else:
-                raise TypeError("If using a tuple for a cache key, it "
-                                "must be of the form `(graph, updates)`.")
+                assert isinstance(key_updates, tuple)
+                if len(val_graph) == 1:
+                    val_graph = val_graph[0]
+                    val_updates = None
+                elif len(val_graph) == 2:
+                    val_graph, val_updates = val_graph
+                elif len(val_graph) == 3:
+                    val_graph, val_updates, rng = val_graph
+                else:
+                    raise TypeError(
+                        "If setting a cached value with a tuple, it must be "
+                        "of the form `(graph, updates)` or `(graph, updates, "
+                        "rng)`.")
 
         # if not isinstance(key_graph, shim.cf.SymbolicType):
         #     raise TypeError(
@@ -344,9 +389,13 @@ class GraphCache:
         # if not isinstance(val_graph, shim.cf.SymbolicType):
         #     raise TypeError(
         #         "`val_graph` must be a symbolic expression.")
-        if not isinstance(key_updates, OrderedDict):
+        if key_updates is None:
+            key_updates = OrderedDict()
+        elif not isinstance(key_updates, OrderedDict):
             raise TypeError("`key_updates` must be an OrderedDict.")
-        if not isinstance(val_updates, OrderedDict):
+        if val_updates is None:
+            val_updates = OrderedDict()
+        elif not isinstance(val_updates, OrderedDict):
             raise TypeError("`val_updates` must be an OrderedDict.")
         # Build the list of all inputs
         if isinstance(val_graph, shim.cf.TerminatingTypes):
@@ -387,6 +436,8 @@ class GraphCache:
             return  # Abort saving to cache
 
         with shelve.open(self.cachename) as cache:
+            cache = cache[cache['dependencyhashes'][-1]]
+                # Latest dependency hash is always the current one
             logger.debug("Caching graph.")
             graphhash = self.get_graph_hash(key_graph)
             updateshash = self.get_graph_hash(key_updates.items())
@@ -402,8 +453,11 @@ class GraphCache:
                     raise CachingError(msg).with_traceback(e.__traceback__)
 
 class CompiledGraphCache(GraphCache):
-    def get(self, graph, updates, rng):
+    def get(self, graph, updates=None, other_inputs=None, rng=None):
+        if updates is None: updates = OrderedDict()
         with shelve.open(self.cachename) as cache:
+            cache = cache[cache['dependencyhashes'][-1]]
+                # Latest dependency hash is always the current one
             graphhash = self.get_graph_hash(graph)
             updateshash = self.get_graph_hash(updates.items())
             f = cache.get(graphhash+updateshash, None)
@@ -417,9 +471,14 @@ class CompiledGraphCache(GraphCache):
                 logger.error("Cannot load graph from cache: cached graph "
                              "requires a random number generator")
 
-        graphs = [graph] if isinstance(graph, shim.cf.GraphType) else graph
+        if other_inputs is None:
+            other_inputs = []
+        elif isinstance(other_inputs, shim.cf.GraphTypes):
+            other_inputs = [other_inputs]
+        graphs = [graph] if isinstance(graph, shim.cf.GraphTypes) else graph
         # Build the substitution dictionary for the shared variables
-        all_graphs = graphs + list(updates.keys()) + list(updates.values())
+        all_graphs = (graphs + list(updates.keys()) + list(updates.values())
+                      + list(other_inputs))
         shared_inputs = [si for si in shim.graph.shared_inputs(all_graphs)
                          if not isinstance(si, shim.cf.RandomStateType)]
         shared_inputs_to_sub = [si for si in f.get_shared()
@@ -453,7 +512,16 @@ class CompiledGraphCache(GraphCache):
 
         return wrapped_f
 
-    def set(self, graph, updates, compiled_graph, rng=None):
+    def set(self, graph, updates, compiled_graph=None, rng=None):
+        """
+        :param:updates may be omitted: `set(graph, compiled_graph)`
+        """
+        if isinstance(updates, shim.cf.CompiledType):
+            compiled_graph = updates
+            updates = OrderedDict()
+        elif updates is None:
+            updates = OrderedDict()
+
         # Check that argument types are correct
         if not isinstance(updates, OrderedDict):
             raise TypeError("`updates` must be an OrderedDict.")
@@ -488,9 +556,12 @@ class CompiledGraphCache(GraphCache):
             return  # Abort saving to cache
 
         with shelve.open(self.cachename) as cache:
+            cache = cache[cache['dependencyhashes'][-1]]
+                # Latest dependency hash is always the current one
             logger.debug("Caching compiled graph.")
             graphhash = self.get_graph_hash(graph)
             updateshash = self.get_graph_hash(updates.items())
+            assert compiled_graph is not None
             try:
                 cache[graphhash+updateshash] = (compiled_graph, rng)
             except Exception as e:
