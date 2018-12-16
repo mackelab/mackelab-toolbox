@@ -112,9 +112,10 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
                                    * p[1])
             else:
                 if p[1].shape != p[0].get_value().shape:
-                    raise ValueError("Provided mask (shape {}) for parameter {} "
-                                     "(shape {}) has a different shape."
-                                     .format(p[1].shape, p[0].name, p[0].get_value().shape))
+                    raise ValueError(
+                        "Provided mask (shape {}) for parameter {} "
+                        "(shape {}) has a different shape."
+                        .format(p[1].shape, p[0].name, p[0].get_value().shape))
                 param_masks.append(p[1])
         else:
             param_masks.append(None)
@@ -125,7 +126,14 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     lrs = {}
 
     if grad_fn is None:
-        grads = T.grad(cost, params)
+        try:
+            grads = T.grad(cost, params)
+        except theano.gradient.DisconnectedInputError as e:
+            disconnected_inputs = set(params).difference(
+                shim.graph.shared_inputs(cost))
+            raise theano.gradient.DisconnectedInputError(
+                "The following parameters do not appear in the expression for "
+                "the cost: {}.".format(disconnected_inputs))
     else:
         grads = grad_fn(cost, params)
 
@@ -182,11 +190,11 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
             p.name = ""
             namem = namev = None
         if hasattr(p, 'broadcastable'):
-            m = theano.shared(initval, broadcastable=p.broadcastable, name=namem)
-            v = theano.shared(initval, broadcastable=p.broadcastable, name=namev)
+            m = shim.shared(initval, broadcastable=p.broadcastable, name=namem)
+            v = shim.shared(initval, broadcastable=p.broadcastable, name=namev)
         else:
-            m = theano.shared(initval, name=namem)
-            v = theano.shared(initval, name=namev)
+            m = shim.shared(initval, name=namem)
+            v = shim.shared(initval, name=namev)
         m_t = (b1 * g) + ((1. - b1) * m)
         # m_t = shim.print(m_t, 'm_t (' + p.name + ')')
         v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
