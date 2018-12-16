@@ -46,7 +46,7 @@ class PyMCPrior(OrderedDict):
     """
     [...]
     Can subclass to support other distributions; just need to redefine
-    `get_dist`, redirecting  to `super().set_dist()` for standard ones.
+    `get_dist`, redirecting  to `super().get_dist()` for standard ones.
 
     A PyMCPrior is an ordered dictionary of {key: PriorVar} pairs. Keys are the variable
     names. The entries are guaranteed to be ordered in the same way
@@ -55,11 +55,11 @@ class PyMCPrior(OrderedDict):
         - model_var
         - transform
         - mask
-    `model_var` is a symbolic variable in our computational graph. `pymc_var` is the
-    equivalent PyMC3 variable. To create a computational graph for sampling with PyMC3,
-    we can use `theano.clone()` to substitute `model_var` with `pymc_var` in the graph.
-    If a mask is applied, `pymc_var` will depend on `model_var` for those values for
-    which there is no prior.
+    `model_var` is a symbolic variable in our computational graph. `pymc_var`
+    is the equivalent PyMC3 variable. To create a computational graph for
+    sampling with PyMC3, we can use `theano.clone()` to substitute `model_var`
+    with `pymc_var` in the graph. If a mask is applied, `pymc_var` will depend
+    on `model_var` for those values for which there is no prior.
     The name assigned to the corresponding PyMC3 variable is given
     by the transform's 'names.new' attrtibute. This name can be used to retrieve
     the variable from the PyMC3 model.
