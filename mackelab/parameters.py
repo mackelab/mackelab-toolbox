@@ -347,6 +347,9 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
         If true, the parameters are normalized by using the result of
         `params_to_arrays(params)` to calculate the filename.
     """
+    if isinstance(params, dict):
+        # TODO: Any reason this implicit conversion should throw a warning ?
+        params = ParameterSet(params)
     if (not isinstance(params, (ParameterSet, str))
         and isinstance(params, Iterable)):
         # Get a hash for each ParameterSet, and rehash them together
