@@ -29,8 +29,12 @@ setup(
         'pymc3': [
             'pymc3'
         ],
+        'luigi': [
+            'psutil'
+        ],
         'all': [
-            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2'
+            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2',
+            'psutil'
         ]
     },
     entry_points = {
