@@ -314,9 +314,9 @@ def normalize_type(value):
     # No conversion match was found: return value unchanged
     return value
 
-def get_filename(params, suffix=None, convert_to_arrays=True):
+def digest(params, suffix=None, convert_to_arrays=True):
     """
-    Generate a unique filename by hashing a parameter file.
+    Generate a unique name by hashing a parameter file.
 
     ..Note:
     Parameters whose names start with '_' are ignored. This means that two
@@ -353,8 +353,10 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
     if (not isinstance(params, (ParameterSet, str))
         and isinstance(params, Iterable)):
         # Get a hash for each ParameterSet, and rehash them together
-        basenames = [get_filename(p, None, convert_to_arrays) for p in params]
-        basename = hashlib.sha1(bytes(''.join(filenames), 'utf-8')).hexdigest()
+        basenames = [p.digest() if hasattr(p, 'digest')
+                     else digest(p, None, convert_to_arrays)
+                     for p in params]
+        basename = hashlib.sha1(bytes(''.join(basenames), 'utf-8')).hexdigest()
         basename += '_'
 
     else:
@@ -363,6 +365,8 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
                            "Performing an implicit conversion.")
             params = ParameterSet(params)
         if convert_to_arrays:
+            # Standardize the parameters by converting them all to arrays
+            # -> `[1, 0]` and `np.array([1, 0])` should give same file name
             params = params_to_arrays(params)
         if params == '':
             basename = ""
@@ -398,7 +402,7 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
 
             # Standardize the parameters by converting them all to arrays
             # -> `[1, 0]` and `np.array([1, 0])` should give same file name
-            params = params_to_arrays(params)
+            # params = params_to_arrays(params)
 
             # We need a sorted dictionary of parameters, so that the hash is consistent
             # Also remove keys starting with '_'
@@ -408,9 +412,16 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
             # back, we use one type per Python type (1 for floats, 1 for ints)
             flat_params = params.flatten()
                 # flatten avoids need to sort recursively
-            sorted_params = OrderedDict( (key, normalize_type(flat_params[key]))
-                                         for key in sorted(flat_params)
-                                         if key[0] != '_' )
+            sorted_params = OrderedDict()
+            for key in sorted(flat_params):
+                if key[0] != '_':
+                    val = flat_params[key]
+                    if hasattr(val, 'digest'):
+                        sorted_params[key] = \
+                            val.digest() if hasattr(val.digest, '__call__') \
+                            else val.digest
+                    else:
+                        sorted_params[key] = normalize_type(val)
 
             # Now that the parameterset is standardized, hash its string repr
             s = repr(sorted_params)
@@ -435,6 +446,7 @@ def get_filename(params, suffix=None, convert_to_arrays=True):
         return basename + '_'.join([str(s) for s in suffix])
     else:
         return basename + str(suffix)
+get_filename = digest
 
 def params_to_arrays(params):
     """
