@@ -199,6 +199,29 @@ def greater_close(x1, x2, rtol=1e-5, atol=1e-8):
     """
     return x1 > x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
 
+def fully_qualified_name(o):
+    """
+    Return fully qualified name for a class or function
+
+    Parameters
+    ----------
+    o: Type (class) or function
+
+    Returns
+    -------
+    str
+    """
+    # Based on https://stackoverflow.com/a/13653312
+    name = getattr(o, '__qualname__', getattr(o, '__name__', None))
+    if name is None:
+        raise TypeError("Argument has no `__qualname__` or `__name__` "
+                        "attribute. Are you certain it is a class or function?")
+    module = o.__module__
+    if module is None or module == builtins.__name__:
+        return name
+    else:
+        return module + '.' + name
+
 class PDF:
     """
     Create an object from a pdf file which allows it to be viewed in a notebook.
