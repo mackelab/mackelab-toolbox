@@ -24,6 +24,7 @@ def using_gpu():
 # TODO: Don't repeat code between GraphCache and CompiledGraphCache
 # TODO: Key CompiledGraphCache on all function args (input, output, flags…)
 
+import sys
 import shelve
 import builtins
 import inspect
@@ -71,7 +72,9 @@ class GraphCache:
                         # their number exceeds `num_dep_caches`
 
     def __init__(self, cachename, *Classes, modules=()):
-        self.cachename = cachename
+        # Append the version info to cachename. Loading from the cache
+        # will fail if versions differ (e.g. when running on 2 machines)
+        self.cachename = cachename + ''.join([str(x) for x in sys.version_info])
 
         if type(self) not in Classes:
             Classes += (type(self),)
