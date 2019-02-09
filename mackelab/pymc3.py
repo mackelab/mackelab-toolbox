@@ -2,6 +2,7 @@ import numpy as np
 from collections import namedtuple, Callable, OrderedDict
 from copy import deepcopy
 import pymc3 as pymc
+from odictliteral import odict
 
 import theano_shim as shim
 from mackelab.parameters import TransformedVar, NonTransformedVar
@@ -308,6 +309,85 @@ def issimpleattr(obj, attr):
                 or isinstance(cls_attr, property)
                 or cls_attr is instance_attr
                 or isinstance(instance_attr, Callable))   # e.g. __delattr__
+
+from pymc3.distributions import Distribution, Continuous
+from pymc3.distributions.continuous import PositiveContinuous
+from pymc3.distributions.transforms import TransformedDistribution
+distribution_bounds = odict[
+    (PositiveContinuous,): (0, np.inf),
+    (TransformedDistribution, Continuous): (-np.inf, np.inf)
+]
+def get_dist_bounds(v):
+    """
+    Hacky method for getting bounds of a distribution. Just checks the
+    distribution's Type against the module variable :attr:distribution_bounds
+    and returns the first match. If no match is found, raises
+    :class:NotImplementedError.
+
+    Parameters
+    ----------
+    v: PyMC3 Distribution or RandomVariable
+        If :param:v has a :attr:distribution attribute, uses that to get bounds,
+        otherwise :param:v itself.
+    """
+    dist = getattr(v, 'distribution', v)
+    dist = v.distribution
+    if not isinstance(dist, Distribution):
+        raise TypeError("Argument `v` must be a PyMC3 Distribution, or have "
+                        "a `distribution` attribute.")
+    for types, bounds in distribution_bounds.items():
+        if isinstance(dist, types):
+            return bounds
+    raise NotImplementedError
+
+def get_pdf(v, print_integration_result=False):
+    from scipy.integrate import quad
+        # Normalization factor is obtained by integrating pdf
+        # To integrate we first need the bounds; current method is
+        # pretty hacky and only works with predefined dists
+
+    # If `v` is transformed, it doesn't have a `logpt`, so we need to use`v.transformed.logpt`
+    if getattr(v, 'transformed', None) is None:
+        logpt = v.logpt
+        inputs = shim.graph.symbolic_inputs(logpt)
+        assert inputs == [v]
+        __pdf = shim.graph.compile(inputs, shim.exp(logpt),
+                                   allow_input_downcast=True)
+        low, high = get_dist_bounds(v)
+        mass, err = quad(__pdf, low, high)
+        def _pdf(x):
+            return __pdf(x)/mass
+    else:
+        logpt = v.transformed.logpt
+        inputs = shim.graph.symbolic_inputs(logpt)
+        assert inputs == [v.transformed]
+        # Compute mass using transformed variable – it should be better behaved
+        ___pdf = shim.graph.compile(inputs, shim.exp(logpt))
+        low, high = get_dist_bounds(v.transformed)
+        def __pdf(x):
+            res = ___pdf(x)
+            if np.isnan(res): return 0  # HACK
+            else: return res
+        mass, err = quad(__pdf, low, high)
+
+        v_ph = shim.tensor(v)  # Placeholder variable for v
+        v_ph.tag.test_value = v.tag.test_value
+        # Change of variable => multiply by Jacobian of inverse transformation
+        gv = shim.grad(v.transformation.forward(v_ph), v_ph)
+        assert len(gv) == 1
+        _pt = shim.graph.clone(shim.exp(logpt) / mass * shim.abs(gv[0]),
+                               replace={v.transformed: v.transformation.forward(v_ph)})
+        _pdf = shim.graph.compile([v_ph], _pt, allow_input_downcast=True)
+
+    if print_integration_result:
+        logger.info("Integration result for {}: ({}, {})".format(v.name, mass, err))
+    # Finally, just wrap the pdf function so that it works with arrays
+    def pdf(x):
+        if isinstance(x, np.ndarray):
+            return np.array([_pdf(_x) for _x in x])
+        else:
+            return _pdf(x)
+    return pdf
 
 class NDArrayView(pymc.backends.NDArray):
     def __init__(self, data=None):
