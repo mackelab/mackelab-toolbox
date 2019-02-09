@@ -613,3 +613,21 @@ class ExtendedFormatter(Formatter):
 formatter = ExtendedFormatter()
 def format(s, *args, **kwargs):
     return formatter.format(s, *args, **kwargs)
+
+class class_or_instance_method:
+    """
+    Method decorator which sets `self` to be either the class (when method
+    is called on the class) on the instance (when method is called on an
+    instance). Adapted from https://stackoverflow.com/a/48809254.
+    """
+    def __init__(self, method, instance=None, owner=None):
+        self.method = method
+        self.instance = instance
+        self.owner = owner
+
+    def __get__(self, instance, owner=None):
+        return type(self)(self.method, instance, owner)
+
+    def __call__(self, *args, **kwargs):
+        clsself = self.instance if self.instance is not None else self.owner
+        return self.method(clsself, *args, **kwargs)
