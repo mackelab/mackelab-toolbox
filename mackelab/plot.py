@@ -883,6 +883,45 @@ def plot(data, **kwargs):
         logger.warning("Plotting of {} data is not currently supported."
                        .format(type(data)))
 
+def subreflabel_pdf(text, savedir='figures', savename='{}_lbl.pdf'):
+    """
+    Create a pdf containing the subref label.
+    Useful for adding to figures which are not created with matplotlib,
+    to ensure consistent font and size.
+    """
+    from PyPDF2 import PdfFileWriter, PdfFileReader
+
+    if '{}' in savename: savename = savename.format(text)
+    path = os.path.join(savedir, savename)
+
+    ## Create a dummy figure with label. This automatically has axes
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    lbl = ml.plot.subreflabel(ax, text, backgroundcolor=white)
+    r = fig.canvas.get_renderer()
+
+    fig.savefig("tmp.pdf")
+    plt.close(fig)
+    fex = fig.get_window_extent(r)
+
+    ## Load the dummy figure and crop out everything but the label
+    out = PdfFileWriter()
+    with open("tmp.pdf", 'rb') as f_plot:
+        plotpdf = PdfFileReader(f_plot)
+        page = plotpdf.getPage(0)
+        w, h = page.mediaBox.getUpperRight_x(), page.mediaBox.getUpperRight_y()
+        w, h = float(w), float(h)
+        scale = np.array((w/fex.width, h/fex.height))
+        page.trimBox.lowerLeft = scale * (lex.x0, lex.y0)
+        page.trimBox.upperRight = scale * (lex.x1, lex.y1)
+        page.cropBox.lowerLeft = scale * (lex.x0, lex.y0)
+        page.cropBox.upperRight = scale * (lex.x1, lex.y1)
+        out.addPage(page)
+
+        with open(path, 'wb') as f_lbl_trim:
+            out.write(f_lbl_trim)
+
+    os.remove("tmp.pdf")
 
 # =================================
 # Changing the property cycler
