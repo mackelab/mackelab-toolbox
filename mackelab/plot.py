@@ -673,6 +673,8 @@ def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, 
     text = ax.text(x, y, label, transform=transform, fontdict=fontdict, verticalalignment='top', zorder=zorder,
                    backgroundcolor=backgroundcolor, bbox=bbox, **kwargs)
 
+    return text
+
 # ====================================
 # Axes and tick placement
 
