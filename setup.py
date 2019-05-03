@@ -33,7 +33,7 @@ setup(
             'psutil'
         ],
         'all': [
-            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2',
+            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2', 'psycopg2',
             'psutil'
         ]
     },
