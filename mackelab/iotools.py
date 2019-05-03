@@ -465,9 +465,10 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
                 else:
                     return data
             # No file was found
-            raise FileNotFoundError("No file with base name '{}' and a "
-                                    "recognized extension was found."
-                                    .format(basename))
+            raise FileNotFoundError(
+                "No file with base name '{}' and a recognized extension was "
+                "found.\nDirectory searched: {}"
+                .format(basename, dirname))
 
         if os.path.exists(file):
             openfilename = file
