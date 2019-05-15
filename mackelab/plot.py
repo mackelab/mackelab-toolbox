@@ -883,7 +883,8 @@ def plot(data, **kwargs):
         logger.warning("Plotting of {} data is not currently supported."
                        .format(type(data)))
 
-def subreflabel_pdf(text, savedir='figures', savename='{}_lbl.pdf'):
+def subreflabel_pdf(text, savedir='figures', savename='{}_lbl.pdf',
+                    bgcolor='white'):
     """
     Create a pdf containing the subref label.
     Useful for adding to figures which are not created with matplotlib,
@@ -897,12 +898,13 @@ def subreflabel_pdf(text, savedir='figures', savename='{}_lbl.pdf'):
     ## Create a dummy figure with label. This automatically has axes
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    lbl = ml.plot.subreflabel(ax, text, backgroundcolor=white)
+    lbl = subreflabel(ax, text, backgroundcolor=bgcolor)
     r = fig.canvas.get_renderer()
 
     fig.savefig("tmp.pdf")
     plt.close(fig)
     fex = fig.get_window_extent(r)
+    lex = lbl.get_window_extent(r)
 
     ## Load the dummy figure and crop out everything but the label
     out = PdfFileWriter()
@@ -912,7 +914,7 @@ def subreflabel_pdf(text, savedir='figures', savename='{}_lbl.pdf'):
         w, h = page.mediaBox.getUpperRight_x(), page.mediaBox.getUpperRight_y()
         w, h = float(w), float(h)
         scale = np.array((w/fex.width, h/fex.height))
-        page.trimBox.lowerLeft = scale * (lex.x0, lex.y0)
+        page.trimBox.lowerLeft = scale * (fex.x0, fex.y0)
         page.trimBox.upperRight = scale * (lex.x1, lex.y1)
         page.cropBox.lowerLeft = scale * (lex.x0, lex.y0)
         page.cropBox.upperRight = scale * (lex.x1, lex.y1)
