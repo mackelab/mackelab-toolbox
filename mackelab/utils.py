@@ -161,8 +161,8 @@ def int_if_close(x, tol=100, npint=None, allow_power10=True):
     if npint is None: npint = np.int64
     if ( isinstance(x, Integral)
          or (hasattr(x, 'dtype') and np.issubdtype(x.dtype, np.integer)) ):
-        #return x
-        pass
+        return x
+        #pass
     if isinstance(x, np.ndarray):
         cond = (abs(x - np.rint(x)) < tol * np.finfo(x.dtype.type).eps).all()
     else:
