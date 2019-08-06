@@ -532,6 +532,8 @@ class _AllRecordFilter:
     def __getattr__(self, attr):
         raise NotImplementedError
 
+# TODO: Not (or None ?) record filter
+
 class RecordFilter:
     """
     Can overwrite RecordFilter.on_error_defaults to change default behaviour for
@@ -757,7 +759,7 @@ class RecordList:
         return latest
 
     @property
-    def earlist(self):
+    def earliest(self):
         """
         Return the record with the earliest timestamp.
         """
