@@ -25,8 +25,12 @@ from . import iotools
 try:
     from . import smttk
     smttk_loaded = True
+    from sumatra.parameters import NTParameterSet as ParameterSet
+    from parameters import ParameterSet as ParameterSetBase
 except (NameError, ImportError):
     smttk_loaded = False
+    from parameters import ParameterSet
+    ParameterSetBase = ParameterSet
 from .utils import isinstance, flatten, strip_comments
 
 ##########################
@@ -350,7 +354,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
     if isinstance(params, dict):
         # TODO: Any reason this implicit conversion should throw a warning ?
         params = ParameterSet(params)
-    if (not isinstance(params, (ParameterSet, str))
+    if (not isinstance(params, (ParameterSetBase, str))
         and isinstance(params, Iterable)):
         # Get a hash for each ParameterSet, and rehash them together
         basenames = [p.digest() if hasattr(p, 'digest')
@@ -360,7 +364,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
         basename += '_'
 
     else:
-        if not isinstance(params, ParameterSet):
+        if not isinstance(params, ParameterSetBase):
             logger.warning("'get_filename()' requires an instance of ParameterSet. "
                            "Performing an implicit conversion.")
             params = ParameterSet(params)
@@ -396,7 +400,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
             def dereference(paramset):
                 for key in paramset:
                     paramset[key] = paramset[key]
-                    if isinstance(paramset[key], ParameterSet):
+                    if isinstance(paramset[key], ParameterSetBase):
                         dereference(paramset[key])
             dereference(params)
 
@@ -459,7 +463,7 @@ def params_to_arrays(params):
         # Allows to work with types derived from ParameterSet, for example Sumatra's
         # NTParameterSet
     for name, val in params.items():
-        if isinstance(val, (ParameterSet, dict)):
+        if isinstance(val, (ParameterSetBase, dict)):
             params[name] = params_to_arrays(val)
         elif (not isinstance(val, str)
             and isinstance(val, Iterable)
@@ -481,7 +485,7 @@ def params_to_lists(params):
         # Allows to work with types derived from ParameterSet, for example Sumatra's
         # NTParameterSet
     for name, val in params.items():
-        if isinstance(val, (ParameterSet, dict)):
+        if isinstance(val, (ParameterSetBase, dict)):
             params[name] = params_to_nonarrays(val)
         elif isinstance(val, np.ndarray):
             params[name] = val.tolist()
@@ -563,6 +567,70 @@ def prune(params, keep, exclude=None):
 ###########################
 # Comparing ParameterSets
 ###########################
+
+# Three main functions, which should be merged at some point.
+#   + param_diff
+#         Older function. A lot of manipulations, apparently buggy.
+#         Simply prints the differences, which is often not ideal.
+#         Should probably be scrapped.
+#   + ParameterComparison
+#         Actually a class.
+#         Only method which can take records, or more than two sets
+#         I always forget what its custom methods are.
+#   + dfdiff
+#         Newer, more straightforward
+#         Easier to use because it returns a standard Pandas DataFrame
+
+def dfdiff(pset1, pset2, name1='pset 1', name2='pset 2'):
+    """
+    Uses `pset1`'s `diff` method to compare `pset1` and `pset2`.
+    Falls back to `pset2`'s method if `pset1` doesn't have one, and to
+    `NTParameterSet.diff` if neither pset does.
+    """
+
+    if not hasattr(ParameterSet, 'diff'):
+        raise RuntimeError(
+            "`dfdiff` requires Sumatra's NTParameterSet. Make sure "
+            "you can load `import mackelab.smttk`.")
+
+    pset1 = params_to_lists(pset1)  # params_to_lists returns same type as pset
+    pset2 = params_to_lists(pset2)
+    if not hasattr(pset1, 'diff'):
+        if hasattr(pset2, 'diff'):
+            # Use pset2's diff method, since pset1 doesn't have one
+            pset1, pset2 = pset2, pset1
+        else:
+            # Cast to a type which has a diff method
+            pset1 = ParameterSet(pset1)
+    diff = pset1.diff(pset2)
+    return psets_to_dataframe(**{name1:diff[0], name2:diff[1]})
+
+def psets_to_dataframe(*args, **psets):
+    from itertools import count, chain
+
+    # Add unlabelled parameter sets to psets with default names
+    if len(args) > 0:
+        psets = psets.copy()
+        newpsets = {'pset'+str(i): p for i, p in zip(count(1), args)}
+        if len(set(newpsets).intersection(psets)) != 0:
+            raise ValueError("Don't use 'pset' to label a parameter set, or pass "
+                             "all parameter sets as keywords to avoid label "
+                             "clashes.")
+        psets.update(newpsets)
+
+    d = {lbl: {tuple(k.split('.')) : v for k, v in ParameterSet(pi).flatten().items()}
+     for lbl, pi in psets.items()}
+    # Make sure all keys have same length, otherwise we get all NaNs (ind -> 'inner dict')
+    indlens = (len(ik) for ik in
+               chain.from_iterable(ind.keys() for ind in d.values()))
+    klen = max(chain([0], indlens))
+    if klen == 0:
+        d = {}
+    else:
+        d = {ok: {k + ('–',)*(klen-len(k)): v for k, v in od.items()}
+             for ok, od in d.items()}
+
+    return pd.DataFrame(d)
 
 ParamRec = namedtuple('ParamRec', ['label', 'parameters'])
     # Data structure for associating a name to a parameter set
@@ -721,8 +789,8 @@ def _param_diff(params1, params2, name1="", name2=""):
         else:
             return val1 != val2
     for key in keys1.intersection(keys2):
-        if isinstance(params1[key], ParameterSet):
-            if not isinstance(params2[key], ParameterSet):
+        if isinstance(params1[key], ParameterSetBase):
+            if not isinstance(params2[key], ParameterSetBase):
                 diffs['nesting'].add((key, name1))
             else:
                 for diffkey, diffval in _param_diff(params1[key], params2[key],
@@ -736,7 +804,7 @@ def _param_diff(params1, params2, name1="", name2=""):
                                    for val in diffval}
                     # Update differences dictionary with the nested differences
                     diffs[diffkey].update(diffval)
-        elif isinstance(params2[key], ParameterSet):
+        elif isinstance(params2[key], ParameterSetBase):
             diffs['nesting'].add(NestingDiff(key, name2))
         elif type(params1[key]) != type(params2[key]):
             diffs['type'].add(TypeDiff(key, name1, name2))
@@ -1237,7 +1305,7 @@ class ParameterSampler:
     """
     # TODO: See if some code can be shared with pymc3.PyMCPrior.get_dist()
     def __init__(self, name, desc, popnames=None):
-        if not isinstance(desc, ParameterSet):
+        if not isinstance(desc, ParameterSetBase):
             # It's a fixed value: no need for sampling
             self.sampled_idx = None   # This indicates that we aren't sampling
             def get_sample():
@@ -1318,7 +1386,7 @@ class ParameterSampler:
                                           "pattern '{}' are not yet implemented."
                                           .format(pop_pattern))
 
-        if isinstance(desc, ParameterSet) and 'transform' in desc:
+        if isinstance(desc, ParameterSetBase) and 'transform' in desc:
             inverse = Transform(desc.transform.back)
             self._get_sample = lambda : inverse(get_sample())
         else:
