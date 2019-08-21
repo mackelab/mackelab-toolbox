@@ -73,6 +73,23 @@ def flatten(*l, terminate=(str, bytes)):
         else:
             yield el
 
+###
+# Recursive setattr and getattr.
+
+# Taken from https://stackoverflow.com/questions/31174295/getattr-and-setattr-#on-nested-objects.
+# See also https://gist.github.com/wonderbeyond/d293e7a2af1de4873f2d757edd580288
+####
+from functools import reduce
+def rsetattr(obj, attr, val):
+    """Recursive setattr. Use as `setattr(foo, 'bar.baz', 1)`."""
+    pre, _, post = attr.rpartition('.')
+    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
+def rgetattr(obj, attr, *args):
+    """Recursive getattr. Use as `getattr(foo, 'bar.baz', None)`."""
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+    return reduce(_getattr, [obj] + attr.split('.'))
+
 class FixedGenerator:
     """
     Generator object which knows its length. Note this class is intended for use
