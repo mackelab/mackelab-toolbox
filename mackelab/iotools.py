@@ -1,11 +1,15 @@
 """
 Created on Wed Sep 20 16:56:37 2017
 
+TODO: Add npy, npz types for saving plain types
+TODO: Use npy by default on numpy arrays
+
 @author: alex
 """
 
 import os
 import os.path
+from pathlib import Path
 import io
 from collections import namedtuple, OrderedDict
 import logging
@@ -174,6 +178,11 @@ def save(file, data, format='npr', overwrite=False):
     overwrite: bool
         If True, allow overwriting previously saved files. Default is false, in which case
         a number is appended to the filename to make it unique.
+
+    Returns
+    -------
+    List of output paths.
+        List because many formats may be specified, leading to multiple outputs.
     """
     selected_formats = set(format.split('+'))
 
@@ -269,7 +278,8 @@ def save(file, data, format='npr', overwrite=False):
                     return dummy_file_context(file)
             get_output = _get_output
     else:
-        assert(isinstance(file, str))
+        # Is it a problem that os.PathLike is only defined for 3.6+ ?
+        assert isinstance(file, (str, os.PathLike))
         filename = file
         set_str_file(file)
 
@@ -335,6 +345,8 @@ def save(file, data, format='npr', overwrite=False):
             fail = True
         if fail:
             # TODO: Use custom error type
+            try: os.remove(output_path)  # Ensure there are no leftover files
+            except: pass
             logger.warning("Unable to save to numpy representation ('npr') format.")
             if 'dill' not in selected_formats:
                 # Warn the user that we will use another format
@@ -345,7 +357,7 @@ def save(file, data, format='npr', overwrite=False):
     for format in [format
                    for format in selected_formats
                    if format in ('repr', 'brepr')]:
-        bytes = False if format == 'repr' else True
+        bytes = (format == 'brepr')
         fail = False
         if data.__repr__ is object.__repr__:
             # Non-informative repr -- abort
@@ -364,6 +376,8 @@ def save(file, data, format='npr', overwrite=False):
             except IOError:
                 fail = True
         if fail:
+            try: os.remove(output_path)  # Ensure there are no leftover files
+            except: pass
             logger.warning("Unable to save to numpy representation ('npr') format.")
             if 'dill' not in selected_formats:
                 # Warn the user that we will use another format
@@ -379,17 +393,66 @@ def save(file, data, format='npr', overwrite=False):
                 dill.dump(data, f)
                 output_paths.append(output_path)
         except IOError:
-            pass # There might be other things to save, so don't terminate
-                 # execution because this save failed
+            # There might be other things to save, so don't terminate
+            # execution because this save failed
+            try: os.remove(output_path)  # Ensure there are no leftover files
+            except: pass
+            logger.warning("Unable to save picke at location {}."
+                           .format(output_path))
 
     # Return the list of output paths
-    return output_paths
+    return [Path(path) for path in output_paths]
 
+def find_file(file, format=None):
+    """
+    If `file` has no extension and `format` is None:
+    Returns the list of paths matching the file. If the list has length one,
+    a simple path is returned
+    Otherwise, returns the file path with the specified format.
+    In both cases, if no file is found, raises FileNotFoundError.
+    """
+    # Is it a problem that os.PathLike is only defined for 3.6+ ?
+    if isinstance(file, (str,os.PathLike)):
+        basepath, ext = os.path.splitext(file)
+        dirname, basename = os.path.split(basepath)
+        if dirname == '':
+            dirname = '.'
+
+        if len(ext) > 0 and format is None:
+            input_format = ext.strip('.')
+        if len(ext) == 0 and format is None:
+            # Try every file whose name without extension matches `file`
+            match = lambda fname: os.path.splitext(fname)[0] == basename
+            fnames = [name for name in os.listdir(dirname) if match(name)]
+            # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
+            # We do not attempt to load other extensions, since we don't know the format
+            ordered_fnames = []
+            for formatext in defined_formats:
+                name = basename + '.' + formatext
+                if name in fnames:
+                    ordered_fnames.append(os.path.join(dirname, name))
+            if len(ordered_fnames) == 0:
+                # No file was found
+                raise FileNotFoundError(
+                    "No file with base name '{}' and a recognized extension was "
+                    "found.\nDirectory searched: {}"
+                    .format(basename, dirname))
+            elif len(ordered_fnames) == 1:
+                ordered_fnames = ordered_fnames[0]
+            return ordered_fnames
+
+        elif os.path.exists(file):
+            return file
+        else:
+            return basepath + "." + defined_formats[format].ext.strip('.')
+    else:
+        raise ValueError("File finding is only implemented for path-like "
+                         "arguments.")
 
 def load(file, types=None, load_function=None, format=None, input_format=None):
     """
     Load file at `file`. How the data is loaded is determined by the input format,
-    which is inferred from the filename extension. It can also be given by `input_format`
+    which is inferred from the filename extension. It can also be given by `format`
     explicitly.
     If `load_function` is provided, it is be applied to the loaded data. Otherwise,
     we try to infer type from the loaded data.
@@ -431,32 +494,14 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     if format is not None:
         input_format = format
 
-    if isinstance(file, str):
-        basepath, ext = os.path.splitext(file)
-        dirname, basename = os.path.split(basepath)
-        if dirname == '':
-            dirname = '.'
-
-        if len(ext) > 0 and input_format is None:
-            input_format = ext.strip('.')
-        if len(ext) == 0 and input_format is None:
-            #raise ValueError("Filename has no extension. Please specify input format.")
-            # Try every file whose name without extension matches `file`
-            match = lambda fname: os.path.splitext(fname)[0] == basename
-            fnames = [name for name in os.listdir(dirname) if match(name)]
-            # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
-            # We do not attempt to load other extensions, since we don't know the format
-            ordered_fnames = []
-            for formatext in defined_formats:
-                name = basename + '.' + formatext
-                if name in fnames:
-                    ordered_fnames.append(name)
+    if isinstance(file, (str, os.PathLike)):
+        ordered_fnames = find_file(file, format)
+        if isinstance(ordered_fnames, list):
             # Try to load every file name in sequence. Terminate after the first success.
-            for fname in ordered_fnames:
+            for fname in ordered_fnames:  # Empty list -> FileNotFound below
                 try:
                     # Recursively call `load`
-                    data = load(os.path.join(dirname, fname),
-                                types, load_function)
+                    data = load(fname, types, load_function)
                 except (FileNotFoundError):
                     # Basically only possible to reach here with a race condition, where
                     # file is deleted after having been listed
@@ -470,10 +515,15 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
                 "found.\nDirectory searched: {}"
                 .format(basename, dirname))
 
-        if os.path.exists(file):
-            openfilename = file
+        elif os.path.exists(ordered_fnames):
+            # Normal exit from `load` recursion
+            openfilename = ordered_fnames
+            basepath, ext = os.path.splitext(openfilename)
         else:
-            openfilename = basepath + "." + defined_formats[input_format].ext.strip('.')
+            # No file was found
+            raise FileNotFoundError("No file '{} was found. (Specified "
+                                    " format: '{}')".format(file, format))
+
     elif isinstance(file, io.IOBase):
         ext = os.path.splitext(file.name)[1]
     elif hasattr(file, 'fn'):
