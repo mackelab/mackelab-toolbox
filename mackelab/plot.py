@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import logging
 logger = logging.getLogger('mackelab.plot')
 import datetime
@@ -22,6 +23,8 @@ from .utils import less_close, greater_close
 from .rcparams import rcParams
 
 φ = 1.61803  # Golden ratio. Good default for plot aspect ratio
+_libpath = Path(__file__).parent.parent
+_stylelibpath = _libpath/'mackelab/stylelib'
 
 # =====================================
 # Archival helper functions
@@ -70,23 +73,43 @@ def saverep(basename, comment=None, pdf=True, png=True):
 # ====================================
 # Plotting styles
 
+available_styles = []
+for dirpath, dirnames, filenames in os.walk(_stylelibpath):
+    available_styles.extend(
+        (f for f in filenames if Path(f).suffix == '.mplstyle'))
+
+def mplinit(inline=True, styles='mldefault'):
+    """
+    Initialize the matplotlib environment by doing the following:
+      - Call `%matplotlib inline`
+      - Configure matplotlib to not add margins when saving figures, so that
+        saved figures look the same as in the notebook.
+      - Set PGF as the PDF export backend, so Tex labels look good.
+      - Call `mpl.style.use()` with the `styles` argument.
+        Default: `styles='mldefault'.`
+    You can specify multiple styles as a tuple or list. For example, for
+    publication plots you should use
+        `mplinit(styles=['mldefault', 'mlpublish'])`
+    As with `mpl.style.use`, later styles take precedence.
+    In addition to the matplotlib styles, mackelab.plot defines
+    additional styles. Some are: 'mldefault', 'mlpublish', 'poster' and
+    'publish-compact.mplstyle'.
+    For a full list, print the value of `mackelab.plot.available_styles`.
+    """
+    from matplotlib.backends.backend_pgf import FigureCanvasPgf
+    from IPython import get_ipython
+    ipython = get_ipython()
+    if ipython is not None:
+        # Plot figures inline
+        if inline: ipython.magic("matplotlib inline")
+          # Show figures as saved)
+        ipython.magic("config InlineBackend.print_figure_kwargs = {'bbox_inches':None}")
+    mpl.backend_bases.register_backend('pdf', FigureCanvasPgf)
+    styles = ["mldefault", "mlpublish"]
+    mpl.style.use(styles)
+
 # Inject a wrapper around `mpl.style.use`, which checks if a missing
 # style just needs to be installed.
-
-# class _Style:
-#     # TODO: Make singleton class
-#     """
-#     Provides some wrappers around methods in `pyplot.style`.
-#     """
-#
-#     def __getattr__(self, attr):
-#         """Redirect calls with no special handlers to pyplot.style."""
-#         return getattr(plt.style, attr)
-#
-#     @staticmethod
-#     def use(style):
-#         return use_style(style)
-# style = _Style()
 
 mpl_use_style = mpl.style.use
 def use_style(style):
@@ -105,7 +128,7 @@ def use_style(style):
         elif isinstance(style, dict):
             # dicts don't represent style files, so problem is not uninstalled styles
             raise(e)
-        libpath = os.path.dirname(os.path.dirname(__file__))
+
         for st in style:
             try:
                 plt.style.use(st)
@@ -115,21 +138,21 @@ def use_style(style):
                 if styleext not in ('', '.mplstyle'):
                     raise ValueError("Unrecognized plot style extension '{}'.".format(styleext))
                 stylename += '.mplstyle'
-                for dirpath, dirnames, filenames in os.walk(os.path.join(libpath, 'mackelab/stylelib')):
+                for dirpath, dirnames, filenames in os.walk(_stylelibpath):
                     if '__pycache__' in dirnames: dirnames.remove('__pycache__')
                     if stylename not in filenames:
                         # At least one unfound style is not a mackelab style
                         raise(e)
         # If we made it here, the only problems are uninstalled mackelab styles
-        script = os.path.join(libpath, 'install_styles.py')
-        logger.warning("The mackelab plot styles were not found, so the produced plots "
-                       "will look different than intended.\n"
-                       "To install the styles, run the following:\n"
-                       "shell:    python {}\nnotebook: %run {}\n"
-                       "If you are running a kernel (e.g. within a "
-                       "notebook), reload the style library with "
-                       "`plt.style.reload_library`."
-                       .format(script, script))
+        script = libpath/'install_styles.py'
+        logger.warning(
+            "The mackelab plot styles were not found, so the produced plots "
+            "will look different than intended.\n"
+            "To install the styles, run the following:\n"
+            "shell:    python {}\nnotebook: %run {}\n"
+            "If you are running a kernel (e.g. within a notebook), reload the "
+            " style library with `plt.style.reload_library`."
+            .format(script, script))
 mpl.style.use = use_style
 assert(plt.style.use is mpl.style.use)
 
