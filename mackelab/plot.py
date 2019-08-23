@@ -81,7 +81,7 @@ for dirpath, dirnames, filenames in os.walk(_stylelibpath):
 def mplinit(inline=True, styles='mldefault'):
     """
     Initialize the matplotlib environment by doing the following:
-      - Call `%matplotlib inline`
+      - Call `%matplotlib inline` (unless `inline=False`).
       - Configure matplotlib to not add margins when saving figures, so that
         saved figures look the same as in the notebook.
       - Set PGF as the PDF export backend, so Tex labels look good.
