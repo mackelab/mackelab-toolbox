@@ -419,7 +419,7 @@ def find_file(file, format=None):
             dirname = '.'
 
         if len(ext) > 0 and format is None:
-            input_format = ext.strip('.')
+            format = ext.strip('.')
         if len(ext) == 0 and format is None:
             # Try every file whose name without extension matches `file`
             match = lambda fname: os.path.splitext(fname)[0] == basename
@@ -491,10 +491,13 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     else:
         types = _load_types
 
-    if format is not None:
-        input_format = format
+    if format is None:
+        format = input_format
 
     if isinstance(file, (str, os.PathLike)):
+        # _, ext = os.path.splitext(file)
+        # if len(ext) > 0 and format is None:
+        #     format = ext.strip('.')
         ordered_fnames = find_file(file, format)
         if isinstance(ordered_fnames, list):
             # Try to load every file name in sequence. Terminate after the first success.
@@ -533,12 +536,12 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
         raise TypeError("[iotools.load] File '{}' is of unrecognized type '{}'."
                         .format(file, type(file)))
 
-    if input_format is None:
-        input_format = ext[1:]
-    if input_format not in defined_formats:
-        raise ValueError("Unrecognized format `{}`.".format(input_format))
+    if format is None:
+        format = ext[1:]
+    if format not in defined_formats:
+        raise ValueError("Unrecognized format `{}`.".format(format))
 
-    if input_format == 'npr':
+    if format == 'npr':
         with wrapped_open(file, 'rb') as f:
             data = np.load(f)
                 # np.load provides dict access to the file object;
@@ -568,7 +571,7 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
                 # Since it's still not in memory, just load it as a dictionary.
                 data = dict(data)
 
-    elif input_format == 'repr':
+    elif format == 'repr':
         with wrapped_open(openfilename, 'r') as f:
             data = f.read()
         if load_function is False:
@@ -588,7 +591,7 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
                         cls = types[test_clsname]
                         if hasattr(cls, 'from_repr'):
                             data = cls.from_repr(data)
-    elif input_format == 'dill':
+    elif format == 'dill':
         with wrapped_open(openfilename, 'rb') as f:
             try:
                 data = dill.load(f)
