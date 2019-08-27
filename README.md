@@ -37,3 +37,17 @@ See `demo` folder for notebooks illustrating functions included in this reposito
 ### Updating
 
 If you installed the package using `develop`, a single `git pull` in the locally cloned folder will suffice for updating. The reason for that being that `develop` will create a symbolic link in Python's `site-packages`.
+
+### Known issues
+
+- Some packages are less mature than others; we need to make this more clear, but until that happens, the following lists relatively mature modules at the 'alpha' or 'beta' stage:
+    + iotools (beta)
+    + optimizers (alpha)
+    + parameters (beta)
+    + plot (beta)
+    + utils (variable)
+Other modules should be considered as experimental.
+
+- Two modules have a dependency on Alex's fsGIF's project; those should be removed before being used in other projects:
+  + smttk
+  + sumatra

@@ -24,6 +24,7 @@ from sumatra.records import Record
 
 import mackelab as ml
 import mackelab.parameters
+# FIXME!!!!: should not depend on fsGIF project
 from fsGIF import core
 
 try:

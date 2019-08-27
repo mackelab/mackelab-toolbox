@@ -10,6 +10,7 @@ def get_records(recordstore, project, label=None, script=None, before=None, afte
     #       to filter them.
     if label is not None:
         # RecordStore has builtin functions for searching on labels
+        # FIXME!!!!: Dependency on fsGIF
         lbl_gen = (fulllabel for fulllabel in recordstore.labels('fsGIF') if label in fulllabel)
         record_list = [recordstore.get(project, fulllabel) for fulllabel in lbl_gen]
     else:
