@@ -5,9 +5,9 @@ import pymc3 as pymc
 from odictliteral import odict
 
 import theano_shim as shim
-from mackelab.parameters import TransformedVar, NonTransformedVar
-from mackelab.iotools import load
-from mackelab.utils import flatten
+from mackelab_toolbox.parameters import TransformedVar, NonTransformedVar
+from mackelab_toolbox.iotools import load
+from mackelab_toolbox.utils import flatten
 
 TransformNames = namedtuple('TransformedNames', ['orig', 'new'])
 PriorVar = namedtuple('PriorVar', ['pymc_var', 'model_var', 'transform', 'mask'])
@@ -477,7 +477,7 @@ def import_multitrace(data):
         Elements may be arbitrarily nested; this makes combining the outputs
         of multiple `export_multitrace` calls easier.
         List elements that are strings are treated as paths to a file storing
-        the output of `export_multitrace()` and loaded with `mackelab.iotools.load()`.
+        the output of `export_multitrace()` and loaded with `mackelab_toolbox.iotools.load()`.
     """
     flatdata = list(flatten(data, terminate=(str,dict)))
     for i, trace in enumerate(flatdata):

@@ -22,8 +22,8 @@ from sumatra.recordstore import DjangoRecordStore as RecordStore
     # The usual RecordStore, provided as a convenience
 from sumatra.records import Record
 
-import mackelab as ml
-import mackelab.parameters
+import mackelab_toolbox as ml
+import mackelab_toolbox.parameters
 # FIXME!!!!: should not depend on fsGIF project
 from fsGIF import core
 
@@ -848,7 +848,7 @@ class RecordList:
         Parameters
         ----------
         common_params: str, or list of str
-            Unless None, `mackelab.parameters.prune()` will be applied to each record with
+            Unless None, `mackelab_toolbox.parameters.prune()` will be applied to each record with
             this filter specification. An error is raised if any of the returned
             ParameterSets differs from the others.
 
@@ -1428,7 +1428,7 @@ if click_loaded:
 
         # FIXME: Parameter expansion does not work with nested files
         param_paths = itertools.chain.from_iterable(
-            mackelab.parameters.expand_param_file(
+            ml.parameters.expand_param_file(
                 paramfile, tmpparam_path, max_files=max_tasks)
             for paramfile in params)
 

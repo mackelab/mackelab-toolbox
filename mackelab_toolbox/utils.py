@@ -340,7 +340,7 @@ class OrderedEnum(Enum):
 class SanitizedDict(dict):
     def __init__(self, *args, _warn=True, **kwargs):
         if _warn:
-            logger.warning("mackelab.utils.SanitizedDict is not implemented")
+            logger.warning("mackelab_toolbox.utils.SanitizedDict is not implemented")
         super().__init__(*args, **kwargs)
 
 class SanitizedOrderedDict(SanitizedDict, OrderedDict):

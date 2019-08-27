@@ -382,7 +382,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
                     "algorithm was changed in v.1.14, meaning that computed "
                     "filenames will not be consistent with those computed on "
                     "more up-to-date systems. To ensure consistent filenames, "
-                    "either update to 1.14, or set  `mackelab.parameters._filename_printoptions['legacy']` "
+                    "either update to 1.14, or set  `mackelab_toolbox.parameters._filename_printoptions['legacy']` "
                     "to '1.13'. Note that setting the 'legacy' option may not "
                     "work in all cases.".format(np.__version__))
             # Remove printoptions that are not supported in this Numpy version
@@ -591,7 +591,7 @@ def dfdiff(pset1, pset2, name1='pset 1', name2='pset 2'):
     if not hasattr(ParameterSet, 'diff'):
         raise RuntimeError(
             "`dfdiff` requires Sumatra's NTParameterSet. Make sure "
-            "you can load `import mackelab.smttk`.")
+            "you can load `import mackelab_toolbox.smttk`.")
 
     pset1 = params_to_lists(pset1)  # params_to_lists returns same type as pset
     pset2 = params_to_lists(pset2)
@@ -639,7 +639,7 @@ class ParameterComparison:
     """
     Example usage:
         testparams = ParameterSet("path/to/file")
-        records = mackelab.smttk.get_records('project').list
+        records = mackelab_toolbox.smttk.get_records('project').list
         cmp = ParameterComparison([testparams] + records, ['test params'])
         cmp.dataframe(depth=3)
     """
