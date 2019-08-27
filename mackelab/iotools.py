@@ -7,6 +7,7 @@ TODO: Use npy by default on numpy arrays
 @author: alex
 """
 
+import sys
 import os
 import os.path
 from pathlib import Path
@@ -18,6 +19,11 @@ import dill
 from inspect import isclass
 from parameters import ParameterSet
 logger = logging.getLogger('mackelab.iotools')
+
+if sys.version_info.major >= 3 and sys.version_info.minor >= 6:
+    PathTypes = (str, os.PathLike)
+else:
+    PathTypes = (str,)
 
 Format = namedtuple("Format", ['ext'])
     # TODO: Allow multiple extensions per format
@@ -278,8 +284,7 @@ def save(file, data, format='npr', overwrite=False):
                     return dummy_file_context(file)
             get_output = _get_output
     else:
-        # Is it a problem that os.PathLike is only defined for 3.6+ ?
-        assert isinstance(file, (str, os.PathLike))
+        assert isinstance(file, PathTypes)
         filename = file
         set_str_file(file)
 
@@ -411,8 +416,7 @@ def find_file(file, format=None):
     Otherwise, returns the file path with the specified format.
     In both cases, if no file is found, raises FileNotFoundError.
     """
-    # Is it a problem that os.PathLike is only defined for 3.6+ ?
-    if isinstance(file, (str,os.PathLike)):
+    if isinstance(file, PathTypes):
         basepath, ext = os.path.splitext(file)
         dirname, basename = os.path.split(basepath)
         if dirname == '':
@@ -494,7 +498,7 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     if format is None:
         format = input_format
 
-    if isinstance(file, (str, os.PathLike)):
+    if isinstance(file, PathTypes):
         # _, ext = os.path.splitext(file)
         # if len(ext) > 0 and format is None:
         #     format = ext.strip('.')

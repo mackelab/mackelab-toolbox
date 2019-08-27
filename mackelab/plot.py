@@ -74,7 +74,7 @@ def saverep(basename, comment=None, pdf=True, png=True):
 # Plotting styles
 
 available_styles = []
-for dirpath, dirnames, filenames in os.walk(_stylelibpath):
+for dirpath, dirnames, filenames in os.walk(str(_stylelibpath)): # str for <3.6
     available_styles.extend(
         (f for f in filenames if Path(f).suffix == '.mplstyle'))
 
@@ -138,7 +138,7 @@ def use_style(style):
                 if styleext not in ('', '.mplstyle'):
                     raise ValueError("Unrecognized plot style extension '{}'.".format(styleext))
                 stylename += '.mplstyle'
-                for dirpath, dirnames, filenames in os.walk(_stylelibpath):
+                for dirpath, dirnames, filenames in os.walk(str(_stylelibpath)):
                     if '__pycache__' in dirnames: dirnames.remove('__pycache__')
                     if stylename not in filenames:
                         # At least one unfound style is not a mackelab style
