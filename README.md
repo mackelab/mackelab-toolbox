@@ -1,11 +1,6 @@
 # mackelab
 
-#### The lab wiki is associated with this repo, see: https://github.com/mackelab/mackelab/wiki
-
-
-## Shared code
-
-In addition, this repository contains Python code shared across the lab.
+This repository contains Python code shared across the lab. It is public to allow functions to be used in published code.
 
 
 ### Installation
