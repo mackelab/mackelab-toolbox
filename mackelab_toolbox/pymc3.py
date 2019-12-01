@@ -19,6 +19,15 @@ modelvarsuffix = "_model"
     # Changing the original model's names is preferred, as this allows accessing
     # the MCMC traces with the expected attribute names.
 
+# ---------- utils ------------
+class classproperty(object):
+    """Define a read-only class property. See https://stackoverflow.com/a/5192374."""
+    def __init__(self, f):
+        self.f = f
+    def __get__(self, obj, owner):
+        return self.f(owner)
+# -------- end utils ----------
+
 class InitializableModel(pymc.model.Model):
     """
     Add to PyMC3 models the ability to specify a setup
@@ -43,6 +52,137 @@ class InitializableModel(pymc.model.Model):
             self.setup()
             return f(*args, **kwargs)
         return makefn_wrapper
+
+# TODO: It might make more sense to use a meta-class to set Parameters
+class ParameterizedModel(pymc.model.Model):
+    """
+    Define a parameterized PyMC3 model.
+
+    The standard PyMC3 approach is to mix parameters and code in the model
+    definition. This isn't ideal if we want to explore different
+    parameter definitions for the same model.
+    This class allows you to collect all your model definition code in one place
+    and define defaults, while still allowing to change parameter definitions.
+    So in the simplest case you may then construct your model with nothing
+    more than
+    >>> model = MyModel()
+    and you can override defaults with
+    >>> model = MyModel(a=1, b=100)
+
+    When definining, you must at least provide the nested :class:Parameters class,
+    which derives from :class:ParameterSpec and defines your model parameters.
+    >>> from mackelab_toolbox.parameters import ParameterSpec
+    >>> class MyModel(ParameterizedModel):
+    >>>     class Parameters(ParameterSpec):
+    >>>         schema = {'a': int, 'b': int}
+    """
+    # Can't use abc because then ParameterizedModel derives from multiple metaclasses
+    # abc.abstractmethod
+    # @property
+    # def Parameters(self):
+    #     pass
+
+    def __init__(self, θ=None, **kwargs):
+        # Create PyMC3 model
+        super().__init__()
+        # Set the priors / parameters
+        if θ is None:
+            θ = {}
+        elif set(θ).intersection(kwargs) != set():
+            raise ValueError("Duplicate argument for "
+                             .format(set(θ).intersection(kwargs)))
+        θ = self.Parameters(**{**θ, **kwargs})  # Merge θ and kwargs dicts
+        self.params = ParameterSet({})
+        for name, value in θ.items():
+            if isinstance(value, pymc.Distribution):
+                self.params[name] = self.Var(name, value)
+            else:
+                if not hasattr(self, name):
+                    setattr(self, name, value)
+                self.params[name] = value
+
+    _initialized_spec = None
+    @classproperty
+    def Parameters(cls):
+        if cls._initialized_spec is None:
+            if (not hasattr(cls, 'Spec')
+                or not isinstance(cls.Spec, type)):
+                raise TypeError(
+                    "A ParameterizedModel must define a nested Spec class.")
+            elif not issubclass(cls.Spec, ParameterSpec):
+                raise TypeError("Model's Spec must subclass ParameterSpec.")
+            cls._initialized_spec = cls.Spec()
+        return cls._initialized_spec
+
+    @property
+    def θ(self):
+        """Use θ as a shorthand for parameters, unless a parameter is named θ"""
+        return getattr(self.params, 'θ', self.params)
+
+    @property
+    def originalvars(self):
+        """
+        Like `vars`, but transformed variables are return as in
+        model specification.
+        """
+        return [v for v in model.vars + model.deterministics
+                  if v.name[:-2] != '__']
+
+    def plot_priors(self, vars=None, ax=None):
+        """
+        :param:vars: list of varnames or variables
+            Can also be a single string, w/ whitespace separated variable names
+        """
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        if vars is None:
+            vars = {v.name: v for v in self.originalvars}
+            # vars = {nm: self.params[nm]
+            #         for nm in self.Parameters.keys()
+            #         if isinstance(self.params[nm], (pymc.Distribution,
+            #                                    theano.gof.graph.Variable))}
+            # # Distributions aren't theano vars and don't have a tag
+            # if any(isinstance(v, pymc.Distribution) for v in vars.keys()):
+            #     raise NotImplementedError(
+            #         "Distribution parameters are not yet supported.")
+        else:
+            _vars = {}
+            if isinstance(vars, str):
+                vars = vars.split()
+            if not isinstance(vars, Iterable):
+                raise TypeError("`vars` must be an iterable of variable names.")
+            for v in vars:
+                if isinstance(v, str):
+                    _vars[v] = self[v]
+                else:
+                    assert isinstance(v, pymc.model.PyMC3Variable)
+                    _vars[v.name] = self[v]
+            vars = _vars
+
+        if ax is None:
+            plt.figure(figsize=(16,2))
+            ax = plt.gca()
+        else:
+            plt.sca(ax)
+        _x = shim.tensor((), dtype='float64')
+        _x.tag.test_value = 1.
+        k = 0
+        for nm, p in vars.items():
+            k+=1; ax=plt.subplot(1, 6, k)
+            shape = p.tag.test_value.shape
+            i = (0,)*len(shape)
+            f = shim.graph.compile([_x], shim.exp(p.distribution.logp(shim.broadcast_to(_x, shape)))[i])
+            samples = p.random(size=100)
+            low = samples.min(axis=0)  # May return a scalar
+            high = samples.max(axis=0)
+            if isinstance(low, np.ndarray): low = low[i]
+            if isinstance(high, np.ndarray): high = high[i]
+            xarr = np.linspace(low, high)
+            ax.plot(xarr, [f(x) for x in xarr])
+            sns.despine(trim=True)
+            ax.set_title(f"prior, ${p.name}_{{{str(i).strip('()')}}}$")
+        return ax
 
 class PyMCPrior(OrderedDict):
     """
