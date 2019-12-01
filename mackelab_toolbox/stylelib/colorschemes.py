@@ -7,7 +7,7 @@ from cycler import cycler
 import matplotlib as mpl
 import matplotlib.cm
 
-from mackelab.colors import monochrome_palette
+from mackelab_toolbox.colors import monochrome_palette
 
 property_cycles = {
     'dark pastel': ['#1e6ea7', '#9d3a11']

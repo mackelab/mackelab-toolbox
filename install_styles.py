@@ -14,7 +14,7 @@ os.makedirs(configdir, exist_ok=True)  # Make sure directory exists
 package_root = os.path.dirname(os.path.abspath(sys.modules[__name__].__file__))
 
 # Add directory structure to get path to `stylelib`
-stylelib_path = os.path.join(package_root, 'mackelab/stylelib')
+stylelib_path = os.path.join(package_root, 'mackelab_toolbox/stylelib')
 
 # Make sure the "stylelib" directory exists in the global config folder
 os.makedirs(os.path.join(configdir, "stylelib"), exist_ok=True)

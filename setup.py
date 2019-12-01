@@ -1,23 +1,23 @@
 from setuptools import setup
 
 setup(
-    name='mackelab',
+    name='mackelab-toolbox',
     version='0.1.0dev',
     description='Common utils for Mackelab',
-    url='https://github.com/mackelab/mackelab',
+    url='https://github.com/mackelab/mackelab_toolbox',
     install_requires=[
         'matplotlib',
-        'theano_shim >= 0.2',
+        'seaborn',
+        'theano_shim>=0.2',
+        'parameters',
+        'pyyaml',  # Required by parameters, for `import yaml`
         'simpleeval',
         'dill',
         'tqdm',
         'pandas'
     ],
-    dependency_links=[
-        #'git+ssh://git@github.com:alcrene/parameters.git',
-        'https://github.com/alcrene/parameters'
-    ],
-    # use with --process-dependency_links
+
+    packages=['mackelab_toolbox'],
 
     extras_require = {
         'smt': [
@@ -37,8 +37,8 @@ setup(
             'psutil'
         ]
     },
-    entry_points = {
-        'console_scripts':
-            ['smttk = mackelab.smttk:cli [smt]']
-    }
+    # entry_points = {
+    #     'console_scripts':
+    #         ['smttk = mackelab.smttk:cli [smt]']
+    # }
 )
