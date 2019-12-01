@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Provides the 'expand_params' method for expanding a parameter description strings.
-This allows to use one descriptor to specify multiple parameter sets.
+Provides the 'expand_params' method for expanding parameter description strings.
+This allows to use one description to specify multiple parameter sets.
 
 Created on Wed Sep 20 13:19:53 2017
 
@@ -14,7 +14,6 @@ from types import SimpleNamespace
 import hashlib
 from numbers import Number
 import numpy as np
-import scipy as sp
 import pandas as pd
 import logging
 logger = logging.getLogger(__file__)
@@ -37,234 +36,6 @@ from .utils import isinstance, flatten, strip_comments
 # Module variables
 debug_store = {}
     # Functions can store values in here to help debugging
-
-##########################
-# Transformed parameters
-##########################
-
-import simpleeval
-import ast
-import operator
-
-class Transform:
-    # Replace the "safe" operators with their standard forms
-    # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
-    #  input but this does not work with non-numerical types.)
-    _operators = simpleeval.DEFAULT_OPERATORS
-    _operators.update(
-        {ast.Add: operator.add,
-         ast.Mult: operator.mul,
-         ast.Pow: operator.pow})
-    # Allow evaluation to find operations in standard namespaces
-    namespaces = {'np': np,
-                  'sp': sp}
-
-    def __new__(cls, *args, **kwargs):
-        # Make calling Transform on a Transform instance just return the instance
-        if len(args) > 0 and isinstance(args[0], Transform):
-            # Don't return a new instance; just return this one
-            return args[0]
-        else:
-            return super().__new__(cls)
-
-    def __init__(self, transform_desc):
-        # No matter what we do in __new__, __init__ is called, so we need
-        # to check this again.
-        if not isinstance(transform_desc, Transform):
-            xname, expr = transform_desc.split('->')
-            self.xname = xname.strip()
-            self.expr = expr.strip()
-
-    def __str__(self):
-        return self.desc
-    def __repr__(self):
-        return str(type(self)) + '(' + self.desc + ')'
-
-    def __call__(self, x):
-        names = {self.xname: x}
-        names.update(self.namespaces)
-        try:
-            res = simpleeval.simple_eval(
-                self.expr,
-                operators=Transform._operators,
-                names=names)
-        except simpleeval.NameNotDefined as e:
-            e.args = ((e.args[0] +
-                       "\n\nThis may be due to a module function in the transform "
-                       "expression (only numpy and scipy, as 'np' and 'sp', are "
-                       "available by default).\nIf '{}' is a module or class, you can "
-                       "make it available by adding it to the transform namespace: "
-                       "`Transform.namespaces.update({{'{}': {}}})`.\nSuch a line would "
-                       "typically be included at the beginning of the execution script "
-                       "(it does not need to be in the same module as the one where "
-                       "the transform is defined, as long as it is executed before)."
-                       .format(e.name, e.name, e.name),)
-                      + e.args[1:])
-            raise
-        return res
-
-    @property
-    def desc(self):
-        return self.xname + " -> " + self.expr
-
-class MetaTransformedVar(type):
-    """Implements subclass selection mechanism of TransformedVarBase."""
-    # Based on https://stackoverflow.com/a/14756633
-    def __call__(cls, desc, *args, orig=None, new=None):
-        if len(args) > 0:
-            raise TypeError("TransformedVar() takes only one positional argument.")
-        if not( (orig is None) != (new is None) ):  #xor
-            raise ValueError("Exactly one of `orig`, `new` must be specified.")
-
-        if desc is not None and all(s in desc for s in ['name', 'to', 'back']):
-            # Standard way to make transformed variable by providing transform description
-            var = TransformedVar.__new__(TransformedVar, desc, *args, orig=orig, new=new)
-            var.__init__(desc, *args, orig=orig, new=new)
-        elif desc is not None and 'transform' in desc:
-            # Alternative way to make transformed variable: pass entire
-            # variable description, which includes transform description
-            var = TransformedVar.__new__(TransformedVar, desc.transform, *args, orig=orig, new=new)
-            var.__init__(desc.transform, *args, orig=orig, new=new)
-        else:
-            # Not a transformed variable
-            if orig is None:
-                orig = new  # orig == new for non transformed variables
-            var = NonTransformedVar.__new__(NonTransformedVar, orig)
-            var.__init__(desc, orig)
-
-        return var
-
-class TransformedVarBase(metaclass=MetaTransformedVar):
-    """
-    Base class for TransformedVar and NonTransformedVar.
-    Can use it's constructor to obtain either TransformedVar or NonTransformedVar,
-    depending on whether `desc` provides a transform.
-    """
-    TransformName = namedtuple('TransformName', ['orig', 'new'])
-
-    def __new__(cls, *args, **kwargs):
-        return super().__new__(cls)
-
-class TransformedVar(TransformedVarBase):
-
-    # def __new__(cls, desc, *args, orig=None, new=None):
-    #     # Required because of MetaTransformedVar
-    #     return super().__new__(cls)
-
-    def __init__(self, desc, *args, orig=None, new=None):
-        """
-        Should pass exactly one of the parameters `orig` and `new`
-        TODO: Allow non-symbolic variables. Possible implementation:
-            Test to see if orig/new is a constant, callable or symbolic.
-            Set the other orig/new to the same type.
-        """
-        if not all(s in desc for s in ['to', 'back', 'name']):
-            raise ValueError("Incomplete transform description")
-        self.to = Transform(desc.to)
-        self.back = Transform(desc.back)
-        if orig is not None:
-            #assert(shim.issymbolic(orig))
-            self.orig = orig
-            self.new = self.to(self.orig)
-        elif new is not None:
-            #assert(shim.issymbolic(new))
-            self.new = new
-            self.orig = self.back(new)
-
-        # Set the variable names
-        self.names = self.TransformName(*[nm.strip() for nm in desc.name.split('->')])
-        if hasattr(self.orig, 'name'):
-            if self.orig.name is None:
-                self.orig.name = self.names.orig
-            else:
-                assert(self.orig.name == self.names.orig)
-        if hasattr(self.new, 'name'):
-            if self.new.name is None:
-                self.new.name = self.names.new
-            else:
-                assert(self.new.name == self.names.new)
-
-    def __str__(self):
-        return self.names.orig + '->' + self.names.new + ' (' + self.to.desc + ')'
-
-    def rename(self, orig, new):
-        """
-        Rename the variables
-
-        Parameters
-        ----------
-        new: str
-            Name to assign to self.new
-        orig: str
-            Name to assign to self.orig
-        """
-        self.names = self.TransformName(orig=orig, new=new)
-        self.orig.name = orig
-        self.new.name = new
-
-class NonTransformedVar(TransformedVarBase):
-    """Provides an interface consistent with TransformedVar."""
-
-    def __init__(self, desc, orig):
-        """
-        `desc` only used to provide name attribute. If you don't need name,
-        you can pass `desc=None`.
-
-        Parameters
-        ----------
-        desc: ParameterSet
-            Transform description
-        orig: variable
-            Theano or Python numeric variable.
-        """
-        self.orig = orig
-        self.to = Transform('x -> x')
-        self.back = Transform('x -> x')
-        self.new = orig
-        # Set name
-        self.names = None
-        if isinstance(desc, str):
-            self.names = self.TransformName(desc, desc)
-        elif desc is not None and 'name' in desc:
-            nametup = desc.name.split('->')
-            if len(nametup) == 1:
-                self.names = self.TransformName(nametup[0], nametup[0])
-            elif len(nametup) == 2:
-                self.names = self.TransformName(*nametup)
-                assert(self.names.new == self.names.orig)
-            else:
-                raise ValueError("Malformed transformation name description '{}'."
-                                 .format(desc.name))
-        if self.names is not None:
-            if hasattr(self.orig, 'name'):
-                if self.orig.name is not None:
-                    assert(self.orig.name == self.names.orig)
-            else:
-                self.orig.name = self.names.orig
-
-    def __str__(self):
-        if self.names is not None:
-            return self.names.orig + '(' + str(self.orig) + ')'
-        else:
-            return str(self.orig)
-
-    def rename(self, orig, new=None):
-        """
-        Rename the variables
-
-        Parameters
-        ----------
-        orig: str
-            Name to assign to self.orig
-        new: str
-            Ignored; only provided to have consistent API with TransformedVar.
-            If given, must be equal to `orig`.
-        """
-        if new is not None and new != orig:
-            raise ValueError("For NonTransformedVar, the 'new' and 'orig' names must match.")
-        self.names = self.TransformName(orig=orig, new=orig)
-        if hasattr(self.orig, 'name') and self.orig.name is not None:
-            self.orig.name = orig
 
 ###########################
 # Making file names from parameters
@@ -293,7 +64,7 @@ _type_compress = OrderedDict((
     (np.floating, np.float64),
     (np.integer, np.int64)
 ))
-    # When normalizing types (currently only in `get_filename`), numpy types
+    # When normalizing types (currently only in `digest`), numpy types
     # matching the key (left) are converted to the type on the right.
     # First matching entry is used, so more specific types should come first.
 
@@ -329,7 +100,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
 
     ..Debugging:
     If two parameter sets should give the same filename but don't, check the
-    value of `debug_store['get_filename']['hashed_string']`. This module-wide
+    value of `debug_store['digest']['hashed_string']`. This module-wide
     stores the most recently hashed string representation of a parameter set.
     Filename hashes will be the same if and only if these string represenations
     are the same.
@@ -365,7 +136,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
 
     else:
         if not isinstance(params, ParameterSetBase):
-            logger.warning("'get_filename()' requires an instance of ParameterSet. "
+            logger.warning("'digest()' requires an instance of ParameterSet. "
                            "Performing an implicit conversion.")
             params = ParameterSet(params)
         if convert_to_arrays:
@@ -429,7 +200,7 @@ def digest(params, suffix=None, convert_to_arrays=True):
 
             # Now that the parameterset is standardized, hash its string repr
             s = repr(sorted_params)
-            debug_store['get_filename'] = {'hashed_string': s}
+            debug_store['digest'] = {'hashed_string': s}
             if _remove_whitespace_for_filenames:
                 # Removing whitespace makes the result more reliable; e.g. between
                 # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
@@ -563,6 +334,295 @@ def prune(params, keep, exclude=None):
             del newparams[filter]
 
     return newparams
+
+
+#########################
+# Parameter parsing / validation
+#########################
+
+# TODO: Make schema an abstractmethod
+#       (currently fails because abc forces class to be hashed ?)
+import abc
+# from parameters import ParameterSet
+from parameters.validators import SchemaBase, ParameterSchema, CongruencyValidator
+from inspect import signature, Parameter
+
+class Any(SchemaBase):
+    """
+    To be used as a value in a `ParameterSchema`. Validates the same-path
+    `ParameterSet` value if it matches any of the provided value schemas.
+
+    Examples
+    --------
+    >>> from parameters.validators import ParameterSchema, SubClass
+    >>> from mackelab_toolbox.parameters import Any
+    >>> schema = ParameterSchema({'a': Any(SubClass(int), SubClass(float))})
+    """
+    def __init__(self, *value_schemas):
+        self.schemas = value_schemas
+
+    def validate(self, leaf):
+        return any(s.validate(leaf) for s in self.schemas)
+
+    def __repr__(self):
+        cls = self.__class__
+        schemas = ', '.join([repr(s) for s in self.schemas])
+        return ('.'.join([cls.__module__, cls.__name__])
+                +'(schemas={})'.format(schemas))
+
+    def __eq__(self, x):
+        if isinstance(x, Any) and len(self.schemas) == len(x.schemas):
+            equal = True
+            for s in self.schemas:
+                if not equal:
+                    break
+                for sx in x.schemas:
+                    if s == sx:
+                        break
+                equal = False
+            return equal
+        else:
+            return False
+
+class Identity(SchemaBase):
+    """
+    To be used as a value in a `ParameterSchema`.  Validates the same-path
+    `ParameterSet` is identical (an `is` comparison).
+    Useful for sentinal values  like `None`.
+
+    See also: `SchemaBase`
+    """
+
+    def __init__(self, cls=None):
+        self.cls = cls
+
+    def validate(self, leaf):
+        return leaf is self.cls
+
+    def __repr__(self):
+        cls = self.__class__
+        return '.'.join([cls.__module__, cls.__name__])+'(id=%s)' % (repr(self.cls),)
+
+    def __eq__(self, x):
+        if isinstance(x, Identity):
+            return self.cls is x.cls
+        else:
+            return False
+
+# TODO: subclass ParameterSchema
+class ParameterSpec:
+    """
+    A ParameterSet constructor based on a ParameterSchema
+
+    Schemas should be specified as a dictionary; they are are automatically cast
+    to ParameterSchema at initialization. For nested schemas this is required.
+    A nested schemas shoud specify the `ParameterSpec` subclass, not that
+    spec's `schema` attribute. I.e. use
+        schema = {'x': 1, 'y': Y.ParameterSpec}
+    not
+        schema = {'x': 1, 'y': Y.ParameterSpec.schema}
+
+
+    Current limitation
+    ------------------
+    This is untested on recursive key names of the form
+        schema = {'x.y' = 1}
+    """
+    parser = None  # Overwrite in derived class to implement parser
+    class InvalidParser(RuntimeError):
+        pass
+    def __init__(self):
+        """
+
+        At the end of initialization, tests well-formedness by calling `self.validate(self)`.
+
+        **Note**: `parse` will not be called if `args` and `kwargs` are empty,
+        only ClassSpecs of this type (args) or only correspond to Spec
+        attributes (kwargs).
+        """
+        # We need two versions of schema to deal with nested ParameterSpec.
+        #   - The original `schema` needs to store ParameterSpec (not
+        #     ParameterSpec.schema) in order to properly cast recursively.
+        #   - The ParameterSchema used by the validator needs the `.schema`,
+        #     otherwise it tests against `type(ParameterSpec)`.
+        # Leaving `schema` untouched also avoids confusion for users
+        self._schema = self.schema.copy()
+        for k, v in self.schema.items():
+            if isinstance(v, type) and issubclass(v, ParameterSpec):
+                self._schema[k] = v.schema
+        if not isinstance(self._schema, ParameterSchema):
+            self._schema = ParameterSchema(self._schema)
+
+        self._validator = CongruencyValidator()
+
+    def __call__(self, *args, **kwargs):
+        pset = self._parse(*args, **kwargs)
+        if not self.validate(pset):
+            raise self.InvalidDescription(
+                "Provided descritor is incompatible with specification '{}'"
+                .format(type(self).__qualname__))
+        return pset
+
+    def __str__(self):
+        return str(self.schema)
+    def __repr__(self):
+        return repr(self.schema)
+    def pretty(self, *args, **kwargs):
+        return self.schema.pretty(*args, **kwargs)
+    def _repr_html_(self):
+        """
+        Defaults:
+            '-' indicates a mandatory argument.
+            '?' indicates that we weren't able to compute a default, because
+                the defaults() method requires some parameters to be set.
+        """
+        try:
+            d = self.defaults()
+        except TypeError:
+            # Defaults invalid without args
+            d = {θ: "?" for θ in self.keys()}
+        s0 = "<table><tr><th>Parameter</th><th>Types</th><th>Default</th></tr>"
+        s = [f"<tr><td>{θ}</td><td>{t}</td><td>{d.get(θ, '-')}</td></tr>"
+             for θ, t in self.items()]
+        sn = "</table>"
+        return "\n".join([s0] + s + [sn])
+
+    @staticmethod
+    def defaults(**kwargs):
+        """
+        Redefine in derived class to provide defaults.
+
+        Parameters
+        ----------
+        **kwargs:
+            The provided parameter values. This is to allow
+            defaults to depend on other parameters (e.g. one parameter
+            may specify the number of dimensions).
+            All positional arguments are converted to keywords before calling
+            :def:defaults.
+        """
+        return {}
+
+    # def __repr__(self):
+    #     return {attr: getattr(self, attr) for attr in self.attrs}
+
+    def flat(self):
+        __doc__ = ParameterSet.flat.__doc__
+        return ParameterSet(dict(self.items())).flat()
+
+    def _parse(self, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs:
+            Arguments as defined by `self.schema`
+
+        Returns
+        -------
+        ParameterSet
+        """
+        pset = ParameterSet({})  # What we return at the end
+        arglist = list(args)
+        # Initialize attributes with those of passed Specs, if any
+        for arg in args:
+            if isinstance(arg, type(self)):
+                for attr in self._schema:
+                    setattr(pset, attr, getattr(arg, attr))
+                arglist.pop(arg)
+        # Kind of hacky way of avoid to overwrite parser keyword args
+        if self.parse is None:
+            parseargs = []
+        else:
+            # This builds a list of arguments which can be passed as keywords
+            # to `parse`, to avoid removing them in the next step.
+            # Any argument which can be set by keyword is removed; testing
+            # `kinds` avoids adding *args and **kwargs to the list.
+            parseargs = [name for name, param in signature(self.parse).parameters.items()
+                         if param.kind in (Parameter.POSITIONAL_OR_KEYWORD,
+                                           Parameter.KEYWORD_ONLY)]
+        # Replace positional arguments by keyword ones
+        allkwargs = {nm: arg for arg, nm in zip(arglist, self._schema)}
+        if set(allkwargs).intersection(kwargs) != set():
+            raise TypeError("Argument {} given by name and position".format(nm))
+        allkwargs.update(kwargs)
+        defaults = self.defaults(**allkwargs)
+        # Replace arguments by their default values
+        for k in self._schema:
+            if k not in allkwargs:
+                if k not in defaults:
+                    raise TypeError("Required argument {} not found.".format(k))
+                else:
+                    allkwargs[k] = defaults[k]
+        # Now extract any explicit keyword args. This allows simple parsers
+        # to be implemented with no `parse` method at all.
+        _allkwargs = allkwargs.copy()
+        kwattrs = {}
+        for k in _allkwargs:
+            if k in self._schema and k not in parseargs:
+                kwattrs[k] = allkwargs.pop(k)
+
+        # If there are remaining args or kwargs, pass them to parse
+        if len(allkwargs) > 0:
+            if self.parse is None:
+                raise ValueError(
+                    "Parser {} does not implement a `parse` method and {} "
+                    "are unrecognized keywords."
+                    .format(type(self).__qualname__, list(allkwargs.keys())))
+            else:
+                pset.update([], **self.parse(**allkwargs))
+        # Finally set the explicitly passed attributes
+        # At the same time, recursively cast any attribute of type ParameterSpec
+        for k, v in kwattrs.items():
+            t = self._schema[k]
+            # TODO?: Casts for other types ?
+            if isinstance(t, type) and issubclass(t, ParameterSpec):
+                v = t(v)
+            setattr(pset, k, v)
+        return pset
+
+    def validate(self, pset):
+        """Validate a parameter set against the parser's schema."""
+        return self._validator.validate(pset, self._schema)
+
+    @classmethod
+    def castable(cls, *args, **kwargs):
+        """
+        Returns True if the arguments can be used to construct a valid
+        ParameterSet.
+        """
+        pset = cls(*args, **kwargs)
+        return pset.validate(pset)
+
+    @classmethod
+    def keys(cls):
+        """
+        Convenience method to access schema keys (i.e. variable names).
+        """
+        return cls.schema.keys()
+    def items(self):
+        # `keys()` makes sure to return only ParameterSet elements,
+        # so use it to remove everything else
+        # Not sure if schema or _schema would be better here
+        for key in self.keys():
+            yield key, self._schema[key]
+    def values(self):
+        for key in self.keys():
+            yield self._schema[key]
+
+    # If we use this abstractmethod, delete `parser = None` above
+    # @abc.abstractmethod
+    # def parse(self, desc):
+    #     """Parse description. Returns True on success, False on failure."""
+    #     return
+
+    # @abc.abstractmethod
+    # def schema(self):
+    #     """
+    #     Attribute names must be specified as a list of strings.
+    #     Attributes must fully determine the specification.
+    #     """
+    #     return
+
 
 ###########################
 # Comparing ParameterSets
@@ -900,7 +960,7 @@ def expand_params(param_str, fail_on_unexpanded=False, parser=None):
     Parameters
     ----------
     param_str: str
-        The string descriptor for the parameters.
+        The string description for the parameters.
     fail_on_unexpanded: bool (default False)
         (Optional) Specify whether to fail when an expansion character is found
         but unable to be expanded. By default such an error is ignored, but

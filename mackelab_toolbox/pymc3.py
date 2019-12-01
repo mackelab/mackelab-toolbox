@@ -1,13 +1,14 @@
-import numpy as np
-from collections import namedtuple, Callable, OrderedDict
+from collections import namedtuple, Callable, OrderedDict, Iterable
 from copy import deepcopy
+import numpy as np
 import pymc3 as pymc
 from odictliteral import odict
 
 import theano_shim as shim
-from mackelab_toolbox.parameters import TransformedVar, NonTransformedVar
+from mackelab_toolbox.transform import TransformedVar, NonTransformedVar
 from mackelab_toolbox.iotools import load
 from mackelab_toolbox.utils import flatten
+from mackelab_toolbox.parameters import ParameterSpec, ParameterSet
 
 TransformNames = namedtuple('TransformedNames', ['orig', 'new'])
 PriorVar = namedtuple('PriorVar', ['pymc_var', 'model_var', 'transform', 'mask'])
@@ -455,8 +456,10 @@ class NDArrayView(pymc.backends.NDArray):
 
         return sliced
 
-class ImportedMultiTrace(pymc.backends.base.MultiTrace):
-
+class MultiTrace(pymc.backends.base.MultiTrace):
+    # Must have the same name as pymc3 MultiTrace, because arviz matches on
+    # the class name.
+    # TODO: Store a surrogate `model` attribute (see arviz.data.io_pymc3)
     def discard(self, n):
         """
         Discard `n` samples from the beginning of the trace.
@@ -487,7 +490,7 @@ def import_multitrace(data):
 
     straces = [NDArrayView(tracedata) for tracedata in flatten(flatdata, terminate=dict)]
         # Need to flatten again because loading from file adds another level of nesting
-    return ImportedMultiTrace(straces)
+    return MultiTrace(straces)
 
 def export_multitrace(multitrace):
     excluded_attrs = ['model', 'vars']
