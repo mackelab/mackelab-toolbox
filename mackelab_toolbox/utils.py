@@ -239,6 +239,30 @@ def fully_qualified_name(o):
     else:
         return module + '.' + name
 
+def comparedicts(dict1, dict2):
+    """
+    Recursively compare nested dictionaries. Works correctly with Numpy values
+    (calls `all()` on the result)
+    """
+    if set(dict1) != set(dict2): return False
+    for k, v1 in dict1.items():
+        v2 = dict2[k]
+        if isinstance(v1, dict):
+            if not isinstance(v2, dict): return False
+            if not dictcompare(v1, v2): return False
+        r = (v1 == v2)
+        try:
+            r = r.all()
+        except AttributeError:
+            pass
+        # Ensure we got a bool
+        if not isinstance(r, bool):
+            raise ValueError(
+                "Comparison of values {} and {} did not yield a boolean."
+                .format(v1, v2))
+        if not r: return False
+    return True
+
 class PDF:
     """
     Create an object from a pdf file which allows it to be viewed in a notebook.
