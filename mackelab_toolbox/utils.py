@@ -280,6 +280,53 @@ class PDF:
     def _repr_latex_(self):
         return r'\includegraphics[width=1.0\textwidth]{{{0}}}'.format(self.pdf)
 
+# Functions for displaying source code in an IPython cell
+# These are especially useful for documenting a module in a notebook
+import inspect
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import HtmlFormatter
+from IPython.display import HTML, display
+
+pythonlexer = PythonLexer(encoding='chardet')
+htmlformatter = HtmlFormatter()
+class CodeStr:
+    """
+    Return a highlighted string of code for display in a notebook output cell.
+    Todo: correct export to Latex
+    """
+    def __init__(self, code):
+        """
+        Parameters
+        ----------
+        code: str
+        """
+        self.code = code
+        display(HTML("""
+        <style>
+        {pygments_css}
+        </style>
+        """.format(pygments_css=HtmlFormatter().get_style_defs('.highlight'))))
+
+    def _repr_html_(self):
+        return HTML(data=highlight(self.code, pythonlexer, htmlformatter)) \
+            ._repr_html_()
+
+def Code(*obj, sep=''):
+    """
+    Extract object source code with `inspect.getsource` and return a string
+    with syntax highlighting suitable for a notebook output cell.
+
+    Parameters
+    ----------
+    *obj: objects for which we want to print the source code
+    sep:  (keyword only) Optional separator, if multiple objects are given.
+          This is appended to the already present newline.
+    """
+    # s
+    src = sep.join([inspect.getsource(s) for s in obj])
+    return CodeStr(src.strip())  # .strip() removes final newline
+
 def sciformat(num, sigdigits=1, minpower=None):
     """
     Return a string representation of `num` with a given
