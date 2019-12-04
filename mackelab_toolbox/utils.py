@@ -216,6 +216,17 @@ def greater_close(x1, x2, rtol=1e-5, atol=1e-8):
     """
     return x1 > x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
 
+def broadcast_shapes(*shapes):
+    """
+    Compute the shape resulting from a broadcasting operation.
+
+    If A1, A2 and A3 have shapes S1, S2 and S3, then the resulting array
+    A = A1 * A2 * A3 (where * can be any broadcasting operation) has shape S.
+    This function takes S1, S2, S3 as arguments and returns S.
+    """
+    As = (np.broadcast_to(np.ones(1), shape) for shape in shapes)
+    return np.broadcast(*As).shape
+
 def fully_qualified_name(o):
     """
     Return fully qualified name for a class or function
