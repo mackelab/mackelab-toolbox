@@ -25,7 +25,7 @@ from sumatra.records import Record
 import mackelab_toolbox as ml
 import mackelab_toolbox.parameters
 # FIXME!!!!: should not depend on fsGIF project
-from fsGIF import core
+# from fsGIF import core
 
 try:
     import click
@@ -1078,58 +1078,58 @@ if click_loaded:
     def cli():
         pass
 
-    @click.command()
-    @click.argument('src', nargs=1)
-    @click.argument('dst', nargs=1)
-    @click.option('--datadir', default="")
-    @click.option('--suffix', default="")
-    @click.option('--ext', default=".sir")
-    @click.option('--link/--no-link', default=True)
-    def rename(src, dst, ext, datadir, suffix, link):
-        """
-        DEPRECATED: Should replace with an `updatelinks` function instead,
-        which doesn't touch the original data.
-        Rename a result file based on the old and new parameter files.
-        TODO: Allow a list of suffixes
-        TODO: Update Sumatra records database
-        TODO: Match any extension; if multiple are present, ask something.
-        Parameters
-        ----------
-        src: str
-            Original parameter file
-        dst: str
-            New parameter file
-        link: bool (default: True)
-            If True, add a symbolic link from the old file name to the new.
-            This avoids invalidating everything linking to the old filename.
-        """
-        if ext != "" and ext[0] != ".":
-            ext = "." + ext
-        old_params = ParameterSet(src)
-        new_params = ParameterSet(dst)
-        old_filename = core.RunMgr._get_filename(old_params, suffix) + ext
-        new_filename = core.RunMgr._get_filename(new_params, suffix) + ext
-        old_filename = os.path.join(datadir, old_filename)
-        new_filename = os.path.join(datadir, new_filename)
-
-        if not os.path.exists(old_filename):
-            raise FileNotFoundError("The file '{}' is not in the current directory."
-                                    .format(old_filename))
-        if os.path.exists(new_filename):
-            print("The target filename '{}' already exists. Skipping the"
-                  "renaming of '{}'.".format(new_filename, old_filename))
-        else:
-            os.rename(old_filename, new_filename)
-            print("Renamed {} to {}.".format(old_filename, new_filename))
-        if link:
-            # Allowing the link to be created even if rename failed allows to
-            # rerun to add missing links
-            # FIXME: Currently when rerunning the script dies on missing file
-            #   before getting here
-            os.symlink(os.path.basename(new_filename), old_filename)
-            print("Added symbolic link from old file to new one")
-
-    cli.add_command(rename)
+    # @click.command()
+    # @click.argument('src', nargs=1)
+    # @click.argument('dst', nargs=1)
+    # @click.option('--datadir', default="")
+    # @click.option('--suffix', default="")
+    # @click.option('--ext', default=".sir")
+    # @click.option('--link/--no-link', default=True)
+    # def rename(src, dst, ext, datadir, suffix, link):
+    #     """
+    #     DEPRECATED: Should replace with an `updatelinks` function instead,
+    #     which doesn't touch the original data.
+    #     Rename a result file based on the old and new parameter files.
+    #     TODO: Allow a list of suffixes
+    #     TODO: Update Sumatra records database
+    #     TODO: Match any extension; if multiple are present, ask something.
+    #     Parameters
+    #     ----------
+    #     src: str
+    #         Original parameter file
+    #     dst: str
+    #         New parameter file
+    #     link: bool (default: True)
+    #         If True, add a symbolic link from the old file name to the new.
+    #         This avoids invalidating everything linking to the old filename.
+    #     """
+    #     if ext != "" and ext[0] != ".":
+    #         ext = "." + ext
+    #     old_params = ParameterSet(src)
+    #     new_params = ParameterSet(dst)
+    #     old_filename = core.RunMgr._get_filename(old_params, suffix) + ext
+    #     new_filename = core.RunMgr._get_filename(new_params, suffix) + ext
+    #     old_filename = os.path.join(datadir, old_filename)
+    #     new_filename = os.path.join(datadir, new_filename)
+    #
+    #     if not os.path.exists(old_filename):
+    #         raise FileNotFoundError("The file '{}' is not in the current directory."
+    #                                 .format(old_filename))
+    #     if os.path.exists(new_filename):
+    #         print("The target filename '{}' already exists. Skipping the"
+    #               "renaming of '{}'.".format(new_filename, old_filename))
+    #     else:
+    #         os.rename(old_filename, new_filename)
+    #         print("Renamed {} to {}.".format(old_filename, new_filename))
+    #     if link:
+    #         # Allowing the link to be created even if rename failed allows to
+    #         # rerun to add missing links
+    #         # FIXME: Currently when rerunning the script dies on missing file
+    #         #   before getting here
+    #         os.symlink(os.path.basename(new_filename), old_filename)
+    #         print("Added symbolic link from old file to new one")
+    #
+    # cli.add_command(rename)
 
     class MoveList:
         """
@@ -1373,6 +1373,8 @@ if click_loaded:
     @click.option("--subdir", default="")
     @click.option("--suffix", default="")
     def file_exists(param_file, subdir, suffix):
+        # FIXME: Use Sumatra function to grab context, if this function
+        # is even still relevant
         mgr = core.RunMgr()
         if subdir == "":
             subdir = None

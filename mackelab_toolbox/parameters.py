@@ -257,7 +257,7 @@ def params_to_lists(params):
         # NTParameterSet
     for name, val in params.items():
         if isinstance(val, (ParameterSetBase, dict)):
-            params[name] = params_to_nonarrays(val)
+            params[name] = params_to_lists(val)
         elif isinstance(val, np.ndarray):
             params[name] = val.tolist()
     return ParamType(params)

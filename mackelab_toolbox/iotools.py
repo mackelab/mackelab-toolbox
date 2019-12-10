@@ -10,6 +10,7 @@ TODO: Use npy by default on numpy arrays
 import sys
 import os
 import os.path
+import builtins
 from pathlib import Path
 import io
 from collections import namedtuple, OrderedDict
@@ -25,27 +26,34 @@ if sys.version_info.major >= 3 and sys.version_info.minor >= 6:
 else:
     PathTypes = (str,)
 
-Format = namedtuple("Format", ['ext'])
+Format = namedtuple("Format", ['ext', 'save', 'load', 'bytes'])
+    # save: save function, `save(filename, data)`
+    # load: load function, `load(filename)`
+    # bytes: whether to use the 'b' flag when opening a file for loading/saving
     # TODO: Allow multiple extensions per format
-    # TODO: Extend Format to include load/save functions
+    # TODO: Use namedtuple defaults statt None once Python3.7 is standard
 defined_formats = OrderedDict([
     # List of formats known to the load/save functions
     # The order of these formats also defines a preference, for when two types might be used
-    ('npr',  Format('npr')),
-    ('repr', Format('repr')),
-    ('brepr', Format('brepr')), # Binary version of 'repr'
-    ('dill', Format('dill'))
+    ('npr',  Format('npr', None, None, True)),
+    ('repr', Format('repr', None, None, False)),
+    ('brepr', Format('brepr', None, None, True)), # Binary version of 'repr'
+    ('dill', Format('dill', None, None, True))
     ])
 
 _load_types = {}
+_format_types = {}
 
-def register_datatype(type, typename=None):
-    global _load_types
+def register_datatype(type, typename=None, format=None):
+    global _load_types, _format_types
     assert(isclass(type))
     if typename is None:
-        typename = type.__name__
+        typename = type.__qualname__
     assert(isinstance(typename, str))
     _load_types[typename] = type
+    if format is not None:
+        assert isinstance(format, str)
+        _format_types[typename] = format
 
 def find_registered_typename(type):
     """
@@ -54,6 +62,7 @@ def find_registered_typename(type):
     If no parents are registered, return `type.__name__`.
     """
     def get_name(type):
+        # _load_types is always a superset of _format_types
         for registered_name, registered_type in _load_types.items():
             if registered_type is type:
                 return registered_name
@@ -61,7 +70,9 @@ def find_registered_typename(type):
 
     typename = get_name(type)
     if typename is None:
-        for base in type.__mro__:
+        if not isinstance(type, builtins.type):
+            type = builtins.type(type)
+        for base in type.mro():
             typename = get_name(base)
             if typename is not None:
                 break
@@ -69,6 +80,22 @@ def find_registered_typename(type):
         typename = type.__name__
             # No registered type; return something sensible (i.e. the type's name)
     return typename
+
+def get_format_from_ext(ext):
+    format = None
+    ext = ext.strip('.')
+    for name, info in defined_formats.items():
+        exts = [info.ext] if isinstance(info.ext, str) else info.ext
+        for e in exts:
+            if e.strip('.') == ext:
+                format = name
+                break
+        if format is not None:
+            break
+    if format is None:
+        raise ValueError("No format matching extension {} was found."
+                         .format(ext))
+    return format
 
 
 def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suffix=None):
@@ -150,18 +177,26 @@ text (False) output. Default is to open for byte output, which
         raise IOError("Number of files with the name '{}' has exceeded limit."
                       .format(path))
 
-def save(file, data, format='npr', overwrite=False):
-    """Save `data`. By default, only the 'numpy_repr' representation is saved,
+def save(file, data, format=None, overwrite=False):
+    """Save `data`.
+    First the function checks if :param:data defines a `save()` method; if so,
+    the method is called as `save(output_path)`. If this is successful, the
+    function terminates.
+    If the call is not successful, or :param:data does not define a `save()`
+    method, then the function attempts to save to the formats defined by
+    `format`. By default, only the 'numpy_repr' representation is saved,
     if `data` defines a numpy representation.
     Not only is the numpy representation format more future-proof, it can be an
     order of magnitude more compact.
-    If the numpy_repr save is unsuccessful (possibly because 'data' does not provide a
-    `numpy_repr` method), than save falls back to saving a plain (dill) pickle of 'data'.
+    If the numpy_repr save is unsuccessful (possibly because `data` does not provide a
+    `numpy_repr` method), then `save()` falls back to saving a plain (dill) pickle of 'data'.
 
     Parameters
     ----------
     file: str
-        Path name or file object
+        Path name or file object. Note that the file extension is mostly
+        ignored and will be replaced by the one associated with the format.
+        This is to allow saving to multiple formats.
     data: Python object
         Data to save
     format: str
@@ -180,7 +215,7 @@ def save(file, data, format='npr', overwrite=False):
             Objects using this format should implement the `from_repr` method.
           - 'dill' A dill pickle.
             Output file has the extension 'dill'
-        Formats can also be combined as e.g. 'npr+dill'.
+        Formats can also be combined as e.g. 'npr+dill'. :fun:save()
     overwrite: bool
         If True, allow overwriting previously saved files. Default is false, in which case
         a number is appended to the filename to make it unique.
@@ -190,6 +225,24 @@ def save(file, data, format='npr', overwrite=False):
     List of output paths.
         List because many formats may be specified, leading to multiple outputs.
     """
+    if isinstance(format, str):
+        selected_formats = format
+    else:
+        if format is None:
+            typename = find_registered_typename(type(data))
+        else:
+            if not isinstance(format, type):
+                logger.error("The `format` argument should be either a string "
+                             "or type. Provided value: {}"
+                             "Attempting to infer type from data".format(format))
+                typename = find_registered_typename(type(data))
+            typename = find_registered_typename(format)
+        if typename in _format_types:
+            selected_formats = _format_types[typename]
+        else:
+            logger.error("Type '{}' has no associated format".format(typename))
+            format = 'npr'
+
     selected_formats = set(format.split('+'))
 
     # Check argument - format
@@ -333,6 +386,41 @@ def save(file, data, format='npr', overwrite=False):
         else:
             output_paths.append(output_path)
 
+    # Save to all specified formats
+    for name, formatinfo in defined_formats.items():
+        if name in ('npr', 'repr', 'brepr', 'dill'):
+            # TODO: Define the save functions below at top level of module
+            # and treat these formats as any other
+            #       Make sure 'dill' is still used as backup
+            continue
+        if name in selected_formats:
+            if formatinfo.save is None:
+                logger.error("Format '{}' does not define a save function"
+                             .format(name))
+                fail = True
+            else:
+                fail = False
+                ext = formatinfo.ext
+                try:
+                    with get_output(filename, ext, formatinfo.bytes, overwrite) as (f, output_path):
+                        formatinfo.save(f, data)
+                except IOError:
+                    fail = True
+                except Exception as e:
+                    logger.error("Silenced uncaught exception during saving process to attempt another format.")
+                    logger.error("Silenced exception was: " + str(e))
+                    fail = True
+                else:
+                    output_paths.append(output_path)
+            if fail:
+                try: os.remove(output_path)  # Ensure there are no leftover files
+                except: pass
+                logger.warning("Unable to save to {} format."
+                               .format(name))
+                if 'dill' not in selected_formats:
+                    # Warn the user that we will use another format
+                    logger.warning("Will try a plain (dill) pickle dump.")
+                    selected_formats.add('dill')
     # Save data as numpy representation
     if 'npr' in selected_formats:
         fail = False
@@ -358,7 +446,7 @@ def save(file, data, format='npr', overwrite=False):
                 logger.warning("Will try a plain (dill) pickle dump.")
                 selected_formats.add('dill')
 
-    # Save data as representation string
+    # Save data as representation string ('repr' or 'brepr')
     for format in [format
                    for format in selected_formats
                    if format in ('repr', 'brepr')]:
@@ -490,8 +578,7 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     """
     global _load_types
     if types is not None:
-        types = dict(types)
-        types.update(_load_types)
+        types = {**_load_types, **dict(types)}
     else:
         types = _load_types
 
@@ -541,11 +628,16 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
                         .format(file, type(file)))
 
     if format is None:
-        format = ext[1:]
+        format = get_format_from_ext(ext[1:])
     if format not in defined_formats:
         raise ValueError("Unrecognized format `{}`.".format(format))
 
-    if format == 'npr':
+    if format not in ('npr', 'repr', 'dill'):
+        # TODO: Define following load functions separately, add them to
+        # to defined_formats, and then treat these as any other format
+        formatinfo = defined_formats[format]
+        data = defined_formats[format].load(basepath+ext)
+    elif format == 'npr':
         with wrapped_open(file, 'rb') as f:
             data = np.load(f)
                 # np.load provides dict access to the file object;
