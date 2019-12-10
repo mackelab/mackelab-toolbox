@@ -221,7 +221,7 @@ class GraphCache:
         Since the cached graphs are typically manipulated versions of the keys,
         they may involve symbolic inputs which are not inputs to the keys.
         Matching variables for these extra inputs need to be provided with
-        :param:other_inputs.
+        `other_inputs`.
 
         ..FIXME: Currently does not work if the RNG depends on a shared
         variable. So instead of doing `rng.normal(std=σ)`, do

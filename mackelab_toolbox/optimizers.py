@@ -97,11 +97,24 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     assert(isinstance(p, tuple) and len(p) == 2 for p in params)
 
     # Standardize the learning rate form
+    errmsg = ("Learning rate must be specified either as a scalar, "
+              "or as a dictionary with a key matching each parameter. "
+              "Provided learning rate: {}".format(lr))
     if shim.isscalar(lr):
         lr = {p: lr for p in params}
-    if not (isinstance(lr, dict) and all(p[0] in lr for p in params)):
-        raise ValueError("Learning rate must be specified either as a scalar, "
-                         "or as a dictionary with a key matching each parameter.")
+    elif not isinstance(lr, dict):
+        raise ValueError(errmsg)
+    _lr = lr.copy()
+    for key, plr in _lr.items():
+        if isinstance(key, str):
+            # We expect lr to be indexed by variable, not variable name
+            for p, mask in params:
+                if p.name == key:
+                    lr[p] = plr
+                    del lr[key]
+                    break
+    if not isinstance(lr, dict) or not all(p[0] in lr for p in params):
+        raise ValueError(errmsg)
 
     # Extract the gradient mask for each parameter
     for p in params:
