@@ -44,7 +44,9 @@ def isinstance(obj, class_or_tuple):
 
 ########################
 
-def flatten(*l, terminate=(str, bytes)):
+terminating_types = (str, bytes)
+
+def flatten(*l, terminate=None):
     """
     Flatten any Python iterable. Taken from https://stackoverflow.com/a/2158532.
 
@@ -57,9 +59,11 @@ def flatten(*l, terminate=(str, bytes)):
         list of dictionaries, specifying `terminate=dict` or `terminate=(dict,)`
         would ensure that the dictionaries are treated as atomic elements and
         not expanded.
-        Default terminates on `str` and `bytes` types.
+        By default terminates on the types listed in `terminating_types`.
     """
     # Normalize `terminate` argument
+    if terminate is None:
+        terminate = terminating_types
     if not isinstance(terminate, Iterable):
         terminate = (terminate,)
     else:

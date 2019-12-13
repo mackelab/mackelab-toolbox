@@ -8,7 +8,6 @@ setup(
     install_requires=[
         'matplotlib',
         'seaborn',
-        'theano_shim>=0.2',
         'parameters',
         'pyyaml',  # Required by parameters, for `import yaml`
         'simpleeval',
@@ -32,9 +31,13 @@ setup(
         'luigi': [
             'psutil'
         ],
+        'theano': [
+            'theano_shim>=0.2'
+        ],
         'all': [
             'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2', 'psycopg2',
-            'psutil'
+            'psutil',
+            'theano_shim>=0.2'
         ]
     },
     # entry_points = {

@@ -3,6 +3,8 @@ import numpy
 import logging
 logger = logging.getLogger(__name__)
 
+# TODO: Add shim terminating types to utils.terminating_types
+
 def using_gpu():
     """
     Return True if Theano is currently able to using the GPU. This function
