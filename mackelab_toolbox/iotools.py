@@ -98,6 +98,14 @@ def get_format_from_ext(ext):
     return format
 
 
+# Register basic data types
+# Python structures can be arbitrarily nested, so we can't assume that they
+# would compatible with any strict format
+register_datatype(list, format='dill')
+register_datatype(tuple, format='dill')
+register_datatype(set, format='dill')
+register_datatype(dict, format='dill')
+
 def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suffix=None):
     """
     Return a file handle to an unused filename. If 'path' is free, return a handle
@@ -238,7 +246,7 @@ def save(file, data, format=None, overwrite=False):
                 typename = find_registered_typename(type(data))
             typename = find_registered_typename(format)
         if typename in _format_types:
-            selected_formats = _format_types[typename]
+            format = _format_types[typename]
         else:
             logger.error("Type '{}' has no associated format".format(typename))
             format = 'npr'
