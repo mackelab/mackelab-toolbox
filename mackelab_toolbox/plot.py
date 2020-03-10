@@ -296,6 +296,22 @@ def points_to_inches(a, fig=None):
     if fig is None: fig = plt.gcf()
     return a / fig.dpi
 
+def full_extent(ax, pad=0.0):
+    """Get the full extent of an axes, including axes labels, tick labels, and
+    titles."""
+    # https://stackoverflow.com/a/14720600
+    # For text objects, we need to draw the figure first, otherwise the extents
+    # are undefined.
+    fig = ax.get_figure()
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    items = ax.get_xticklabels() + ax.get_yticklabels()
+    items += [ax]
+    for text in [ax.title, ax.xaxis.label, ax.yaxis.label]:
+        if text.get_text() != "":
+            items += [text]
+    bbox = mpl.transforms.Bbox.union([item.get_window_extent(renderer) for item in items])
+    return bbox.expanded(1.0 + pad, 1.0 + pad)
 
 # ====================================
 # Margins and spacing
@@ -509,9 +525,11 @@ def add_corner_xlabel(ax, label, axcoordx=1, axcoordy=-0.08, fracsize=0.69):
                 xticklabels = xticklabels[:i] + [""] + xticklabels[i+1:]
     ax.set_xticklabels(xticklabels)
 
-def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
+def draw_xscale(length, label, ax=None, offset=10, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
     """
-    offset in inches
+    TODO: Allow shifting in data coords as well
+
+    offset in points (1/72 inches)
     **kwargs passed on to ax.xaxis.set_label_text
     """
     if ax is None:
@@ -519,7 +537,7 @@ def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     if color is None:
         color = mpl.rcParams['axes.edgecolor']
     fig = ax.get_figure()
-    fontsize = plt.rcParams['font.size']
+    fontsize = mpl.rcParams['font.size']
     dpi = fig.dpi
     ax.set_xticks([])  # Remove ticks
 
@@ -541,21 +559,24 @@ def draw_xscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
     spine = ax.spines['bottom']
     spine.set_visible(True)
     x = x0 + data_xshift
-    y = y0 - offset - data_yshift - data_linewidth
+    y = y0 - data_offset - data_yshift - data_linewidth
     spine.set_bounds(x, x+length)
     spine.set_linewidth(scalelinewidth)
     spine.set_position(('data', y))
     spine.set_color(color)
 
     #y -= fontsize/dpi * yheight/dheight
-    data_fontheight = fontsize/dpi * yheight/dheight  # FIXME: too small
-    y -= data_linewidth - 1.0*data_fontheight
+    data_fontheight = fontsize * 0.3*yheight/dheight
+        # FIXME: I don't understand why I need the 0.3 factor
+    y -= data_linewidth + 1.0*data_fontheight
     ax.xaxis.set_label_coords(x, y, transform=ax.transData)
     ax.xaxis.set_label_text(label, color=color, horizontalalignment='left', verticalalignment='top', **kwargs)
 
-def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
+def draw_yscale(length, label, ax=None, offset=10, scalelinewidth=2, color=None, xshift=0, yshift=0, **kwargs):
     """
-    offset in inches
+    TODO: Allow shifting in data coords as well
+
+    offset in points (1/72 inches)
     **kwargs passed on to ax.yaxis.set_label_text.
     """
     if ax is None:
@@ -589,7 +610,7 @@ def draw_yscale(length, label, ax=None, offset=0.05, scalelinewidth=2, color=Non
 
     spine = ax.spines['left']
     spine.set_visible(True)
-    x = x0 - offset - data_xshift
+    x = x0 - data_offset - data_xshift
     y = y0 - data_yshift + data_linewidth
     spine.set_bounds(y, y+length)
     spine.set_linewidth(scalelinewidth)
@@ -704,6 +725,8 @@ def subreflabel(ax=None, label="", x=None, y=None, transform=None, inside=None, 
 def detach_spines(ax=None, amount=0.03,
                   spines=('top', 'right', 'bottom', 'left')):
     """
+    DEPRECATED: Use seaborn's `despine(trim=True)`.
+
     Detach a plot's axes (which matplotlib calls 'spines'), i.e. place
     them a little outside the plot and truncate the bounds so they end
     at a tick.
@@ -817,6 +840,25 @@ def cleanname(_name):
     s = s_els[0] + ''.join(['_{' + el + '}' for el in s_els[1:]])
     # wrap the whole string in brackets, to allow underscore with component
     return '{' + s + '}'
+
+def set_full_axes_background(ax, color, zorder=-10):
+    # https://stackoverflow.com/a/14720600
+
+    fig = ax.get_figure()
+
+    axes = [ax] if not isinstance(ax, Iterable) else ax
+    #extent = mpl.transforms.Bbox.union([full_extent(ax) for ax in axes])
+    extent = mpl.transforms.Bbox.union([full_extent(ax) for ax in axes])
+
+    # It's best to transform this back into figure coordinates. Otherwise, it won't
+    # behave correctly when the size of the plot is changed.
+    extent = extent.transformed(fig.transFigure.inverted())
+
+    # We can now make the rectangle in figure coords using the "transform" kwarg.
+    rect = mpl.patches.Rectangle([extent.xmin, extent.ymin], extent.width, extent.height,
+                                  facecolor=color, edgecolor='none', zorder=zorder,
+                                  transform=fig.transFigure)
+    fig.patches.append(rect)
 
 def plot(data, **kwargs):
     """

@@ -34,7 +34,7 @@ legend.edgecolor: FFFFFF00  # Remove legend border
 lines.markersize: 4
 
 figure.figsize : 4.5, 2.78  # Golden ratio
-figure.dpi : 120  # Display figures larger in notebook; default is 72
+figure.dpi : 120  # Display figures larger in notebook; default is 72 when pyplot is imported
 
 savefig.dpi : 300
 savefig.format : pdf

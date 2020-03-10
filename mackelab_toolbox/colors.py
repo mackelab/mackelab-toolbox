@@ -244,3 +244,54 @@ def get_value(c):
         rgb = mpl.colors.to_rgb(c)
         h, s, v = mpl.colors.rgb_to_hsv(rgb)
         return v
+
+# ===============================
+# Functions for viewing color scheme
+# ===============================
+
+def plot_value_profile(clist, style=None):
+    """
+    Plot the value profile of a color map. Ensuring each colour
+    has a different values helps make the colors distinguishable
+    even in grey scale.
+    It also helps that the value progression be monotonous, that way
+    legends go from e.g. light to dark.
+
+    Parameters
+    ----------
+    clist: colour list
+    style: str | None
+        Either 'line' or 'scatter'. If None, style is chosen automatically.
+    """
+    if style is None:
+        style = 'line' if len(clist) >= 8 else 'scatter'
+    ax = plt.subplot(111)
+    if style == 'line':
+        ax.plot(get_value(clist))
+    else:
+        ax.scatter(range(len(clist)), get_value(clist))
+
+def display_palette(colors, ax=None):
+    #if (isinstance(colors, (str, bytes))
+    #    or not isinstance(colors, Iterable)):
+    #    colors = [colors]
+    rowheight = 1.5  # Height of a color row in inches
+    colors = np.atleast_1d(colors)
+    if ax is None:
+        ax = plt.gca()
+    fig = ax.get_figure()
+    if colors.ndim == 2:
+        # Multiple color lists
+        ax.remove()
+        for i, row in enumerate(colors):
+            ax = plt.subplot(len(colors),1,i+1)
+            show_colors(row, ax=ax)
+        fig.set_figheight(len(colors)*rowheight)
+    else:
+        fig.set_figheight(rowheight)
+        ax.set_axis_off()
+        w = 1/len(colors); h = 1
+        for i, c in enumerate(colors):
+            rect = Rectangle((i*w,0), w, h, color=c)
+            ax.add_patch(rect);
+        return ax
