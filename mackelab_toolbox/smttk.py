@@ -807,7 +807,7 @@ class RecordList:
         label: str | list of str
             Label of the record we want to retrieve.
             Can also be an iterable of labels. In this case the record corresponding
-            to each is retrieved, and the result returned as a RecordLis.
+            to each is retrieved, and the result returned as a RecordList.
 
         Returns
         -------
@@ -1522,21 +1522,6 @@ if click_loaded:
         return res
 
     cli.add_command(run)
-
-class MoveList:
-    def __init__(self):
-        self.moves = {}
-
-    def __iter__(self):
-        return ({'new path': key, 'old path': val['old path'],
-                 'label': val['label']}
-                 for key, val in self.moves.items())
-
-    def add_move(self, old_path, new_path, label):
-        if ( new_path not in self.moves
-             or label > self.moves[new_path]['label']):
-            self.moves[new_path] = {'old path': old_path,
-                                    'label': label}
 
 def get_free_file(path, max_files=100):
     """
