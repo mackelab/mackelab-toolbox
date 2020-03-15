@@ -298,13 +298,18 @@ class PDF:
 # Functions for displaying source code in an IPython cell
 # These are especially useful for documenting a module in a notebook
 import inspect
-from pygments import highlight
-from pygments.lexers import PythonLexer
-from pygments.formatters import HtmlFormatter
-from IPython.display import HTML, display
+try:
+    from pygments import highlight
+    from pygments.lexers import PythonLexer
+    from pygments.formatters import HtmlFormatter
+    from IPython.display import HTML, display
+    pygments_loaded = True
+except ModuleNotFoundError:
+    pygments_loaded = False
 
-pythonlexer = PythonLexer(encoding='chardet')
-htmlformatter = HtmlFormatter()
+if pygments_loaded:
+    pythonlexer = PythonLexer(encoding='chardet')
+    htmlformatter = HtmlFormatter()
 class CodeStr:
     """
     Return a highlighted string of code for display in a notebook output cell.

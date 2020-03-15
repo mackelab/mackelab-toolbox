@@ -37,7 +37,9 @@ setup(
         'all': [
             'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2', 'psycopg2',
             'psutil',
-            'theano_shim>=0.2'
+            'theano_shim>=0.2',
+            'pygments',
+            'IPython'
         ]
     },
     # entry_points = {
