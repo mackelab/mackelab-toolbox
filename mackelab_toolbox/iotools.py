@@ -381,7 +381,16 @@ def save(file, data, format=None, overwrite=False):
     elif hasattr(data, 'save'):
         _selected_formats_back = selected_formats
         selected_formats = []  # Don't save to another format if successful
-        with get_output(filename, ext="", bytes=False, overwrite=overwrite) as (f, output_path):
+        # See if this type is in the registered formats, so we can get the
+        # expected extension
+        typename = find_registered_typename(data)
+            # Always returns a type name: if none is found, returns that of data
+        format = _format_types.get(typename, None)
+        if format is None or format not in defined_formats:
+            ext = ""
+        else:
+            ext = defined_formats[format].ext
+        with get_output(filename, ext=ext, bytes=False, overwrite=overwrite) as (f, output_path):
             # TODO: Use `f` if possible, and only `output_path` if it fails.
             pass
         try:
