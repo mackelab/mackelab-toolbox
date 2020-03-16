@@ -520,6 +520,12 @@ def find_file(file, format=None):
     a simple path is returned
     Otherwise, returns the file path with the specified format.
     In both cases, if no file is found, raises FileNotFoundError.
+
+    Parameters
+    ----------
+    file: str | path-like
+    format: str | type
+        Should correspond to an entry in `defined_formats`.
     """
     if isinstance(file, PathTypes):
         basepath, ext = os.path.splitext(file)
@@ -527,9 +533,16 @@ def find_file(file, format=None):
         if dirname == '':
             dirname = '.'
 
-        if len(ext) > 0 and format is None:
+        # Normalize the format and see if it is recognized
+        if isinstance(format, str):
+            formatext = defined_formats.get(format, None)
+        elif isinstance(format, type):
+            formatext = defined_formats.get(find_registered_typename(format), None)
+
+        # Find the file
+        if len(ext) > 0 and formatext is None:
             format = ext.strip('.')
-        if len(ext) == 0 and format is None:
+        if len(ext) == 0 and formatext is None:
             # Try every file whose name without extension matches `file`
             match = lambda fname: os.path.splitext(fname)[0] == basename
             fnames = [name for name in os.listdir(dirname) if match(name)]
@@ -553,7 +566,7 @@ def find_file(file, format=None):
         elif os.path.exists(file):
             return file
         else:
-            return basepath + "." + defined_formats[format].ext.strip('.')
+            return basepath + "." + formatext.strip('.')
     else:
         raise ValueError("File finding is only implemented for path-like "
                          "arguments.")
