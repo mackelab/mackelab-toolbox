@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Provides the 'expand_params' method for expanding parameter description strings.
-This allows to use one description to specify multiple parameter sets.
-
+Mackelab toolbox : Parameters
 Created on Wed Sep 20 13:19:53 2017
+Author: Alexandre René © 2017-2020
 
-@author: alex
+A collection of functions for working with `ParameterSet` objects defined by
+the [parameters](https://parameters.readthedocs.io) package. Uses fall mostly
+two categories:
+
+  + Using ParameterSets as consistent identifiers
+    This involves normalizing value types and computing a form of hash, which
+    we call a "digest".
+  + Querying ParameterSets, mostly to compare and find differences between
+    two sets.
 """
 
 from collections import deque, OrderedDict, namedtuple, Iterable
@@ -18,7 +25,7 @@ import pandas as pd
 import logging
 logger = logging.getLogger(__file__)
 
-from parameters import ParameterSet
+# from parameters import ParameterSet
 
 from . import iotools
 try:
@@ -957,6 +964,10 @@ def expand_params(param_str, fail_on_unexpanded=False, parser=None):
     Parser, and change its 'open_brackets', 'close_brackets', 'separators' and
     'expanders' attributes.
 
+    NOTE: The *parameters* package already provides `ParameterRange` and
+    `ParameterSpace` objects, which provide the same functionality and should
+    probably be used instead.
+
     Parameters
     ----------
     param_str: str
@@ -1000,6 +1011,10 @@ def expand_param_file(param_path, output_path,
     Load the file located at 'param_path' and call expand_params on its contents.
     The resulting files are saved at the location specified by 'output_pathn',
     with a number appended to each's filename to make it unique.
+
+    NOTE: The *parameters* package already provides `ParameterRange` and
+    `ParameterSpace` objects, which provide the same functionality and should
+    probably be used instead.
 
     Parameters
     ----------
