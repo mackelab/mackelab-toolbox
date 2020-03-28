@@ -13,7 +13,8 @@ Created on Tue Nov 28 2017
 import logging
 logger = logging.getLogger(__file__)
 import builtins
-from collections import Iterable, Callable, OrderedDict
+from collections import OrderedDict
+from collections.abc import Iterable, Callable
 from enum import Enum
 
 ########################

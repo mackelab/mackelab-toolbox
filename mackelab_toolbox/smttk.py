@@ -4,7 +4,8 @@ import glob
 import operator
 import itertools
 import multiprocessing
-from collections import namedtuple, deque, Iterable, Sequence, Callable, OrderedDict
+from collections import namedtuple, deque, OrderedDict
+from collections.abc import Iterable, Sequence, Callable
 from datetime import datetime
 import logging
 import numpy as np
@@ -911,7 +912,7 @@ class RecordListSummary(OrderedDict):
             is initialized as an empty dictionary to which the entries of
             `recordlist` are then added.
         """
-        lbltest = re.compile('^\d{8,8}-\d{6,6}$')
+        lbltest = re.compile(r'^\d{8,8}-\d{6,6}$')
             # RegEx for the standard label format YYYYMMDD-HHMMSS
         if base is None: base = ()  # Empty initialization
         elif not isinstance(base, OrderedDict):

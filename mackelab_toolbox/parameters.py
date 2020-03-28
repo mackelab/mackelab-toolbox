@@ -15,7 +15,9 @@ two categories:
     two sets.
 """
 
-from collections import deque, OrderedDict, namedtuple, Iterable
+from collections import deque, OrderedDict, namedtuple
+from collections.abc import Iterable, Callable
+import builtins
 import itertools
 from types import SimpleNamespace
 import hashlib
