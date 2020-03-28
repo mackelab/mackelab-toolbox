@@ -68,7 +68,7 @@ _filename_printoptions = {
 _new_printoptions = {'1.14': ['floatmode', 'sign', 'legacy']}
     # Lists of printoptions keywords, keyed by the NumPy version where they were introduced
     # This allows removing keywords when using an older version
-_remove_whitespace_for_filenames = True
+_remove_whitespace_for_digests = True
 _type_compress = OrderedDict((
     (np.floating, np.float64),
     (np.integer, np.int64)
@@ -123,15 +123,15 @@ def digest(params, suffix=None, convert_to_arrays=True):
         depend on the order of the list.
         Could also arbitrarily nested lists of parameter sets.
 
-    suffix: str or None
+    suffix: str or None (default none)
         If not None, an underscore ('_') and then the value of `suffix` are
         appended to the calculated filename
 
-    convert_to_arrays: bool
+    convert_to_arrays: bool (default True)
         If true, the parameters are normalized by using the result of
         `params_to_arrays(params)` to calculate the filename.
     """
-    if isinstance(params, dict):
+    if isinstance(params, dict) and not isinstance(params, ParameterSet):
         # TODO: Any reason this implicit conversion should throw a warning ?
         params = ParameterSet(params)
     if (not isinstance(params, (ParameterSetBase, str))
@@ -184,10 +184,6 @@ def digest(params, suffix=None, convert_to_arrays=True):
                         dereference(paramset[key])
             dereference(params)
 
-            # Standardize the parameters by converting them all to arrays
-            # -> `[1, 0]` and `np.array([1, 0])` should give same file name
-            # params = params_to_arrays(params)
-
             # We need a sorted dictionary of parameters, so that the hash is consistent
             # Also remove keys starting with '_'
             # Types need to be normalized, because if we save values as Python
@@ -209,11 +205,11 @@ def digest(params, suffix=None, convert_to_arrays=True):
 
             # Now that the parameterset is standardized, hash its string repr
             s = repr(sorted_params)
-            debug_store['digest'] = {'hashed_string': s}
-            if _remove_whitespace_for_filenames:
+            if _remove_whitespace_for_digests:
                 # Removing whitespace makes the result more reliable; e.g. between
                 # v1.13 and v1.14 Numpy changed the amount of spaces between some elements
                 s = ''.join(s.split())
+            debug_store['digest'] = {'hashed_string': s}
             basename = hashlib.sha1(bytes(s, 'utf-8')).hexdigest()
             basename += '_'
             # Reset the saved print options
@@ -344,6 +340,227 @@ def prune(params, keep, exclude=None):
 
     return newparams
 
+#########################
+# @parameterized decorator
+#########################
+import typing
+from typing import Any, List
+from dataclasses import dataclass
+import nptyping  # Stop-gap measure until types are officially supported by NumPy
+
+def parameterized(cls=None, **kwargs):
+    """
+    Build off the @dataclasses.dataclass decorator to construct an initializer
+    with type-casting from class type annotations.
+
+    Examples
+    --------
+    >>> from mackelab_toolbox.parameters import parameterized
+    >>> @parameterized
+        class Model:
+            a: float
+            dt: float=0.01
+            def integrate(self, x0, T):
+                x = x0; y=0
+                a = self.a; dt = self.dt
+                for t in np.arange(0, T, self.dt):
+                    x += y*dt; y+=a*x*dt
+                return x
+    >>> m = Model(a=-0.5)
+    >>> m
+        "Model(a=-0.5, dt=0.01)"
+    >>> m.integrate(1, 5.)
+    """
+    if cls is None:
+        # We are being called as @parameterized()
+        def wrap(cls):
+            return parameterized(cls, **kwargs)
+        return wrap
+    else:
+        # We are being called as @parameterized
+        newname = cls.__name__ + '_Parameterized'
+        newcls = parameterized.created_types.get(newname, None)
+        if newcls is None:
+            newcls = type(newname, (dataclass(cls),),
+                          {'__post_init__': _parameterized_post_init})
+            parameterized.created_types[newname] = newcls
+        return newcls
+parameterized.created_types = {}
+
+def _parameterized_post_init(self):
+    computed_fields = deque()
+    for name,field in self.__dataclass_fields__.items():
+        T = convert_type(field.type)
+        v = getattr(self, name)
+        if v is _COMPUTED_PARAMETER:
+            computed_fields.append((name,v,T))
+        elif not (isinstance(v, T.type) if isinstance(T, TypeFunction)
+                  else isinstance(v, T)):
+            setattr(self, name, cast(v, T, name))
+    # Loop over bases in reverse order and execute "__init_computed__" methods
+    bases = type(self).mro()
+    for base in bases[::-1]:
+        ic = getattr(base, '__init_computed__', None)
+        if ic is not None:
+            ic(self)
+    for name,v,T in computed_fields:
+        setattr(self, name, cast(v, T))
+
+class _COMPUTED_PARAMETER:
+    pass
+def Computed():
+    return dataclasses.field(default=_COMPUTED_PARAMETER, repr=False, compare=False)
+
+@dataclass
+class TypeFunction:
+    """
+    Parameters
+    ----------
+    cast_function: Callable
+        Function taking a single argument and returning it, casted to
+        the designated type.
+    type: type
+        Type of the result of `cast_function`
+    """
+    cast_function: typing.Callable[[Any], Any]
+    type: type
+    def __call__(self, x):
+        return self.cast_function(x)
+    def __str__(self):
+        return f"TypeFunction({str(self.type)})"
+    def __repr__(self):
+        return f"TypeFunction({repr(self.cast_function)}, {repr(self.type)})"
+
+# Custom type casting functions can be written and added to `cast_functions`
+# (see mackelab_toolbox.cgshim.cast_symbolic for an example)
+# Functions may support only certain values or types; for any unsupported
+# arguments, they should return `NotImplemented`.
+cast_functions = deque()
+
+# Modules can update type_map as required
+# For example, theano_shim adds the mapping from `float` type to `floatX`
+# Mappings can be either types, or argument-less functions which return a type
+type_map = {}
+
+def cast(value, type, name):
+    """
+    Try every member of `cast_functions` in order, and stop after the
+    first one returning something else than `NotImplemented`.
+
+    Some casting functions (e.g. cgshim's `cast_symbolic`) require a `name`
+    attribute. We require all functions to accept that argument, to keep
+    signatures consistent.
+    """
+    if isinstance(type, TypeFunction):
+        type = type.type
+    for castfn in cast_functions:
+        result = castfn(value, type, name)
+        if result is not NotImplemented:
+            return result
+    raise TypeError(f"The variable '{name}' (value: '{value}') could not "
+                    f"be casted to the type '{type}'.")
+
+def cast_with_type(value, type, name):
+    """
+    The default casting function: we try to call `type(value)`.
+    This should generally be last in the `cast_functions` list.
+    """
+    if isinstance(type, Callable):
+        return type(value)
+    else:
+        return NotImplemented
+cast_functions.append(cast_with_type)
+
+def convert_type(annotation_type):
+    # TODO: Combine common code with smttask.types.cast
+    """
+    Look up the type in type_map and see if it should be replaced.
+    For example, we could define `float` to be replaced by `np.float32`.
+    This is mostly meant to keep parameter definitions as clean and compact
+    as possible.
+    Also performs conversions to convert type hints into castable types.
+
+    Most of the functionality would probably be better implemented by creating
+    custom types (c.f. `typing` module), but for now this solution is more
+    flexible and easier for me to wrap my head around.
+
+    Special cases:
+    --------------
+    Callback types:
+        A value in `type_map` may be specified as an argument-less function,
+        in which case it will be called and the return value used as a type.
+        This can be used to specify a type which may change during runtime;
+        for instance, Theano's 'floatX' type.
+    Array types:
+        Array types from the nptyping module are recognized, and in this case
+        we return a function which performs a cast
+
+    Returns
+    -------
+    type or TypeFunction instance
+        Returns a type T, such that `T(x)` will cast `x` as an instance of T.
+        For some types (such as ndarray), one should not use the type directly
+        but a helper function to cast the type. In this case we return a
+        TypeFunction which performs the cast, similarly to the original helper
+        function, and which also stores the expected type of the result.
+    """
+    T = type_map.get(annotation_type, annotation_type)
+    if not isinstance(T, type) and isinstance(T, Callable):
+        T = T()
+    if issubclass(T, nptyping.Array):
+        Ttype = T.generic_type
+        if isinstance(Ttype, np.dtype):
+            dtype = Ttype
+        elif isinstance(Ttype, str):
+            dtype = np.dtype(Ttype)
+        elif isinstance(Ttype, Iterable):
+            raise TypeError("Array parameters should have a unique type. This "
+                            f"type hint defines multiple: {Ttype}")
+        else:
+            # Any valid specifier for `dtype` should be accepted.
+            dtype = np.dtype(Ttype)
+        typehint = T if not isinstance(T, TypeFunction) else T.type
+            # Assign to typehint outside closure before def of T is changed
+        def _cast(x):
+            if hasattr(x, 'astype'):
+                result = x.astype(str(dtype))  # Theano only accepts str dtype
+            else:
+                result = np.array(x, dtype=dtype)
+            if not isinstance(result, typehint):
+                r = "…" if typehint.rows is Ellipsis else getattr(typehint, 'rows', None)
+                c = "…" if typehint.cols is Ellipsis else getattr(typehint, 'cols', None)
+                raise TypeError(f"Array {result} does not match the expected "
+                                f"format Array[{typehint.generic_type},{r},{c}]")
+            return result
+        T = TypeFunction(_cast, dtype.type)
+    elif issubclass(T, List):
+        accepted_types = typish.get_args(T)
+        if accepted_types == ():
+            # No specified types
+            def _cast(x):
+                return list(x)
+            T = TypeFunction(_cast, list)
+        else:
+            # Cast to types, in the order they are provided
+            accepted_types = [convert_type(_T) for _T in accepted_types]
+                # List element types themselves might need to be converted
+            result_types = [_T.type if isinstance(_T, TypeFunction) else _T
+                            for _T in accepted_types]
+            def subcast(x):
+                if isinstance(x, result_types):
+                    return x
+                for _T in accepted_types:
+                    try:
+                        result = _T(x)
+                    except (ValueError, TypeError):
+                        pass
+                    else:
+                        return result
+                raise TypeError(f"Unable to cast {x} to any of {accepted_types}.")
+            def _cast(x):
+                return [subcast(_x) for _x in x]
+            T = TypeFunction(_cast, list)
+    return T
 
 #########################
 # Parameter parsing / validation
@@ -360,6 +577,9 @@ class Any(SchemaBase):
     """
     To be used as a value in a `ParameterSchema`. Validates the same-path
     `ParameterSet` value if it matches any of the provided value schemas.
+
+    NOTE: Much of this functionality could probably be achieved by building of
+    the `dataclass` class decorator introduced in Python 3.7.
 
     Examples
     --------
@@ -950,6 +1170,7 @@ def structure_keys(keys):
 
 ###########################
 # Parameter file expansion
+# USE PARAMETERRANGE INSTEAD !
 ###########################
 
 ExpandResult = namedtuple("ExpandResult", ['strs', 'done'])

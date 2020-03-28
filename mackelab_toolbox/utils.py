@@ -740,3 +740,19 @@ class class_or_instance_method:
     def __call__(self, *args, **kwargs):
         clsself = self.instance if self.instance is not None else self.owner
         return self.method(clsself, *args, **kwargs)
+
+# A dictionary mapping string representations to numpy types like np.float32
+# Note that these aren't the same as numpy dtypes
+# str_to_nptype ={
+#     'int8'   : np.int8,
+#     'int16'  : np.int16,
+#     'int32'  : np.int32,
+#     'int64'  : np.int64,
+#     'uint8'  : np.uint8,
+#     'uint16' : np.uint16,
+#     'uint32' : np.uint32,
+#     'uint64' : np.uint64,
+#     'float16': np.float16,
+#     'float32': np.float32,
+#     'float64': np.float64
+#     }
