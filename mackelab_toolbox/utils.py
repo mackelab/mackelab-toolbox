@@ -137,6 +137,52 @@ def _tobytes(o):
     else:
         return bytes(o)
 
+class SentinelMeta(type):
+    """
+    Create a singleton object to use as sentinel value.
+    Based on the pattern for numpy._globals._NoValue
+
+    A sentinel value is an object, like NumPy's `_NoValue`, that can be assigned
+    to a variable to signal a particular state.
+    It is guaranteed not equal to any other value (in contrast to `None` or 0),
+    and guaranteed to only ever have one instance (so can be used in tests like
+    `a is Sentinel`).
+
+    Example
+    -----
+    >>> class _NoValueType(metaclass=SentinelMeta)
+            pass
+    >>> NoValue = _NoValueType("<no value>")
+    >>>
+    >>> def f(x, y=NoValue):
+    >>>     if y is NoValue:
+    >>>         y = 1
+    >>>     return x*y
+    """
+    __instance = None
+    def __new__(metacls, name, bases, dct):
+        cls = super().__new__(metacls, name, bases, dct)
+        cls.__instance = None
+        cls.__new__ = metacls.__clsnew__
+        cls.__init__ = metacls.__clsinit__
+        cls.__repr__ = metacls.__clsrepr__
+        return cls
+    @staticmethod
+    def __clsnew__(cls, repr_str=None):
+        # ensure that only one instance exists
+        if not cls.__instance:
+            cls.__instance = super(cls, cls).__new__(cls)
+            if repr_str is None:
+                repr_str = f"<{cls.__name__}>"
+            cls._repr_str = repr_str
+        return cls.__instance
+    @staticmethod
+    def __clsinit__(self, repr_str=None):
+        pass
+    @staticmethod
+    def __clsrepr__(self):
+        return self._repr_str
+
 def min_scalar_type(x):
     """
     Custom version of `numpy.min_scalar_type` which will not downcast a float
