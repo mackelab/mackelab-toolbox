@@ -178,6 +178,20 @@ def test_parameterized(caplog):
     assert caprec2.levelname == "WARNING"  # Warning because upcast less critical than downcast
     assert caprec2.msg.startswith("Attempted to cast a symbolic")
 
+    # Check method for recovering a ParameterSet
+    from mackelab_toolbox.parameters import ParameterSet
+    assert isinstance(m.params, ParameterSet)
+    assert m.params == dict(a=-0.5, dt=0.01)
+
+    params = m4.params
+    assert (params.a is m4.a
+            and params.b is m4.b
+            and params.dt is m4.dt
+            and params.β is m4.β
+            and params.w is m4.w
+            and params.γ is m4.γ)
+    assert set(m2_tensor.params.keys()) == set(['a', 'dt', 'b', 'w'])
+    assert shim.is_pure_symbolic(m2_tensor.params.w)
 
 def parameterspec_test():
     class Foo:

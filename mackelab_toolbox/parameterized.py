@@ -13,6 +13,7 @@ import numpy as np
 import nptyping  # Stop-gap measure until types are officially supported by NumPy
 
 import mackelab_toolbox.utils as utils
+from mackelab_toolbox.parameters import ParameterSet
 
 ############
 # Constants, sentinel objects
@@ -87,10 +88,14 @@ def parameterized(cls=None, **kwargs):
         # `dataclass` sees them.
         if newcls is None:
             newcls = type(newname, (dataclass(cls),),
-                          {'__post_init__': _parameterized_post_init})
+                          {'__post_init__': _parameterized_post_init,
+                           'params': property(_get_params)})
             parameterized.created_types[newname] = newcls
         return newcls
 parameterized.created_types = {}
+
+def _get_params(self):
+    return ParameterSet({nm: getattr(self, nm) for nm in self.__dataclass_fields__})
 
 def _parameterized_post_init(self):
     computed_fields = deque()
@@ -117,6 +122,7 @@ def _parameterized_post_init(self):
         casted = cast(v, T, name)
         if casted is not v:  # `cast` did something, so update the attribute
             setattr(self, name, casted)
+
 
 #############
 # Functions to deal with type-casting
