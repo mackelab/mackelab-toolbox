@@ -8,7 +8,7 @@ import nptyping
 import theano_shim as shim
 
 import logging
-logger = logging.getLogger()
+logger = logging.getLogger(__file__)
 
 # Map `float` to `floatX`
 # Use a function because `floatX` can be changed at runtime

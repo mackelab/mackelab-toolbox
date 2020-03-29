@@ -56,14 +56,14 @@ def test_digest():
         print(mtb.parameters.digest(params))
         #basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
 
-def test_parameterized(caplog):
+import mackelab_toolbox.parameterized as ps
+from mackelab_toolbox.cgshim import shim
+from typing import List
+import numpy as np
+from nptyping import Array
 
-    from importlib import reload
-    import mackelab_toolbox.parameterized as ps
-    from mackelab_toolbox.cgshim import shim
-    from typing import List
-    import numpy as np
-    from nptyping import Array
+def test_parameterized(caplog):
+    pass
 
     @ps.parameterized
     class Model:
@@ -116,8 +116,6 @@ def test_parameterized(caplog):
             for t in np.arange(0, T, self.dt):
                 x += y*dt; y+=γ*x
             return x.sum()
-
-    import mackelab_toolbox.cgshim
 
     @ps.parameterized
     class Model2(Model):

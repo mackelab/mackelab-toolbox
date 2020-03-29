@@ -13,7 +13,8 @@ setup(
         'simpleeval',
         'dill',
         'tqdm',
-        'pandas'
+        'pandas',
+        'nptyping'  # Stop gap until NumPy's official typing support
     ],
 
     packages=['mackelab_toolbox'],
