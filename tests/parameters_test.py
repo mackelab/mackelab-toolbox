@@ -13,6 +13,8 @@ from parameters.validators import ValidationError
 import mackelab_toolbox as mtb
 import mackelab_toolbox.parameters
 
+import pytest
+
 def test_digest():
     params = ParameterSet({
         "seed": 100,
@@ -57,7 +59,7 @@ def test_digest():
 def test_parameterized(caplog):
 
     from importlib import reload
-    import mackelab_toolbox.parameters as ps
+    import mackelab_toolbox.parameterized as ps
     from mackelab_toolbox.cgshim import shim
     from typing import List
     import numpy as np
@@ -79,7 +81,42 @@ def test_parameterized(caplog):
     assert np.isclose(m.integrate(1, 5.), -0.924757713688715)
     assert type(m.a) is float
 
-    # Import after defining Model to test difference in mapping of `float` type
+    # TODO: once the discussion https://bugs.python.org/issue36077 is resolved,
+    #       add test for using `Computed` as a flag to override base class
+    #       attributes, without having to use a default for new every attribute
+    #       in the derived class
+    @ps.parameterized
+    class Model3(Model):
+        #a: float = 0.3      # <<< This currently fails, until defaults work
+        β: float = ps.Computed()
+        def __init_computed__(self):
+            self.β = self.a*self.dt
+        def integrate(self, x0, T, y0=0):
+            x = x0; y=y0
+            β = self.β; dt = self.dt
+            for t in np.arange(0, T, self.dt):
+                x += y*dt; y+=β*x
+            return x
+    #del ps.parameterized.created_types['Model4_Parameterized']
+
+    # Model3.__annotations__
+
+    # TODO: Following previous todo: also test that Model4 doesn't need to
+    #       define defaults for every attribute.
+    @ps.parameterized
+    class Model4(Model3):
+        b: np.float32        = 0.7        # <<< We should not have to
+        w: Array[np.float32] = (0.2, 0.8) # <<< define defaults here
+        γ: Array[np.float32] = ps.Computed()
+        def __init_computed__(self):
+            self.γ = self.β * np.array([1, self.b/self.a], dtype='float32')
+        def integrate(self, x0, T, y0=0):
+            x = w*x0; y = w*y0
+            γ = self.γ; dt = self.dt
+            for t in np.arange(0, T, self.dt):
+                x += y*dt; y+=γ*x
+            return x.sum()
+
     import mackelab_toolbox.cgshim
 
     @ps.parameterized
@@ -94,24 +131,40 @@ def test_parameterized(caplog):
             return x.sum()
 
     # Basic type conversion
-    w = np.array([0.3, 0.7], dtype='float64')
-    w32 = w.astype('float32')
-    w16 = w.astype('float16')
-    m2_np = Model2(a=-0.5, b=-0.1, w=w, dt=0.01)
-    assert str(m2_np) == "Model2_Parameterized(a=-0.5, dt=0.01, b=-0.1, w=array([0.3, 0.7], dtype=float32))"
+    w64 = np.array([0.25, 0.75], dtype='float64')
+    w32 = w64.astype('float32')
+    w16 = w64.astype('float16')
+    m2_np = Model2(a=-0.5, b=-0.1, w=w16, dt=0.01)
+    assert str(m2_np) == "Model2_Parameterized(a=-0.5, dt=0.01, b=-0.1, w=array([0.25, 0.75], dtype=float32))"
     assert m2_np.b.dtype is np.dtype('float32')
     # Check that loading cgshim has overridden the meaning of the 'float' type
     assert type(m2_np.a) is not type(m.a)
     assert type(m2_np.a) is np.dtype(shim.config.floatX).type
     # Test conversion from ints and list
-    wint = np.array([1, 2])
-    m2_npint = Model2(a=-0.5, b=-0.1, w=wint, dt=0.01)
-    assert m2_npint.w.dtype is np.dtype('float32')
-    m2_nplist = Model2(a=-0.5, b=-0.1, w=[0.3, 0.7], dt=0.01)
+    m2_nplist = Model2(a=-0.5, b=-0.1, w=[0.25, 0.75], dt=0.01)
     assert m2_nplist.w.dtype is np.dtype('float32')
 
+    # Test computed fields and numpy type conversions
+    m3 = Model3(.25, 0.02)
+    assert m3.β == 0.005
+    m4 = Model4(.25, 0.02, b=0.7)
+    assert isinstance(m4.w, np.ndarray) and m4.w.dtype.type is np.float32
+
+    m4_16 = Model4(.25, 0.02, w=w16)
+    m4_32 = Model4(.25, 0.02, w=w32)
+    assert m4_16.w.dtype == 'float32'
+    assert m4_32.w.dtype == 'float32'
+    # Casts which raise TypeError
+    with pytest.raises(TypeError):
+        Model4(.3, 0.02, w=w64)
+    with pytest.raises(TypeError):
+        wint = np.array([1, 2])
+        m2_npint = Model2(a=-0.5, b=-0.1, w=wint, dt=0.01)
+
+    # Import after defining Model to test difference in mapping of `float` type
+
     shim.load(True)
-    m2_shared = Model2(a=-0.5, b=-0.1, w=shim.shared(w), dt=0.01)
+    m2_shared = Model2(a=-0.5, b=-0.1, w=shim.shared(w64), dt=0.01)
     m2_tensor = Model2(a=-0.5, b=-0.1, w=shim.tensor(w16), dt=0.01)
     m2_shared = Model2(a=-0.5, b=-0.1, w=shim.shared(w32), dt=0.01)
     m2_tensor = Model2(a=-0.5, b=-0.1, w=shim.tensor(w32), dt=0.01)
@@ -125,11 +178,6 @@ def test_parameterized(caplog):
     assert caprec2.levelname == "WARNING"  # Warning because upcast less critical than downcast
     assert caprec2.msg.startswith("Attempted to cast a symbolic")
 
-
-    # shim.shared(w).astype('floatX')
-    #
-    # m2_shared.w
-    # m2_tensor.w
 
 def parameterspec_test():
     class Foo:
