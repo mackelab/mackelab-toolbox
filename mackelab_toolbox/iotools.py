@@ -535,9 +535,11 @@ def find_file(file, format=None):
 
         # Normalize the format and see if it is recognized
         if isinstance(format, str):
-            formatext = defined_formats.get(format, None)
+            formatext = defined_formats.get(format, None).ext
         elif isinstance(format, type):
-            formatext = defined_formats.get(find_registered_typename(format), None)
+            formatext = defined_formats.get(find_registered_typename(format), None).ext
+        else:
+            formatext = None
 
         # Find the file
         if len(ext) > 0 and formatext is None:
@@ -549,8 +551,8 @@ def find_file(file, format=None):
             # Order the file names so we try most likely formats first (i.e. npr, repr, dill)
             # We do not attempt to load other extensions, since we don't know the format
             ordered_fnames = []
-            for formatext in defined_formats:
-                name = basename + '.' + formatext
+            for formatinfo in defined_formats.values():
+                name = basename + '.' + formatinfo.ext
                 if name in fnames:
                     ordered_fnames.append(os.path.join(dirname, name))
             if len(ordered_fnames) == 0:
