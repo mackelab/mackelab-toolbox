@@ -137,7 +137,37 @@ def _tobytes(o):
     else:
         return bytes(o)
 
-class SentinelMeta(type):
+class Singleton(type):
+    """Singleton metaclass
+    Based on the pattern for numpy._globals._NoValue
+
+    Although singletons are usually an anti-pattern, I've found them useful in
+    a few cases, notably for a configuration class storing dynamic attributes
+    in the form of properties.
+
+    Example
+    -------
+    >>> from mackelab_toolbox.utils import Singleton
+    >>> import sys
+    >>>
+    >>> class Config(metaclass=Singleton):
+    >>>     def num_modules(self):
+    >>>         return len(sys.modules)
+    """
+    __instance = None
+    def __new__(metacls, name, bases, dct):
+        cls = super().__new__(metacls, name, bases, dct)
+        cls.__instance = None
+        cls.__new__ = metacls.__clsnew__
+        return cls
+    @staticmethod
+    def __clsnew__(cls, *args, **kwargs):
+        # ensure that only one instance exists
+        if not cls.__instance:
+            cls.__instance = super(cls, cls).__new__(cls, *args, **kwargs)
+        return cls.__instance
+
+def sentinel(name, repr_str=None):
     """
     Create a singleton object to use as sentinel value.
     Based on the pattern for numpy._globals._NoValue
@@ -159,29 +189,13 @@ class SentinelMeta(type):
     >>>         y = 1
     >>>     return x*y
     """
-    __instance = None
-    def __new__(metacls, name, bases, dct):
-        cls = super().__new__(metacls, name, bases, dct)
-        cls.__instance = None
-        cls.__new__ = metacls.__clsnew__
-        cls.__init__ = metacls.__clsinit__
-        cls.__repr__ = metacls.__clsrepr__
-        return cls
-    @staticmethod
-    def __clsnew__(cls, repr_str=None):
-        # ensure that only one instance exists
-        if not cls.__instance:
-            cls.__instance = super(cls, cls).__new__(cls)
-            if repr_str is None:
-                repr_str = f"<{cls.__name__}>"
-            cls._repr_str = repr_str
-        return cls.__instance
-    @staticmethod
-    def __clsinit__(self, repr_str=None):
-        pass
-    @staticmethod
-    def __clsrepr__(self):
-        return self._repr_str
+    if repr_str is None:
+        repr_str = f"<{name}>"
+    def __repr__(self):
+        return repr_str
+    SentinelCls = Singleton(
+        name, (), {'__repr__': __repr__})
+    return SentinelCls()
 
 def min_scalar_type(x):
     """

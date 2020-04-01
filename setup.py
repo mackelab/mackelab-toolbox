@@ -9,12 +9,12 @@ setup(
         'matplotlib',
         'seaborn',
         'parameters',
+        'pydantic',
         'pyyaml',  # Required by parameters, for `import yaml`
         'simpleeval',
         'dill',
         'tqdm',
         'pandas',
-        'nptyping'  # Stop gap until NumPy's official typing support
     ],
 
     packages=['mackelab_toolbox'],
