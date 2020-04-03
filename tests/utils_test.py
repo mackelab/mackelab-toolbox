@@ -22,16 +22,23 @@ def int_if_close_test():
 
     assert(ml.utils.int_if_close(arrmixed) is arrmixed)
 
-def test_sentinel():
-    class FooType(metaclass=SentinelMeta):
+def test_singleton():
+    class FooType(metaclass=Singleton):
         pass
-    class BarType(metaclass=SentinelMeta):
+    class BarType(metaclass=Singleton):
         pass
     a = FooType()
-    b = FooType("<Bar>")
-    c = BarType("<Bar>")
+    b = FooType()
+    c = BarType()
     assert a is b
     assert a is not c
-    assert str(a) == "<FooType>"
-    assert str(b) == "<FooType>"
-    assert str(c) == "<Bar>"
+
+def test_singleton():
+    a = sentinel('Foo')
+    b = sentinel('Foo', "<Bar>")
+    c = sentinel('Bar', "<Baz>")
+    assert a is b
+    assert a is not c
+    assert str(a) == "<Foo>"
+    assert str(b) == "<Foo>"
+    assert str(c) == "<Baz>"

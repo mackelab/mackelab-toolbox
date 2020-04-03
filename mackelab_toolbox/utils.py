@@ -154,7 +154,6 @@ class Singleton(type):
     >>>     def num_modules(self):
     >>>         return len(sys.modules)
     """
-    __instance = None
     def __new__(metacls, name, bases, dct):
         cls = super().__new__(metacls, name, bases, dct)
         cls.__instance = None
@@ -189,13 +188,16 @@ def sentinel(name, repr_str=None):
     >>>         y = 1
     >>>     return x*y
     """
-    if repr_str is None:
-        repr_str = f"<{name}>"
-    def __repr__(self):
-        return repr_str
-    SentinelCls = Singleton(
-        name, (), {'__repr__': __repr__})
-    return SentinelCls()
+    if name not in sentinel.__instances:
+        if repr_str is None:
+            repr_str = f"<{name}>"
+        def __repr__(self):
+            return repr_str
+        SentinelCls = Singleton(
+            name, (), {'__repr__': __repr__})
+        sentinel.__instances[name] = SentinelCls()
+    return sentinel.__instances[name]
+sentinel.__instances = {}
 
 def min_scalar_type(x):
     """
