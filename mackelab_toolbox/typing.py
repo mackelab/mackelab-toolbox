@@ -95,7 +95,7 @@ class _DTypeType(np.generic):
         # Don't cast unless necessary
         if type(value) is cls.dtype.type:
             return value
-        elif np.can_cast(type(value), cls.dtype):
+        elif np.can_cast(value, cls.dtype):
             return cls.dtype.type(value)
         else:
             raise TypeError(f"Cannot safely cast '{field.name}' type  "
@@ -151,14 +151,14 @@ class _ArrayType(np.ndarray):
                                 f"{cls._ndim} dimensions.")
             if value.dtype == cls.dtype:
                 result = value
-            elif np.can_cast(value.dtype, cls.dtype):
+            elif np.can_cast(value, cls.dtype):
                 result = value.astype(cls.dtype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' type  "
                                 f"({value.dtype}) to type {cls.dtype}.")
         else:
             result = np.array(value)
-            if np.can_cast(result.dtype, cls.dtype):
+            if np.can_cast(result, cls.dtype):
                 if cls._ndim is not None and result.ndim != cls._ndim:
                     raise TypeError(
                         f"The shape of the data ({result.shape}) does not " "correspond to the expected of dimensions "

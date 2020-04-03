@@ -105,7 +105,9 @@ def test_pydantic(caplog):
     w32 = w64.astype('float32')
     w16 = w64.astype('float16')
     with pytest.raises(ValidationError):   # With vanially dataclass: TypeError
-        m2_np = Model2(a=-0.5, b=np.float128(-0.1), w=w16, dt=0.01)
+        largeb = 57389780668102097303
+            # Obtained with int(''.join((str(i) for i in np.random.randint(10, size=20))))
+        m2_np = Model2(a=-0.5, b=largeb, w=w16, dt=0.01)
     m2_np = Model2(a=-0.5, b=-0.1, w=w16, dt=0.01)
     assert repr(m2_np) == "Model2(a=-0.5, dt=0.01, b=-0.1, w=array([0.25, 0.75], dtype=float32))"
     assert m2_np.b.dtype is np.dtype('float64')
