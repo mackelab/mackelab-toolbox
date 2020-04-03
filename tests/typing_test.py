@@ -64,7 +64,7 @@ def test_pydantic(caplog):
     #       override base class attributes, without having to use a default for
     #       new every attribute in the derived class
     class Model3(Model):
-        a: cgshim.types.FloatX  = 0.3      #  <<< Setting default does not work with dataclass (a comes before non-keyword b)
+        a: cgshim.typing.FloatX  = 0.3      #  <<< Setting default does not work with dataclass (a comes before non-keyword b)
         β: DType[float] = None
         @validator('β', pre=True, always=True)
         def set_β(cls, v, values):
@@ -152,9 +152,9 @@ def test_pydantic(caplog):
     # will not include shared types
     # Types are fixed when class is defined
     class Model2symb(Model2):
-        dt: cgshim.types.Tensor[float]
-        b : cgshim.types.Shared[cgshim.types.FloatX]
-        w : cgshim.types.Symbolic[np.float32]
+        dt: cgshim.typing.Tensor[float]
+        b : cgshim.typing.Shared[cgshim.typing.FloatX]
+        w : cgshim.typing.Symbolic[np.float32]
 
     with pytest.raises(ValidationError):
         Model2(a=-0.5, b=-0.1, w=shim.shared(w32), dt=0.01)

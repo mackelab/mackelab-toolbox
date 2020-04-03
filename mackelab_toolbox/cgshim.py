@@ -187,4 +187,4 @@ class TypeContainer(metaclass=utils.Singleton):
 
         return self.__validation_types[baseT]
 
-types = TypeContainer()
+typing = TypeContainer()
