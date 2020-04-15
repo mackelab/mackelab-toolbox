@@ -33,7 +33,7 @@ def test_singleton():
     assert a is b
     assert a is not c
 
-def test_singleton():
+def test_sentinel():
     a = sentinel('Foo')
     b = sentinel('Foo', "<Bar>")
     c = sentinel('Bar', "<Baz>")

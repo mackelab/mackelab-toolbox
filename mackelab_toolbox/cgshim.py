@@ -27,21 +27,35 @@ Side-effects
 ------------
 Importing this module also has the following side-effects:
 
+  - Add the `shim` namespace to mackelab_toolbox.transform.Transforms.
+    It points to 'theano_shim'.
   - Add a mapping from `float` (type) to `shim.config.floatX`
   - Add a mapping from 'floatX' (string) to `shim.config.floatX`
   - Prevent mackelab_toolbox.typing.Array from parsing computational graph types
 """
 
+import sys
 import numpy as np
 from collections.abc import Iterable
 from typing import Union
 import theano_shim as shim
 import mackelab_toolbox as mtb
-import mackelab_toolbox.typing  # Call as mtb.typing to avoid confusing
+# import mackelab_toolbox.typing  # Call as mtb.typing to avoid confusing
 import mackelab_toolbox.utils as utils
+import mackelab_toolbox.transform
+# # Any module using types must be loaded at the very end, after we've updated
+# # mackelab_toolbox.typing
+# # FIXME: It would be REALLY nice if the types could be reliably dynamic
+# #        instead of relying on import order
+# too_soon = [m for m in sys.modules if m in
+#             ['mackelab_toolbox.transform']]
+# if len(too_soon) > 0:
+#     raise ImportError("The following modules must be loaded after `cgshim`, "
+#                       "otherwise they won't recognize symbolic types:\n"
+#                       f"{too_soon}.")
 
-import logging
-logger = logging.getLogger(__file__)
+# Add 'shim' to Transform namspaces if it isn't already present
+mtb.transform.Transform.namespaces.setdefault('shim', shim)
 
 # Map `float` to `floatX`
 # Use a function because `floatX` can be changed at runtime
@@ -51,9 +65,13 @@ mtb.typing.type_map['floatX'] = cast_floatX
 
 # Add graph types to the list of types not to be casted as arrays
 # GraphTypes is a dynamic property, so we add a function
-mtb.typing.NotCastableToArray.add(
-    lambda: shim.config.__class__.GraphTypes.fget(shim.config))
+mtb.typing.add_nonarray_type(lambda: shim.config.GraphTypes)
+    # lambda: shim.config.__class__.GraphTypes.fget(shim.config))
 
+import logging
+logger = logging.getLogger(__file__)
+
+# FIXME: Redundant with mtb.typing.TypeContainer
 class TypeContainer(metaclass=utils.Singleton):
     def __init__(self):
         self.__validation_types = {}
@@ -188,3 +206,9 @@ class TypeContainer(metaclass=utils.Singleton):
         return self.__validation_types[baseT]
 
 typing = TypeContainer()
+mtb.typing.add_numerical_type(
+    (lambda: typing.Symbolic[np.number],
+     lambda: typing.Shared[np.number]))
+mtb.typing.add_scalar_type(
+    (lambda: typing.Symbolic[np.number,0],
+     lambda: typing.Shared[np.number,0]))

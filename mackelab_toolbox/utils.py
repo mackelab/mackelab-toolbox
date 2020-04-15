@@ -317,6 +317,18 @@ def fully_qualified_name(o):
     else:
         return module + '.' + name
 
+def argstr(args: tuple, kwargs: dict):
+    """Reconstruct the string of arguments as it would have been passed to a
+    function.
+    >>> argstr((2, 4), {'a': 33})
+    "2, 4, a=33"
+    """
+    s = ', '.join(f'{a} [{type(a)}]' for a in args)
+    if len(s) > 0 and len(kwargs) > 0:
+        s += ', '
+    s += ', '.join(f'{k}:{v} [{type(v)}]' for k,v in kwargs.items())
+    return s
+
 def comparedicts(dict1, dict2):
     """
     Recursively compare nested dictionaries. Works correctly with Numpy values
