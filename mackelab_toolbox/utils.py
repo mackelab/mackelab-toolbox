@@ -221,8 +221,8 @@ def min_scalar_type(x):
 
 def int_if_close(x, tol=100, npint=None, allow_power10=True):
     """
-    Similar to numpy's `real_if_close`, casts the value to an int if it close
-    to an integer value.
+    Similar to numpy's `real_if_close`, casts the value to an int if it is
+    close to an integer value.
 
     Parameters
     ----------
@@ -339,14 +339,14 @@ def comparedicts(dict1, dict2):
         v2 = dict2[k]
         if isinstance(v1, dict):
             if not isinstance(v2, dict): return False
-            if not dictcompare(v1, v2): return False
+            if not comparedicts(v1, v2): return False
         r = (v1 == v2)
         try:
             r = r.all()
         except AttributeError:
             pass
         # Ensure we got a bool
-        if not isinstance(r, bool):
+        if not isinstance(r, (bool, np.bool_)):
             raise ValueError(
                 "Comparison of values {} and {} did not yield a boolean."
                 .format(v1, v2))
