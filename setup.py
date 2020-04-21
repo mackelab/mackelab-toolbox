@@ -9,7 +9,7 @@ setup(
         'matplotlib',
         'seaborn',
         'parameters',
-        'pydantic',
+        'pydantic>=1.5',
         'pyyaml',  # Required by parameters, for `import yaml`
         'simpleeval',
         'dill',

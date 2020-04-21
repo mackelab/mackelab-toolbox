@@ -190,6 +190,31 @@ class NonTransformedVar(pydantic.BaseModel):
     # ----------
     # Validators and initializer
 
+    def __init__(self, desc=None, *, bijection=None, **kwargs):
+        # We don't want `bijection` in the schema, but for compability with
+        # TransformedVar it should be in the signature
+        names = kwargs.get('names', None)
+        if desc is not None:
+            if 'orig' in kwargs or 'new' in kwargs:
+                raise TypeError("When instantiating NonTransformedVar with "
+                                "positional arguments, the `orig` and `new` "
+                                "keyword arguments are redundant.")
+            # If `desc` were a NonTransformedVar, it would already have been
+            # caught by the @generic_pydantic_initializer decorator.
+            # However it could also be a bare numeric type.
+            kwargs['orig'] = desc
+        if names is None and bijection is not None:
+            try:
+                φ = Transform(bijection)
+                oname = φ.xname
+                nname = φ.xname
+            except (ValidationError, ValueError):
+                bij = Bijection(bijection)
+                oname = bij.map.xname
+                nname = bij.inverse_map.xname
+            kwargs['names'] = TransformNames(orig=oname, new=nname)
+        super().__init__(**kwargs)
+
     @validator('names', pre=True)
     def construct_names(cls, names):
         names = TransformNames(names)
@@ -220,31 +245,6 @@ class NonTransformedVar(pydantic.BaseModel):
         values['orig'] = orig
         values['new']  = new
         return values
-
-    def __init__(self, desc=None, *, bijection=None, **kwargs):
-        # We don't want `bijection` in the schema, but for compability with
-        # TransformedVar it should be in the signature
-        names = kwargs.get('names', None)
-        if desc is not None:
-            if 'orig' in kwargs or 'new' in kwargs:
-                raise TypeError("When instantiating NonTransformedVar with "
-                                "positional arguments, the `orig` and `new` "
-                                "keyword arguments are redundant.")
-            # If `desc` were a NonTransformedVar, it would already have been
-            # caught by the @generic_pydantic_initializer decorator.
-            # However it could also be a bare numeric type.
-            kwargs['orig'] = desc
-        if names is None and bijection is not None:
-            try:
-                φ = Transform(bijection)
-                oname = φ.xname
-                nname = φ.xname
-            except (ValidationError, ValueError):
-                bij = Bijection(bijection)
-                oname = bij.map.xname
-                nname = bij.inverse_map.xname
-            kwargs['names'] = TransformNames(orig=oname, new=nname)
-        super().__init__(**kwargs)
 
     # --------
     # Accessor methods

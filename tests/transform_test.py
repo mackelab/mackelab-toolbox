@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 from pydantic import ValidationError
 import mackelab_toolbox as mtb
+import mackelab_toolbox.typing
 from mackelab_toolbox.cgshim import shim
 shim.load('theano')
 mtb.typing.freeze_types()

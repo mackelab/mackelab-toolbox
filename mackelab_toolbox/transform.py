@@ -35,6 +35,7 @@ import pydantic
 import pydantic.generics
 from pydantic import validator, root_validator, Field, ValidationError
 import mackelab_toolbox as mtb
+import mackelab_toolbox.typing
 from mackelab_toolbox.pydantic import generic_pydantic_initializer
 
 import mackelab_toolbox.utils as utils
@@ -44,6 +45,32 @@ import mackelab_toolbox.utils as utils
 # We _could_ allow Transform, and Bijection, but that would just be confusing,
 # since TransformedVar is also part of the public API.
 __ALL__ = []
+
+# # ---------------------------
+# # Some timings for simpleeval
+# # ---------------------------
+# arr = np.arange(1,100)
+# seval = simpleeval.SimpleEval(names={'x': arr, 'np': np})
+# astexpr = simpleeval.ast.parse("np.log(10)").body[0].value
+# # Reference
+# %timeit np.log(arr)
+# 3.24 µs ± 170 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
+# # 8x increase with simple_eval
+# %timeit simpleeval.simple_eval("np.log(x)", names={'x': arr, 'np': np})
+# 25.3 µs ± 223 ns per loop (mean ± std. dev. of 7 runs, 10000 loops each)
+# # Reduced to 6x if we use preconstruct object. Assigning x value at each
+# # evaluation makes little difference
+# %timeit seval.eval("np.log(x)")
+# 17.2 µs ± 1.09 µs per loop (mean ± std. dev. of 7 runs, 10000 loops each)
+# %timeit seval.names['x']=arr; seval.eval("np.log(x)")
+# 17.8 µs ± 1.12 µs per loop (mean ± std. dev. of 7 runs, 10000 loops each)
+# # Reduced to 1.5x by pre-parsing ast tree and using internal function.
+# # Still little difference with assigning name at each evaluation
+# %timeit seval._eval(astexpr)
+# 5.09 µs ± 236 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
+# %timeit seval.names['x']=arr; seval._eval(astexpr)
+# 5.2 µs ± 276 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
+# # ---------------
 
 @generic_pydantic_initializer
 class Transform(pydantic.BaseModel):
@@ -72,6 +99,7 @@ class Transform(pydantic.BaseModel):
     .. _simpleeval:
         https://pypi.org/project/simpleeval/
     """
+    __slots__ = ('astexpr', 'simple')
     xname : str
     expr  : str
     # TODO: Use Config: json_dumps? to export desc instead of xname, expr
@@ -89,7 +117,7 @@ class Transform(pydantic.BaseModel):
     namespaces : ClassVar[dict] ={'np': np, 'math': math}
 
     class Config:
-        schema_extra = {'single arg format': '[x] -> [f(x)]'}
+        schema_extra = {"description": "[x] -> [f(x)]"}
         json_encoders = mtb.typing.json_encoders
 
     @classmethod  # Not a validator because desc not a pydantic attribute
@@ -110,6 +138,34 @@ class Transform(pydantic.BaseModel):
             kwargs['xname'] = xname.strip()
             kwargs['expr']  = expr.strip()
         super().__init__(**kwargs)
+        self.__init_slots__()
+
+    def __init_slots__(self):
+        """
+        Initialize private variables which aren't managed by Pydantic.
+        """
+        object.__setattr__(
+            self, 'astexpr',
+            simpleeval.ast.parse(self.expr.strip()).body[0].value)
+        object.__setattr__(
+            self, 'simple',
+            simpleeval.SimpleEval(names=Transform.namespaces,
+                                  operators=Transform._operators))
+
+    # FIXME: Patch BaseModel's `construct` method for private vars ?
+    # @classmethod
+    # def construct(cls, *args, **kwargs):
+    #     """Private attributes aren't copied over with _construct."""
+    #     m = cls.mro()[1].construct(*args, **kwargs)
+    #     m.__init_slots__()
+    #     return m
+    #
+    def copy(self, *args, **kwargs):
+        """Private attributes aren't copied over with _construct."""
+        m = super().copy(*args, **kwargs)
+        object.__setattr__(m, 'astexpr', self.astexpr)
+        object.__setattr__(m, 'simple', self.simple)
+        return m
 
     @property
     def desc(self):
@@ -117,16 +173,30 @@ class Transform(pydantic.BaseModel):
     def __str__(self):
         return self.desc
     def __repr__(self):
-        return str(type(self)) + '(' + self.desc + ')'
+        return type(self).__name__ + '(' + self.desc + ')'
+
+    def compose(self, g :Transform):
+        """Return a new Transform corresponding to (self ○ g).
+
+        Parameters
+        ----------
+        g: Transform
+            May also be a Transform initializer (e.g. string).
+        """
+        g = Transform(g)
+        newexpr = self.expr.replace(self.xname, g.expr)
+        return Transform(xname=g.xname, expr=newexpr)
 
     def __call__(self, x):
-        names = {self.xname: x}
-        names.update(self.namespaces)
+        # names = {self.xname: x}
+        # names.update(self.namespaces)
+        self.simple.names[self.xname] = x
         try:
-            res = simpleeval.simple_eval(
-                self.expr,
-                operators=Transform._operators,
-                names=names)
+            res = self.simple._eval(self.astexpr)
+            # res = SimpleEval.eval(
+            #     self.expr,
+            #     operators=Transform._operators,
+            #     names=names)
         except simpleeval.NameNotDefined as e:
             e.args = (
                 (e.args[0] +
@@ -143,6 +213,9 @@ class Transform(pydantic.BaseModel):
                 + e.args[1:]
                 ) # ( (e.args[0]+"…",) + e.args[1:] )
             raise
+        # Remove the variable name from the namespace. This avoids it being
+        # inadvertendly used in another transform.
+        del self.simple.names[self.xname]
         return res
 
 # Transform.update_forward_refs()
@@ -151,13 +224,13 @@ def validator_parse_map(name, direction):
     splitidx = {'forward': 0, 'inverse': 1}[direction]
     def _parse_map(cls, m, values):
         if m is not None:
-            return Transform(m)
+            m = Transform(m)
         else:
             desc = values.get('desc', None)
             if desc is not None:
                 mapdesc = desc.split(';')[splitidx]
                 m = Transform(mapdesc)
-            return m
+        return m
     return validator(name, pre=True, allow_reuse=True)(_parse_map)
 
 @generic_pydantic_initializer  # Allow initialization with json, instance, dict
@@ -167,13 +240,14 @@ class Bijection(pydantic.BaseModel):
     Set `test_value` to None to disable the bijection test.
     """
     __slots__ = ('_inverse',)
-    map         : Transform = Field(None, alias='to')
-    inverse_map : Transform = Field(None, alias='back')
+    map         : Transform = Field(..., alias='to')
+    inverse_map : Transform = Field(..., alias='back')
     test_value  : Union[mtb.typing.DType[np.number],mtb.typing.Array[np.number]] = 0.5
 
     class Config:
         schema_extra  = {'single arg format': '[x] -> [f(x)] ; [y] -> [f⁻¹(y)]'}
         json_encoders = mtb.typing.json_encoders
+        allow_population_by_field_name = True
 
     # ------------
     # Validators and initializer
@@ -218,6 +292,13 @@ class Bijection(pydantic.BaseModel):
             kwargs['to']   = to
             kwargs['back'] = back
         super().__init__(**kwargs)
+
+    def copy(self, *args, **kwargs):
+        """Private attributes aren't copied over with _construct."""
+        m = super().copy(*args, **kwargs)
+        object.__setattr__(m, '_inverse', self._inverse)
+        return m
+
 
     # ------------
     # Interface
