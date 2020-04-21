@@ -2,17 +2,22 @@
 For almost all cases, you should not import this module directly but use
 
     import macklab_toolbox.typing
-
 """
 
 import sys
 import builtins
 import importlib
+import numbers
 import numpy as np
-from collections.abc import Iterable, Callable
+import abc
+from typing import Iterable, Callable, Sequence
 import mackelab_toolbox.utils as utils
 import typing
 from typing import Union, Type
+from collections import namedtuple
+
+import logging
+logger = logging.getLogger(__file__)
 
 ############
 # Postponed class instantiation
@@ -168,6 +173,8 @@ class TypeSet(set):
         self.check_input(types)
         super().update(types)
 
+JsonEncoder = namedtuple("JsonEncoder", ["encoder", "priority"])
+
 class TypeContainer(metaclass=utils.Singleton):
     """
     This class emulates a dynamic module, which is used as a collection of
@@ -177,14 +184,42 @@ class TypeContainer(metaclass=utils.Singleton):
 
     Access the unique class instance as `import mackelab_toolbox.typing`
 
+    Pydantic-compatible types
+    -------------------------
+    - Range
+    - Slice
+    - Sequence
+        Defined as `Union[Range, typing.Sequence]`. This prevents Pydantic
+        from coercing a range into a list.
+    - Types deriving from `numbers` module
+        + Number
+        + Integral
+        + Real
+    - PintValue
+        Incomplete
+    - QantitiesValue
+        Incomplete
+    - DType
+        Numpy dtypes. Use as `DType[np.float64]`.
+    - Array
+        Numpy ndarray. Use as `Array[np.float64]`, or `Array[np.float64,2]`.
+
+    Interaction with modules for physical quantities (Pint and Quantities)
+    ------------------------
+
+    If either the `pint` or `quantities` modules are loaded before
+    `typing.freeze_types()` is called, the corresponding json_encoder is
+    added to `typing.json_encoders`. Alternatively, the functions
+    `typing.load_pint` or `typing.load_quantities` can be executed at any time
+    to add the corresponding json encoders.
 
     Attributes
     --------
-    + type_map : dict
+    - type_map : dict
         Modules can update type_map as required
         For example, theano_shim adds the mapping from `float` type to `floatX`
         Mappings can be either types, or argument-less functions which return a type
-    + AllNumericalTypes: tuple
+    - AllNumericalTypes: tuple
         Anything which can be considered a number (incl. array, symbolic)
         Modules can add their own types to this list
         Use as
@@ -192,14 +227,14 @@ class TypeContainer(metaclass=utils.Singleton):
         >>> Union[mtb.typing.AllNumericalTypes]`
         Value without additional imports:
             (int, float, DType[np.number], Array[np.number]
-    + AllScalarTypes: tuple
+    - AllScalarTypes: tuple
         Similar to AllNumericalTypes, but restricted to scalars
         Use as
         >>> import mackelab_toolbox as mtb
         >>> Union[mtb.typing.AllScalarTypes]`
         Value without additional imports:
             (int, float, DType[np.number], Array[np.number, 0]
-    + NotCastableToArray
+    - NotCastableToArray
         Modules can add types to `NotCastableToArray`
             mtb.typing.add_nonarray_type(mytype)
         to prevent `pydantic` from trying to cast them to a NumPy array
@@ -225,6 +260,10 @@ class TypeContainer(metaclass=utils.Singleton):
         return PostponedClass(*args, **kwargs)
     @staticmethod
     def freeze_types():
+        if 'pint' in sys.modules:
+            typing.load_pint()
+        if 'quantities' in sys.modules:
+            typing.load_quantities()
         return freeze_types()
 
     def __init__(self):
@@ -232,7 +271,7 @@ class TypeContainer(metaclass=utils.Singleton):
         self._AllScalarTypes    = TypeSet([int, float])
         self._NotCastableToArrayTypes = TypeSet()
         self.type_map = {}
-        self.json_encoders = {}
+        self._json_encoders = {}
     @property
     def AnyNumericalType(self):
         return Union[tuple(T if isinstance(T, type) else T()
@@ -252,6 +291,19 @@ class TypeContainer(metaclass=utils.Singleton):
         self._AllScalarTypes.add(type)
     def add_nonarray_type(self, type):
         self._NotCastableToArrayTypes.add(type)
+
+    ####################
+    # Managing JSON encoders
+
+    def add_json_encoder(self, type, encoder, priority=0):
+        self._json_encoders[type] = JsonEncoder(encoder, priority)
+
+    @property
+    def json_encoders(self):
+        return {T:je.encoder
+                for T, je in sorted(self._json_encoders.items(),
+                                    key = lambda item: -item[1].priority)}
+        # Use -je.priority: higher number is higher priority
 
     ####################
     # Type normalization
@@ -290,15 +342,30 @@ class TypeContainer(metaclass=utils.Singleton):
             T = T.dtype
         return np.dtype(T)
 
+    ####################
+    # Conditionally loaded modules
+
+    @staticmethod
+    def load_pint():
+        import pint
+        typing.add_json_encoder(pint.quantity.Quantity, PintValue.json_encoder)
+        typing.add_json_encoder(pint.unit.Unit, PintUnit.json_encoder)
+
+    @staticmethod
+    def load_quantities():
+        import quantities
+        # Must have higher priority than numpy types
+        typing.add_json_encoder(quantities.quantity.Quantity,
+                                QuantitiesValue.json_encoder,
+                                priority=5)
+        typing.add_json_encoder(quantities.dimensionality.Dimensionality,
+                                QuantitiesUnit.json_encoder,
+                                priority=5)
+
 typing = TypeContainer()
 
 ############
 # Constants, sentinel objects
-
-# Computed = utils.sentinel("Computed", "<computed>")
-# def Computed():
-#     return field(default=_COMPUTED_PARAMETER, repr=False, compare=False)
-
 
 # class _NotCastableToArrayType(metaclass=utils.Singleton):
 #     """
@@ -334,6 +401,46 @@ typing = TypeContainer()
 # Custom Types for annotations / pydantic
 
 ####
+# Range type
+
+class Range:
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if (isinstance(v, Sequence) and isinstance(v[0], str)
+            and v[0].lower() == 'range'): # JSON decoder
+            v = range(*v[1])
+        if not isinstance(v, range):
+            raise TypeError(f"{v} is not of type `range`.")
+        return v
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        """We need to tell pydantic how to export this type to the schema,
+        since it doesn't know what to map the type to.
+        """
+        # See https://pydantic-docs.helpmanual.io/usage/types/#custom-data-types
+        # for the API, and https://pydantic-docs.helpmanual.io/usage/schema/
+        # for the expected fields
+        # TODO: Use 'items' ?
+        field_schema.update(
+            type="array",
+            description="('range', START, STOP, [STEP])"
+            )
+    @staticmethod
+    def json_encoder(v):
+        if v.step is None:
+            args = (v.start, v.stop)
+        else:
+            args = (v.start, v.stop, v.step)
+        return ("range", args)
+
+typing.Range = Range
+typing.add_json_encoder(range, Range.json_encoder)
+# Range.register(range)
+
+####
 # Slice type
 
 class Slice:
@@ -342,7 +449,7 @@ class Slice:
         yield cls.validate
     @classmethod
     def validate(cls, v):
-        if isinstance(v, Sequence) and v[0].lower() == 'slice':
+        if isinstance(v, Sequence) and v[0].lower() == 'slice': # JSON decoder
             v = slice(*v[1])
         if not isinstance(v, slice):
             raise TypeError("Slice required.")
@@ -355,18 +462,17 @@ class Slice:
         # See https://pydantic-docs.helpmanual.io/usage/types/#custom-data-types
         # for the API, and https://pydantic-docs.helpmanual.io/usage/schema/
         # for the expected fields
+        # TODO: Use 'items' ?
         field_schema.update(
             type="array",
-            description="('slice', [START], STOP, [STEP])"
+            description="('slice', START, STOP, [STEP])"
             )
     @staticmethod
     def json_encoder(v):
         """Attach this method to a pydantic BaseModel as follows:
         >>> class MyModel(BaseModel):
         >>>     class Config:
-        >>>         json_encoders = {
-        >>>             slice: Slice.json_encoder
-        >>>         }
+        >>>         json_encoders = mtb.typing.json_encoders
         """
         if v.step is None:
             args = (v.start, v.stop)
@@ -375,8 +481,172 @@ class Slice:
         return ("slice", args)
 
 typing.Slice = Slice
+typing.add_json_encoder(slice, Slice.json_encoder)
+# Slice.register(slice)
 
-####
+################
+# Port / overrides of typing types for pydantic
+
+# class Sequence(typing.Sequence):
+#     NOTE: If this is uncommented, take care name clash from typing.Sequence
+#     """
+#     Pydantic recognizes typing.Sequence, but treats it as a shorthand for
+#     Union[List, Tuple] (but with equal precedence). This means that other
+#     sequence types like `range` are not recognized. Even if they were
+#     recognized, the documented behaviour is to return a list – which would
+#     defeat the point of `range`.
+#
+#     This type does not support coercion, only validation.
+#     """
+#     @classmethod
+#     def __get_validators__(cls):
+#         yield cls.validate
+#     @classmethod
+#     def validate(cls, value, field):
+#         if not isinstance(value, collection.abc.Sequence):
+#             raise TypeError(f"Field {field.name} expects a sequence. "
+#                             f"It received {value} [type: {type(value)}].")
+#         return value
+#     @classmethod
+#     def __modify_schema__(cls, field_schema):
+#         field_scheam.update(type="array")
+typing.Sequence = Union[Range, Sequence]
+
+
+################
+# Recognizing unit types
+
+class PintValue:
+    """At present only used to define JSON encoder/decoder."""
+    @staticmethod
+    def json_encoder(v):
+        return ("PintValue", v.to_tuple())
+    @staticmethod
+    def json_decoder(v, ureg: "pint.registry.UnitRegistry"):
+        if pint is None:
+            raise ValueError("'pint' module is not loaded.")
+        if isinstance(v, tuple) and len(v) > 0 and v[0] == "PintValue":
+            return ureg.Quantity.from_tuple(v[1])
+        else:
+            raise ("Input is incompatible with PintValue.json_decoder. "
+                   f"Input value: {v} (type: {type(v)})")
+
+class PintUnit:
+    """At present only used to define JSON encoder/decoder."""
+    @staticmethod
+    def json_encoder(v):
+        return ("PintUnit", (str(v),))
+    @staticmethod
+    def json_decoder(v):
+        pint = sys.modules.get('pint', None)
+        if pint is None:
+            raise ValueError("'pint' module is not loaded.")
+        if isinstance(v, tuple) and len(v) > 0 and v[0] == "PintUnit":
+            return pint.unit.Unit(v[1][0])
+        else:
+            raise ("Input is incompatible with PintUnit.json_decoder. "
+                   f"Input value: {v} (type: {type(v)})")
+
+class QuantitiesValue:
+    """At present only used to define JSON encoder."""
+    @staticmethod
+    def json_encoder(v):
+        return ("QuantitiesValue", (v.magnitude, str(v.dimensionality)))
+    @staticmethod
+    def json_decoder(v):
+        pq = sys.modules.get('quantities', None)
+        if pq is None:
+            raise ValueError("'Quanties' module is not loaded.")
+        elif (isinstance(v, tuple)
+              and len(v) > 0 and v[0] == "QuantitiesValue"):
+            return pq.Quantity(v[1][0], units=v[1][1])
+        else:
+            raise ("Input is incompatible with QuantitiesValue.json_decoder. "
+                   f"Input value: {v} (type: {type(v)})")
+
+class QuantitiesUnit:
+    """At present only used to define JSON encoder/decoder."""
+    @staticmethod
+    def json_encoder(v):
+        return ("QuantitiesUnit", (str(v),))
+    @staticmethod
+    def json_decoder(v):
+        pq = sys.modules.get('quantities', None)
+        if pq is None:
+            raise ValueError("'Quanties' module is not loaded.")
+        if isinstance(v, tuple) and len(v) > 0 and v[0] == "QuantitiesUnit":
+            return pq.validate_dimensionality(v[1][0])
+        else:
+            raise ("Input is incompatible with QuantitiesUnit.json_decoder. "
+                   f"Input value: {v} (type: {type(v)})")
+
+typing.PintValue = PintValue
+typing.PintUnit  = PintUnit
+typing.QuantitiesValue = QuantitiesValue
+typing.QuantitiesUnit = QuantitiesUnit
+
+################
+# Types based on numbers module
+
+class Number(numbers.Number):
+    """
+    This type does not support coercion, only validation.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field):
+        if not isinstance(value, numbers.Number):
+            raise TypeError(f"Field {field.name} expects a number. "
+                            f"It received {value} [type: {type(value)}].")
+        return value
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type="number")
+typing.Number = Number
+typing.add_numerical_type(Number)
+typing.add_scalar_type(Number)
+
+class Integral(numbers.Integral):
+    """
+    This type does not support coercion, only validation.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field):
+        if not isinstance(value, numbers.Integral):
+            raise TypeError(f"Field {field.name} expects an integer. "
+                            f"It received {value} [type: {type(value)}].")
+        return value
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type="integer")
+typing.Integral = Integral
+# Don't add to numerical/scalar_type: covered by Number
+
+class Real(numbers.Real):
+    """
+    This type does not support coercion, only validation.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field):
+        if not isinstance(value, numbers.Real):
+            raise TypeError(f"Field {field.name} expects a real number. "
+                            f"It received {value} [type: {type(value)}].")
+        return value
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type="number")
+typing.Real = Real
+# Don't add to numerical/scalar_type: covered by Number
+
+################
 # DType type
 
 class _DTypeType(np.generic):
@@ -406,7 +676,7 @@ class _DTypeType(np.generic):
                             f"({type(value)}) to type {cls.dtype}.")
     @classmethod
     def __modify_schema__(cls, field_schema):
-        field_schema.update(type='number')
+        field_schema.update(type="number")
 
 
 class _DTypeMeta(type):
@@ -493,13 +763,7 @@ class _ArrayType(np.ndarray):
                             items={'type': 'number'})
     @classmethod
     def json_encoder(cls, v):
-        """Attach this method to a pydantic BaseModel as follows:
-        >>> class MyModel(BaseModel):
-        >>>     class Config:
-        >>>         json_encoders = {
-        >>>             Array: Array.json_encoder
-        >>>         }
-        """
+        """See typing.json_encoders."""
         return v.tolist()
 
 class _ArrayMeta(type):
@@ -555,4 +819,4 @@ class Array(np.ndarray, metaclass=_ArrayMeta):
 typing.Array = Array
 typing.add_numerical_type(Array[np.number])
 typing.add_scalar_type(Array[np.number, 0])
-typing.json_encoders.update({np.ndarray: _ArrayType.json_encoder})
+typing.add_json_encoder(np.ndarray, _ArrayType.json_encoder)
