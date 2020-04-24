@@ -676,8 +676,15 @@ class _DTypeType(np.generic):
                             f"({type(value)}) to type {cls.dtype}.")
     @classmethod
     def __modify_schema__(cls, field_schema):
-        field_schema.update(type="number")
+        if np.issubdtype(cls.dtype, np.integer):
+            field_schema.update(type="integer")
+        else:
+            field_schema.update(type="number")
 
+    @classmethod
+    def json_encoder(cls, v):
+        """See typing.json_encoders."""
+        return v.item()  #  Convert Numpy to native Python type
 
 class _DTypeMeta(type):
     def __getitem__(self, dtype):
@@ -712,6 +719,7 @@ class DType(np.generic, metaclass=_DTypeMeta):
 typing.DType = DType
 typing.add_numerical_type(DType[np.number])
 typing.add_scalar_type(DType[np.number])
+typing.add_json_encoder(np.generic, _DTypeType.json_encoder)
 
 ####
 # Array type
