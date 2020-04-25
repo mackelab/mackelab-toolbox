@@ -1,24 +1,44 @@
 # -*- coding: utf-8 -*-
+
+# ******************* Organization of this module ************************** #
+#                                                                            #
+# This file is split into sections, each with its own set of imports.        #
+# This makes it easy to split off a section into an independent module       #
+# when/if it gets big enough.                                                #
+#                                                                            #
+# Sections:                                                                  #
+#   - Functions imported by __init__.py into top level                       #
+#   - Iteration utilities                                                    #
+#   - Specialized types                                                      #
+#   - String utilities                                                       #
+#   - Hashing                                                                #
+#   - Numerical types                                                        #
+#   - Dictionary utilities                                                   #
+#   - Unit conversion utilities                                              #
+#   - Stashing                                                               #
+#   - Sentinel values                                                        #
+#   - Introspection / Class-hacking / Metaprogramming                        #
+#   - IPython / Jupyter Notebook utilities                                   #
+#   - Misc. utilities                                                        #
+#                                                                            #
+# ************************************************************************** #
+
 """
   Mackelab utilities
 
 Collection of useful short snippets.
 
 Created on Tue Nov 28 2017
-@author: alex
+Author: Alexandre René
 """
 
-# To keep keep this module as light as possible, imports required for specific
-# functions are kept within that function
 import logging
 logger = logging.getLogger(__file__)
-import builtins
-from collections import OrderedDict
-from collections.abc import Iterable, Callable
-from enum import Enum
 
 ########################
 # Functions imported by __init__.py into top level
+from collections.abc import Iterable
+import builtins
 
 def isinstance(obj, class_or_tuple):
     """
@@ -44,6 +64,8 @@ def isinstance(obj, class_or_tuple):
     return r
 
 ########################
+# Iteration utilities
+from collections.abc import Iterable
 
 terminating_types = (str, bytes)
 
@@ -78,23 +100,6 @@ def flatten(*l, terminate=None):
         else:
             yield el
 
-###
-# Recursive setattr and getattr.
-
-# Taken from https://stackoverflow.com/questions/31174295/getattr-and-setattr-#on-nested-objects.
-# See also https://gist.github.com/wonderbeyond/d293e7a2af1de4873f2d757edd580288
-####
-from functools import reduce
-def rsetattr(obj, attr, val):
-    """Recursive setattr. Use as `setattr(foo, 'bar.baz', 1)`."""
-    pre, _, post = attr.rpartition('.')
-    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
-def rgetattr(obj, attr, *args):
-    """Recursive getattr. Use as `getattr(foo, 'bar.baz', None)`."""
-    def _getattr(obj, attr):
-        return getattr(obj, attr, *args)
-    return reduce(_getattr, [obj] + attr.split('.'))
-
 class FixedGenerator:
     """
     Generator object which knows its length. Note this class is intended for use
@@ -109,6 +114,130 @@ class FixedGenerator:
     def __len__(self):
         return self.length
 
+############################
+# Specialized types
+from enum import Enum
+from collections import OrderedDict
+from collections.abc import Iterable, Callable
+
+class OrderedEnum(Enum):
+    """
+    Copied from python docs:
+    https://docs.python.org/3.6/library/enum.html#orderedenum
+    """
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value >= other.value
+        return NotImplemented
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        return NotImplemented
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value <= other.value
+        return NotImplemented
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
+
+class SanitizedDict(dict):
+    """Not implemented. See `SanitizedOrderedDict`."""
+    def __init__(self, *args, _warn=True, **kwargs):
+        if _warn:
+            logger.warning("mackelab_toolbox.utils.SanitizedDict is not implemented")
+        super().__init__(*args, **kwargs)
+
+class SanitizedOrderedDict(SanitizedDict, OrderedDict):
+    """
+    Subclass of OrderedDict with sanitized keys.
+    Any key query is passed through a user-defined 'sanitization' function
+    before searching for a match in the dictionary.
+
+    This is intended for user-facing dictionaries, to allow the user to access
+    entries without needing to remember the exact key, as long as the one they
+    specify is "close enough".
+    """
+
+    def __init__(self, *args, sanitize="", ignore_whitespace=True, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs: Same as for OrderedDict
+        sanitize: function, or list of characters
+            If a function, used to sanitize inputs.
+            If a list of characters, sanitization is to remove all characters
+            in that list.
+            Can be left unspecified if the only thing we want to sanitize is
+            whitespace.
+        ignore_whitespace: bool
+            Whether to also ignore all whitespace. Ignored if `sanitize` is
+            a function.
+        """
+        if isinstance(sanitize, Callable):
+            self.sanitize = sanitize
+        elif isinstance(sanitize, Iterable):
+            def f(s):
+                for c in sanitize:
+                    s = s.replace(c, '')
+                if ignore_whitespace:
+                    # Remove all whitespace
+                    s = ''.join(s.split())
+                return s
+            self.sanitize = f
+
+        return super().__init__(*args, _warn=False, **kwargs)
+
+    def __setitem__(self, key, value):
+        if isinstance(key, Iterable) and not isinstance(key, (str, bytes)):
+            key = type(key)([self.sanitize(k) for k in key])
+        else:
+            key = self.sanitize(key)
+        return super().__setitem__(key, value)
+    def __getitem__(self, key):
+        if isinstance(key, Iterable) and not isinstance(key, (str, bytes)):
+            key = type(key)([self.sanitize(k) for k in key])
+        else:
+            key = self.sanitize(key)
+        return super().__getitem__(key)
+
+    def newdict(self, *args, **kwargs):
+        """
+        Return an empty OrderedDict with the same sanitization.
+        """
+        return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
+
+###
+# Recursive setattr and getattr.
+
+# Taken from https://stackoverflow.com/questions/31174295/getattr-and-setattr-#on-nested-objects.
+# See also https://gist.github.com/wonderbeyond/d293e7a2af1de4873f2d757edd580288
+####
+from functools import reduce
+def rsetattr(obj, attr, val):
+    """
+    Recursive setattr. Use as `setattr(foo, 'bar.baz', 1)`.
+
+    Source: https://stackoverflow.com/questions/31174295/getattr-and-setattr-#on-nested-objects
+    See also: https://gist.github.com/wonderbeyond/d293e7a2af1de4873f2d757edd580288
+    """
+    pre, _, post = attr.rpartition('.')
+    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
+def rgetattr(obj, attr, *args):
+    """
+    Recursive getattr. Use as `getattr(foo, 'bar.baz', None)`.
+
+    Source: https://stackoverflow.com/questions/31174295/getattr-and-setattr-#on-nested-objects
+    See also: https://gist.github.com/wonderbeyond/d293e7a2af1de4873f2d757edd580288
+    """
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+    return reduce(_getattr, [obj] + attr.split('.'))
+
+################
+# String utilities
+
 def strip_comments(s, comment_mark='#'):
     """
     Remove single line comments from plain text.
@@ -118,13 +247,53 @@ def strip_comments(s, comment_mark='#'):
     return '\n'.join(line.partition(comment_mark)[0].rstrip()
                      for line in s.splitlines())
 
+from string import Formatter
+class ExtendedFormatter(Formatter):
+    """An extended format string formatter
+
+    Formatter with extended conversion symbols for upper/lower case and
+    capitalization.
+
+    Source: https://stackoverflow.com/a/46160537
+    """
+    def convert_field(self, value, conversion):
+        """ Extend conversion symbol
+        Following additional symbol has been added
+        * l: convert to string and low case
+        * u: convert to string and up case
+
+        default are:
+        * s: convert with str()
+        * r: convert with repr()
+        * a: convert with ascii()
+        """
+
+        if conversion == "u":
+            return str(value).upper()
+        elif conversion == "l":
+            return str(value).lower()
+        elif conversion == "c":
+            return str(value).capitalize()
+        # Do the default conversion or raise error if no matching conversion found
+        super().convert_field(value, conversion)
+
+        # return for None case
+        return value
+formatter = ExtendedFormatter()
+def format(s, *args, **kwargs):
+    return formatter.format(s, *args, **kwargs)
+
+###############
+# Hashing
+import hashlib
+from collections.abc import Iterable
+
 def stablehash(o):
     """
     Builtin `hash` is not stable across sessions for security reasons.
     This function can be used when consistency of a hash is required, e.g.
     for on-disk caches.
     """
-    import hashlib
     return hashlib.sha1(_tobytes(o)).hexdigest()
 
 def _tobytes(o):
@@ -136,6 +305,253 @@ def _tobytes(o):
         return b''.join(_tobytes(oi) for oi in o)
     else:
         return bytes(o)
+
+##########################
+# Numerical types
+from numbers import Number, Integral, Real
+import numpy as np
+
+def min_scalar_type(x):
+    """
+    Custom version of `numpy.min_scalar_type` which will not downcast a float
+    unless it can be done without loss of precision.
+    """
+    if np.issubdtype(x, np.floating):
+        if x == np.float16(x):
+            return np.dtype('float16')
+        elif x == np.float32(x):
+            return np.dtype('float32')
+        else:
+            return np.dtype('float64')
+    elif np.issubdtype(x, np.complexfloating):
+        raise NotImplementedError
+    elif np.issubdtype(x, np.integer):
+        return np.min_scalar_type(x)
+    else:
+        raise TypeError("Unsupported type '{}'.".format(type(x)))
+
+def int_if_close(x, tol=100, npint=None, allow_power10=True):
+    """
+    Similar to numpy's `real_if_close`, casts the value to an int if it is
+    close to an integer value.
+
+    Parameters
+    ----------
+    x : numerical value
+        Input array.
+    tol : float
+        Tolerance in machine epsilons.
+    npint: numpy type
+        Integer type to use for numpy inputs. Defaults to `numpy.int64`.
+    allow_power10: bool
+        If True, will also try to round to a power of 10, so e.g. 0.009999998
+        would be replaced with 0.01.
+    Returns
+    -------
+    out : int | float
+    """
+
+    if npint is None: npint = np.int64
+    if ( isinstance(x, Integral)
+         or (hasattr(x, 'dtype') and np.issubdtype(x.dtype, np.integer)) ):
+        return x
+        #pass
+    if isinstance(x, np.ndarray):
+        cond = (abs(x - np.rint(x)) < tol * np.finfo(x.dtype.type).eps).all()
+    else:
+        cond = abs(x - np.rint(x)) < tol * np.finfo(x).eps
+    if cond:
+        if isinstance(x, (np.ndarray, np.number)):
+            #return np.rint(x).astype(npint)
+            x = np.rint(x).astype(npint)
+        else:
+            #return int(round(x))
+            x = int(round(x))
+    else:
+        #return x
+        pass
+
+    if allow_power10:
+        pwr = int_if_close(np.log10(x), tol, npint, allow_power10=False)
+        if isinstance(pwr, Integral):
+            x = 10**int(pwr)   # Need `int()` b/c numpy doesn't allow neg. pwr
+
+    return x
+
+def less_close(x1, x2, rtol=1e-5, atol=1e-8):
+    """
+    'less than or equal' test where 'isclose' is used to test
+    equality. `atol` and `rtol` are parameters for `isclose`.
+    """
+    return x1 < x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
+
+def greater_close(x1, x2, rtol=1e-5, atol=1e-8):
+    """
+    'greater than or equal' test where 'isclose' is used to test
+    equality. `atol` and `rtol` are parameters for `isclose`.
+    """
+    return x1 > x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
+
+def broadcast_shapes(*shapes):
+    """
+    Compute the shape resulting from a broadcasting operation.
+
+    If A1, A2 and A3 have shapes S1, S2 and S3, then the resulting array
+    A = A1 * A2 * A3 (where * can be any broadcasting operation) has shape S.
+    This function takes S1, S2, S3 as arguments and returns S.
+    """
+    As = (np.broadcast_to(np.ones(1), shape) for shape in shapes)
+    return np.broadcast(*As).shape
+
+# A dictionary mapping string representations to numpy types like np.float32
+# Note that these aren't the same as numpy dtypes
+# str_to_nptype ={
+#     'int8'   : np.int8,
+#     'int16'  : np.int16,
+#     'int32'  : np.int32,
+#     'int64'  : np.int64,
+#     'uint8'  : np.uint8,
+#     'uint16' : np.uint16,
+#     'uint32' : np.uint32,
+#     'uint64' : np.uint64,
+#     'float16': np.float16,
+#     'float32': np.float32,
+#     'float64': np.float64
+#     }
+
+#######################
+# Dictionary utilities
+
+def comparedicts(dict1, dict2):
+    """
+    Recursively compare nested dictionaries. Works correctly with Numpy values
+    (calls `all()` on the result)
+    """
+    if set(dict1) != set(dict2): return False
+    for k, v1 in dict1.items():
+        v2 = dict2[k]
+        if isinstance(v1, dict):
+            if not isinstance(v2, dict): return False
+            if not comparedicts(v1, v2): return False
+        r = (v1 == v2)
+        try:
+            r = r.all()
+        except AttributeError:
+            pass
+        # Ensure we got a bool
+        if not isinstance(r, (bool, np.bool_)):
+            raise ValueError(
+                "Comparison of values {} and {} did not yield a boolean."
+                .format(v1, v2))
+        if not r: return False
+    return True
+
+############################
+# Unit conversion utilities
+from collections.abc import Iterable
+
+def mm2in(size, *args):
+    """
+    Convert size tuple from millimetres to inches.
+
+    Examples
+    --------
+    >>> from mackelab_toolbox.utils import mm2in
+    >>> mm2in(45)
+    1.771…
+    >>> mm2in(10, 20, 30, 40)
+    (0.393…, 0.787…, 1.181…, 1.574…)
+    >>> mm2in([50, 60, 70])
+    [1.968…, 2.362…, 2.755…]
+    """
+    if len(args) > 0:
+        if isinstance(size, Iterable):
+            raise TypeError("When giving multiple arguments to `mm2in`, the "
+                            "first must not be an iterable.")
+        return (size/25.4,) + tuple(s/25.4 for s in args)
+    elif not isinstance(size, Iterable):
+        return size / 25.4
+    else:
+        return type(size)(s/25.4 for s in size)
+
+#####################
+# Stashing
+
+from collections import OrderedDict, deque
+from collections.abc import MutableSequence, MutableSet, MutableMapping
+from copy import deepcopy
+
+class Stash:
+    """
+    Classes which use variables to record internal state can be in a situation
+    where they need to be in a fresh default state for an operation, but
+    rather than flushing their state before the operation, we would rather
+    reinstate it when we are done.
+    We store the variables to stash as string names rather than pointers to
+    the variables themselves, because pointers can change.
+
+    See `mackelab/sinn.histories.History` for a real-life example.
+
+    Usage
+    -----
+    Instantiate:
+        stash = Stash({vars to stash: default values})
+    Stash:
+        stash()
+    Pop:
+        stash.pop()
+    """
+    def __init__(self, obj, *stash_attrs):
+        """
+        Parameters
+        ----------
+        obj: class instance
+            The object to which we want to attach the stash.
+        stash_attrs: iterable of tuples
+            Each `(attrname, default, [string])` tuple is expanded and passed to
+            `add_stash_attr`.
+        """
+        self._obj = obj
+        self._stash_attrs = OrderedDict()
+        self._stash = deque()
+        for t in stash_attrs:
+            self.add_stash_attr(*t)
+
+    def add_stash_attr(self, attr, default, default_is_string=False):
+        """
+        Parameters
+        ----------
+        attr: str
+            Class attribute name
+        default: str | variable
+            If string, interpreted as a class attribute name. To prevent this
+            and treat the default as a plain string, set `default_is_string`.
+            Otherwise, treated as a default value (e.g. `True` or `0` and set
+            as is.
+        default_is_string: bool
+            Set to true to treat the default value as a string instead of an
+            attribute name. Has no effect if `default` is not a string.
+        """
+        if isinstance(default, (MutableSequence, MutableSet, MutableMapping)):
+            default = deepcopy(default)
+        self._stash_attrs[attr] = (default, default_is_string)
+
+    def __call__(self):
+        self._stash.append(
+            [getattr(self._obj, attr) for attr in self._stash_attrs])
+        for attr, (default, default_is_string) in self._stash_attrs.items():
+            if isinstance(default, str) and not default_is_string:
+                setattr(self._obj, attr, getattr(self._obj, default))
+            else:
+                setattr(self._obj, attr, default)
+
+    def pop(self):
+        for attr, val in zip(self._stash_attrs, self._stash.pop()):
+            setattr(self._obj, attr, val)
+
+
+####################
+# Sentinel values
 
 class Singleton(type):
     """Singleton metaclass
@@ -199,104 +615,14 @@ def sentinel(name, repr_str=None):
     return sentinel.__instances[name]
 sentinel.__instances = {}
 
-def min_scalar_type(x):
-    """
-    Custom version of `numpy.min_scalar_type` which will not downcast a float
-    unless it can be done without loss of precision.
-    """
-    import numpy as np  # Only import numpy if needed
-    if np.issubdtype(x, np.floating):
-        if x == np.float16(x):
-            return np.dtype('float16')
-        elif x == np.float32(x):
-            return np.dtype('float32')
-        else:
-            return np.dtype('float64')
-    elif np.issubdtype(x, np.complexfloating):
-        raise NotImplementedError
-    elif np.issubdtype(x, np.integer):
-        return np.min_scalar_type(x)
-    else:
-        raise TypeError("Unsupported type '{}'.".format(type(x)))
-
-def int_if_close(x, tol=100, npint=None, allow_power10=True):
-    """
-    Similar to numpy's `real_if_close`, casts the value to an int if it is
-    close to an integer value.
-
-    Parameters
-    ----------
-    x : numerical value
-        Input array.
-    tol : float
-        Tolerance in machine epsilons.
-    npint: numpy type
-        Integer type to use for numpy inputs. Defaults to `numpy.int64`.
-    allow_power10: bool
-        If True, will also try to round to a power of 10, so e.g. 0.009999998
-        would be replaced with 0.01.
-    Returns
-    -------
-    out : int | float
-    """
-    from numbers import Number, Integral, Real
-    import numpy as np
-
-    if npint is None: npint = np.int64
-    if ( isinstance(x, Integral)
-         or (hasattr(x, 'dtype') and np.issubdtype(x.dtype, np.integer)) ):
-        return x
-        #pass
-    if isinstance(x, np.ndarray):
-        cond = (abs(x - np.rint(x)) < tol * np.finfo(x.dtype.type).eps).all()
-    else:
-        cond = abs(x - np.rint(x)) < tol * np.finfo(x).eps
-    if cond:
-        if isinstance(x, (np.ndarray, np.number)):
-            #return np.rint(x).astype(npint)
-            x = np.rint(x).astype(npint)
-        else:
-            #return int(round(x))
-            x = int(round(x))
-    else:
-        #return x
-        pass
-
-    if allow_power10:
-        pwr = int_if_close(np.log10(x), tol, npint, allow_power10=False)
-        if isinstance(pwr, Integral):
-            x = 10**int(pwr)   # Need `int()` b/c numpy doesn't allow neg. pwr
-
-    return x
-
-def less_close(x1, x2, rtol=1e-5, atol=1e-8):
-    """
-    'less than or equal' test where 'isclose' is used to test
-    equality. `atol` and `rtol` are parameters for `isclose`.
-    """
-    return x1 < x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
-
-def greater_close(x1, x2, rtol=1e-5, atol=1e-8):
-    """
-    'greater than or equal' test where 'isclose' is used to test
-    equality. `atol` and `rtol` are parameters for `isclose`.
-    """
-    return x1 > x2 or np.isclose(x1, x2, rtol=rtol, atol=atol)
-
-def broadcast_shapes(*shapes):
-    """
-    Compute the shape resulting from a broadcasting operation.
-
-    If A1, A2 and A3 have shapes S1, S2 and S3, then the resulting array
-    A = A1 * A2 * A3 (where * can be any broadcasting operation) has shape S.
-    This function takes S1, S2, S3 as arguments and returns S.
-    """
-    As = (np.broadcast_to(np.ones(1), shape) for shape in shapes)
-    return np.broadcast(*As).shape
+###################
+# Introspection / Class-hacking / Metaprogramming
+import builtins
 
 def fully_qualified_name(o):
     """
-    Return fully qualified name for a class or function
+    Return fully qualified name for a class or function (i.e. including
+    the module)
 
     Parameters
     ----------
@@ -305,6 +631,13 @@ def fully_qualified_name(o):
     Returns
     -------
     str
+
+    Example
+    -------
+    >>> from mackelab_toolbox.utils import fully_qualified_name
+    >>> from mackelab_toolbox.iotools import load
+    >>> fully_qualified_name(load)
+    'mackelab_toolbox.iotools.load'
     """
     # Based on https://stackoverflow.com/a/13653312
     name = getattr(o, '__qualname__', getattr(o, '__name__', None))
@@ -320,6 +653,9 @@ def fully_qualified_name(o):
 def argstr(args: tuple, kwargs: dict):
     """Reconstruct the string of arguments as it would have been passed to a
     function.
+
+    Example
+    -------
     >>> argstr((2, 4), {'a': 33})
     "2, 4, a=33"
     """
@@ -329,29 +665,29 @@ def argstr(args: tuple, kwargs: dict):
     s += ', '.join(f'{k}:{v} [{type(v)}]' for k,v in kwargs.items())
     return s
 
-def comparedicts(dict1, dict2):
+class class_or_instance_method:
     """
-    Recursively compare nested dictionaries. Works correctly with Numpy values
-    (calls `all()` on the result)
+    Method decorator which sets `self` to be either the class (when method
+    is called on the class) or the instance (when method is called on an
+    instance). Adapted from https://stackoverflow.com/a/48809254.
+
+    .. Note:: This is clever, but it's likely to really hinder maintainability
+    of your code.
     """
-    if set(dict1) != set(dict2): return False
-    for k, v1 in dict1.items():
-        v2 = dict2[k]
-        if isinstance(v1, dict):
-            if not isinstance(v2, dict): return False
-            if not comparedicts(v1, v2): return False
-        r = (v1 == v2)
-        try:
-            r = r.all()
-        except AttributeError:
-            pass
-        # Ensure we got a bool
-        if not isinstance(r, (bool, np.bool_)):
-            raise ValueError(
-                "Comparison of values {} and {} did not yield a boolean."
-                .format(v1, v2))
-        if not r: return False
-    return True
+    def __init__(self, method, instance=None, owner=None):
+        self.method = method
+        self.instance = instance
+        self.owner = owner
+
+    def __get__(self, instance, owner=None):
+        return type(self)(self.method, instance, owner)
+
+    def __call__(self, *args, **kwargs):
+        clsself = self.instance if self.instance is not None else self.owner
+        return self.method(clsself, *args, **kwargs)
+
+#########################
+# IPython / Jupyter Notebook utilities
 
 class PDF:
     """
@@ -424,9 +760,17 @@ def Code(*obj, sep=''):
 
 def sciformat(num, sigdigits=1, minpower=None):
     """
-    Return a string representation of `num` with a given
-    number of significant digits.
+    Return a string representation of `num` with a given number of significant
+    digits.
     Use scientific notation if it is larger than `10^minpower`.
+
+    The output is intended mostly for figure production and uses TeX
+    notation ('10^' for the power, '\\cdot' for multiplication).
+
+    .. Note:: Core Python formatting has a `'g'` option, along with variants,
+    which does something similar. The main difference is that `sciformat`
+    will always print the specified number of significant digits, and its
+    output is suited for TeX formatting.
 
     Parameters
     ----------
@@ -437,6 +781,10 @@ def sciformat(num, sigdigits=1, minpower=None):
     minpower: int | None
         Minimum power to use scientific notation. Default value of None
         forces scientific notation.
+
+    Returns
+    -------
+    str
     """
     import math
     if sigdigits < 1:
@@ -469,183 +817,19 @@ def sciformat(num, sigdigits=1, minpower=None):
         dotstr = ""
     return mstring + dotstr + pstring
 
-def mm2in(size, *args):
-    """Convert size tuple from millimetres to inches."""
-    if len(args) > 0:
-        if isinstance(size, Iterable):
-            raise TypeError("When giving multiple arguments to `mm2in`, the "
-                            "first must not be an iterable.")
-        return (size/25.4,) + tuple(s/25.4 for s in args)
-    elif not isinstance(size, Iterable):
-        return size / 25.4
-    else:
-        return type(size)(s/25.4 for s in size)
-
-class OrderedEnum(Enum):
-    """
-    Copied from python docs:
-    https://docs.python.org/3.6/library/enum.html#orderedenum
-    """
-    def __ge__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value >= other.value
-        return NotImplemented
-    def __gt__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value > other.value
-        return NotImplemented
-    def __le__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value <= other.value
-        return NotImplemented
-    def __lt__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value < other.value
-        return NotImplemented
-
-class SanitizedDict(dict):
-    def __init__(self, *args, _warn=True, **kwargs):
-        if _warn:
-            logger.warning("mackelab_toolbox.utils.SanitizedDict is not implemented")
-        super().__init__(*args, **kwargs)
-
-class SanitizedOrderedDict(SanitizedDict, OrderedDict):
-    """
-    Subclass of OrderedDict with sanitized keys.
-    Any key query is passed through a user-defined 'sanitization' function
-    before searching for a match in the dictionary.
-
-    This is intended for user-facing dictionaries, to allow the user to access
-    entries without needing to remember the exact key, as long as the one they
-    specify is "close enough".
-    """
-
-    def __init__(self, *args, sanitize="", ignore_whitespace=True, **kwargs):
-        """
-        Parameters
-        ----------
-        *args, **kwargs: Same as for OrderedDict
-        sanitize: function, or list of characters
-            If a function, used to sanitize inputs.
-            If a list of characters, sanitization is to remove all characters
-            in that list.
-            Can be left unspecified if the only thing we want to sanitize is
-            whitespace.
-        ignore_whitespace: bool
-            Whether to also ignore all whitespace. Ignored if `sanitize` is
-            a function.
-        """
-        if isinstance(sanitize, Callable):
-            self.sanitize = sanitize
-        elif isinstance(sanitize, Iterable):
-            def f(s):
-                for c in sanitize:
-                    s = s.replace(c, '')
-                if ignore_whitespace:
-                    # Remove all whitespace
-                    s = ''.join(s.split())
-                return s
-            self.sanitize = f
-
-        return super().__init__(*args, _warn=False, **kwargs)
-
-    def __setitem__(self, key, value):
-        if isinstance(key, Iterable) and not isinstance(key, (str, bytes)):
-            key = type(key)([self.sanitize(k) for k in key])
-        else:
-            key = self.sanitize(key)
-        return super().__setitem__(key, value)
-    def __getitem__(self, key):
-        if isinstance(key, Iterable) and not isinstance(key, (str, bytes)):
-            key = type(key)([self.sanitize(k) for k in key])
-        else:
-            key = self.sanitize(key)
-        return super().__getitem__(key)
-
-    def newdict(self, *args, **kwargs):
-        """
-        Return an empty OrderedDict with the same sanitization.
-        """
-        return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
-
-from collections import OrderedDict, deque
-from collections.abc import MutableSequence, MutableSet, MutableMapping
-from copy import deepcopy
-class Stash:
-    """
-    Classes which use variables to record internal state be in a situation
-    where they need to be in a fresh default state for an operation, but
-    rather than flushing their state before the operation, we would rather
-    reinstate when we are done.
-    We store the variables to stash as string names rather than pointers to
-    the variables themselves, because pointers can change.
-
-    Usage
-    -----
-    Instantiate:
-        stash = Stash({vars to stash: default values})
-    Stash:
-        stash()
-    Pop:
-        stash.pop()
-    """
-    def __init__(self, obj, *stash_attrs):
-        """
-        Parameters
-        ----------
-        obj: class instance
-            The object to which we want to attach the stash.
-        stash_attrs: iterable of tuples
-            Each `(attrname, default, [string])` tuple is expanded and passed to
-            `add_stash_attr`.
-        """
-        self._obj = obj
-        self._stash_attrs = OrderedDict()
-        self._stash = deque()
-        for t in stash_attrs:
-            self.add_stash_attr(*t)
-
-    def add_stash_attr(self, attr, default, default_is_string=False):
-        """
-        Parameters
-        ----------
-        attr: str
-            Class attribute name
-        default: str | variable
-            If string, interpreted as a class attribute name. To prevent this
-            and treat the default as a plain string, set `default_is_string`.
-            Otherwise, treated as a default value (e.g. `True` or `0` and set
-            as is.
-        default_is_string: bool
-            Set to true to treat the default value as a string instead of an
-            attribute name. Has no effect if `default` is not a string.
-        """
-        if isinstance(default, (MutableSequence, MutableSet, MutableMapping)):
-            default = deepcopy(default)
-        self._stash_attrs[attr] = (default, default_is_string)
-
-    def __call__(self):
-        self._stash.append(
-            [getattr(self._obj, attr) for attr in self._stash_attrs])
-        for attr, (default, default_is_string) in self._stash_attrs.items():
-            if isinstance(default, str) and not default_is_string:
-                setattr(self._obj, attr, getattr(self._obj, default))
-            else:
-                setattr(self._obj, attr, default)
-
-    def pop(self):
-        for attr, val in zip(self._stash_attrs, self._stash.pop()):
-            setattr(self._obj, attr, val)
-
+#####################
+# Misc. utilities
 
 # TODO: Pre-evaluate strings to some more efficient expresison, so
-#       we don't need to parse the string every time. simpleeval can do this
+#       we don't need to parse the string every time.
+#       > This is now done in `mackelab_toolbox.transform`
+# TODO: Update and use with `mackelab_toolbox.transform` ?
 import simpleeval
 import ast
 import operator
 import numpy as np
-import scipy as sp
 class StringFunction:
+    """See `mackelab_toolbox.transform.Transform`, which is more mature."""
     # Replace the "safe" operators with their standard forms
     # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
     #  input but this does not work with non-numerical types.)
@@ -655,8 +839,7 @@ class StringFunction:
          ast.Mult: operator.mul,
          ast.Pow: operator.pow})
     # Allow evaluation to find operations in standard namespaces
-    namespaces = {'np': np,
-                  'sp': sp}
+    namespaces = {'np': np}
 
     def __init__(self, expr, args):
         """
@@ -681,7 +864,7 @@ class StringFunction:
         except simpleeval.NameNotDefined as e:
             e.args = ((e.args[0] +
                        "\n\nThis may be due to a module function in the transform "
-                       "expression (only numpy and scipy, as 'np' and 'sp', are "
+                       "expression (only numpy, as 'np', are "
                        "available by default).\nIf '{}' is a module or class, you can "
                        "make it available by adding it to the function namespace: "
                        "`StringFunction.namespaces.update({{'{}': {}}})`.\nSuch a line would "
@@ -693,6 +876,7 @@ class StringFunction:
             raise
         return res
 
+from collections.abc import Iterable
 class SkipCounter(int):
     """
     An integer counter which automatically skips certain values.
@@ -702,6 +886,9 @@ class SkipCounter(int):
     making it inconvenient to arrange multiple sequences as columns.
     With a SkipCounter, we can define which grid indices to leave blank,
     and simply increment by 1 for each plot.
+    I've found better ways of doing this since then
+    (assigning names to the axes returned by `plt.subplots(n,m)`), but maybe
+    there are other uses for this.
 
     Usage example
     -------------
@@ -760,73 +947,3 @@ class SkipCounter(int):
 
     def __sub__(self, i):
         return self + -i
-
-from string import Formatter
-class ExtendedFormatter(Formatter):
-    """An extended format string formatter
-
-    Formatter with extended conversion symbols for upper/lower case and
-    capitalization.
-
-    Source: https://stackoverflow.com/a/46160537
-    """
-    def convert_field(self, value, conversion):
-        """ Extend conversion symbol
-        Following additional symbol has been added
-        * l: convert to string and low case
-        * u: convert to string and up case
-
-        default are:
-        * s: convert with str()
-        * r: convert with repr()
-        * a: convert with ascii()
-        """
-
-        if conversion == "u":
-            return str(value).upper()
-        elif conversion == "l":
-            return str(value).lower()
-        elif conversion == "c":
-            return str(value).capitalize()
-        # Do the default conversion or raise error if no matching conversion found
-        super().convert_field(value, conversion)
-
-        # return for None case
-        return value
-formatter = ExtendedFormatter()
-def format(s, *args, **kwargs):
-    return formatter.format(s, *args, **kwargs)
-
-class class_or_instance_method:
-    """
-    Method decorator which sets `self` to be either the class (when method
-    is called on the class) on the instance (when method is called on an
-    instance). Adapted from https://stackoverflow.com/a/48809254.
-    """
-    def __init__(self, method, instance=None, owner=None):
-        self.method = method
-        self.instance = instance
-        self.owner = owner
-
-    def __get__(self, instance, owner=None):
-        return type(self)(self.method, instance, owner)
-
-    def __call__(self, *args, **kwargs):
-        clsself = self.instance if self.instance is not None else self.owner
-        return self.method(clsself, *args, **kwargs)
-
-# A dictionary mapping string representations to numpy types like np.float32
-# Note that these aren't the same as numpy dtypes
-# str_to_nptype ={
-#     'int8'   : np.int8,
-#     'int16'  : np.int16,
-#     'int32'  : np.int32,
-#     'int64'  : np.int64,
-#     'uint8'  : np.uint8,
-#     'uint16' : np.uint16,
-#     'uint32' : np.uint32,
-#     'uint64' : np.uint64,
-#     'float16': np.float16,
-#     'float32': np.float32,
-#     'float64': np.float64
-#     }
