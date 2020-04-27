@@ -110,14 +110,14 @@ class GraphCache:
                             .format(cachename, C))
                 else:
                     # We got the class' source code, now hash it
-                    classhashes.append(utils.stablehash(src))
+                    classhashes.append(utils.stabledigest(src))
         classhashes = tuple(classhashes)
         # Add the module dependencies
         if not isinstance(modules, (list, tuple)):
             modules = (modules,)
-        modulehashes = tuple(utils.stablehash(inspect.getsource(m))
+        modulehashes = tuple(utils.stabledigest(inspect.getsource(m))
                              for m in modules)
-        dependencyhash = utils.stablehash(classhashes+modulehashes)
+        dependencyhash = utils.stabledigest(classhashes+modulehashes)
 
         # Open the cache (`shelve` will create it if needed) and check
         # if the dependency hash is new. If it is and the we already have

@@ -293,8 +293,48 @@ def stablehash(o):
     Builtin `hash` is not stable across sessions for security reasons.
     This function can be used when consistency of a hash is required, e.g.
     for on-disk caches.
+
+    For obtaining a usable digest, see the convenience functions
+    `stablehexdigest`, `stablebytesdigest` and `stableintdigest`.
+    `stabledigest` is a synonym for `stableintdigest` and is suitable as the
+    return value of a `__hash__` method.
+
+    .. Note:: For exactly the reason stated above, none of hash functions in
+    this module are cryptographically secure.
     """
-    return hashlib.sha1(_tobytes(o)).hexdigest()
+    return hashlib.sha1(_tobytes(o))
+def stablehexdigest(o):
+    """
+    Returns
+    -------
+    str
+    """
+    return stablehash(o).hexdigest()
+def stablebytesdigest(o):
+    """
+    Returns
+    -------
+    bytes
+    """
+    return stablehash(o).digest()
+def stableintdigest(o, byte_len=4):
+    """
+    Suitable as the return value of a `__hash__` method.
+
+    Parameters
+    ----------
+    o : object to hash (see `stablehash`)
+    byte_len : int, Optional (default: 4)
+        Number of bytes to keep from the hash. A value of `b` provides at most
+        `8**b` bits of entropy. With `b=4`, this is 4096 bits and 10 digit
+        integers.
+
+    Returns
+    -------
+    int
+    """
+    return int.from_bytes(stablehash(o)[:byte_len], 'little')
+stabledigest = stableintdigest
 
 def _tobytes(o):
     if isinstance(o, bytes):
