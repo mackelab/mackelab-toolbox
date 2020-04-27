@@ -9,7 +9,7 @@ Provides
   - types: interface for symbolic types for type hinting/annotations
     Has the elements:
     + FloatX: retrieved as `cgshim.types.FloatX`
-      A type which maps to `.typing.DType[shim.config.floatX]`.
+      A type which maps to `.typing.NPType[shim.config.floatX]`.
     + Symbolic: retrieved as `cgshim.types.Symbolic`
       A type, compatible with pydantic, to indicate a symbolic value in
       annotations. Which type that corresponds to depends on the currently
@@ -78,7 +78,7 @@ class TypeContainer(metaclass=utils.Singleton):
 
     @property
     def FloatX(self):
-        return mtb.typing.DType[shim.config.floatX]
+        return mtb.typing.NPType[shim.config.floatX]
 
     @property
     def Symbolic(self):

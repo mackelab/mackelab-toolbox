@@ -199,8 +199,8 @@ class TypeContainer(metaclass=utils.Singleton):
         Incomplete
     - QantitiesValue
         Incomplete
-    - DType
-        Numpy dtypes. Use as `DType[np.float64]`.
+    - NPType
+        Numpy dtypes. Use as `NPType[np.float64]`.
     - Array
         Numpy ndarray. Use as `Array[np.float64]`, or `Array[np.float64,2]`.
 
@@ -226,14 +226,14 @@ class TypeContainer(metaclass=utils.Singleton):
         >>> import mackelab_toolbox as mtb
         >>> Union[mtb.typing.AllNumericalTypes]`
         Value without additional imports:
-            (int, float, DType[np.number], Array[np.number]
+            (int, float, NPType[np.number], Array[np.number]
     - AllScalarTypes: tuple
         Similar to AllNumericalTypes, but restricted to scalars
         Use as
         >>> import mackelab_toolbox as mtb
         >>> Union[mtb.typing.AllScalarTypes]`
         Value without additional imports:
-            (int, float, DType[np.number], Array[np.number, 0]
+            (int, float, NPType[np.number], Array[np.number, 0]
     - NotCastableToArray
         Modules can add types to `NotCastableToArray`
             mtb.typing.add_nonarray_type(mytype)
@@ -338,7 +338,7 @@ class TypeContainer(metaclass=utils.Singleton):
         T = self.type_map.get(annotation_type, annotation_type)
         if not isinstance(T, type) and isinstance(T, Callable):
             T = T()
-        if isinstance(T, type) and issubclass(T, _DTypeType):
+        if isinstance(T, type) and issubclass(T, _NPTypeType):
             T = T.dtype
         return np.dtype(T)
 
@@ -584,6 +584,7 @@ typing.PintValue = PintValue
 typing.PintUnit  = PintUnit
 typing.QuantitiesValue = QuantitiesValue
 typing.QuantitiesUnit = QuantitiesUnit
+# JSON encoders added typing.load_pint/load_quantities
 
 ################
 # Types based on numbers module
@@ -647,9 +648,28 @@ typing.Real = Real
 # Don't add to numerical/scalar_type: covered by Number
 
 ################
-# DType type
+# DType
 
-class _DTypeType(np.generic):
+class DType:
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value):
+        return np.dtype(value)
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type="str")
+    @classmethod
+    def json_encoder(cls, value):
+        return str(value)
+typing.DType = DType
+typing.add_json_encoder(np.dtype, DType.json_encoder)
+
+################
+# NPType type
+
+class _NPTypeType(np.generic):
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
@@ -686,13 +706,13 @@ class _DTypeType(np.generic):
         """See typing.json_encoders."""
         return v.item()  #  Convert Numpy to native Python type
 
-class _DTypeMeta(type):
+class _NPTypeMeta(type):
     def __getitem__(self, dtype):
         dtype=typing.convert_dtype(dtype)
-        return type(f'DType[{dtype}]', (_DTypeType,),
+        return type(f'NPType[{dtype}]', (_NPTypeType,),
                     {'dtype': typing.convert_dtype(dtype)})
 
-class DType(np.generic, metaclass=_DTypeMeta):
+class NPType(np.generic, metaclass=_NPTypeMeta):
     """
     Use this to use a NumPy dtype for type annotation; `pydantic` will
     recognize the type and execute appropriate validation/parsing.
@@ -700,26 +720,31 @@ class DType(np.generic, metaclass=_DTypeMeta):
     This may become obsolete, or need to be updated, when NumPy officially
     supports type hints (see https://github.com/numpy/numpy-stubs).
 
-    - `DType[T]` specifies an object to be casted with dtype `T`. Any
+    - `NPType[T]` specifies an object to be casted with dtype `T`. Any
        expression for which `np.dtype(T)` is valid is accepted.
+
+    .. Note:: Difference with `DType`. The annotation `NPType[np.int8]`
+    matches any value of the same type as would be returned by `np.int8`.
+    `DType` describes an instance of `dtype` and would match `np.dtype('int8')`,
+    but also `np.dtype(float)`, etc.
 
     Example
     -------
     >>> from pydantic.dataclasses import dataclass
-    >>> from mackelab_toolbox.typing import DType
+    >>> from mackelab_toolbox.typing import NPType
     >>>
     >>> @dataclass
     >>> class Model:
-    >>>     x: DType[np.float64]
-    >>>     y: DType[np.int8]
+    >>>     x: NPType[np.float64]
+    >>>     y: NPType[np.int8]
 
     """
     pass
 
-typing.DType = DType
-typing.add_numerical_type(DType[np.number])
-typing.add_scalar_type(DType[np.number])
-typing.add_json_encoder(np.generic, _DTypeType.json_encoder)
+typing.NPType = NPType
+typing.add_numerical_type(NPType[np.number])
+typing.add_scalar_type(NPType[np.number])
+typing.add_json_encoder(np.generic, _NPTypeType.json_encoder)
 
 ####
 # Array type
