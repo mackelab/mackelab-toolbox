@@ -72,6 +72,10 @@ __ALL__ = []
 # 5.2 µs ± 276 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
 # # ---------------
 
+# TODO: Add method to attach new names and functions to specific transforms
+#       It should be possible to clear all added names, without removing the
+#       default ones.
+
 @generic_pydantic_initializer
 class Transform(pydantic.BaseModel):
     """
@@ -80,6 +84,9 @@ class Transform(pydantic.BaseModel):
     `simpleeval`_ is used to evaluate `expr`, which provides some safety
     sanitization. (Note that we disable `simpleeval`'s safety checks for large
     values, since they prevent use with symbolic variables.)
+    Specifically, we use the :class:`simpleeval.EvalWithCompoundTypes` parser,
+    which adds support for types like `list` and `tuple`, as well as
+    comprehensions.
 
     The standard way to initialize is to use a string of the form "x -> f(x)",
     although directly setting `xname` and `expr` is also possible.
@@ -149,8 +156,9 @@ class Transform(pydantic.BaseModel):
             simpleeval.ast.parse(self.expr.strip()).body[0].value)
         object.__setattr__(
             self, 'simple',
-            simpleeval.SimpleEval(names=Transform.namespaces,
-                                  operators=Transform._operators))
+            simpleeval.EvalWithCompoundTypes(
+                names=Transform.namespaces.copy(),
+                operators=Transform._operators))
 
     # FIXME: Patch BaseModel's `construct` method for private vars ?
     # @classmethod
@@ -192,6 +200,8 @@ class Transform(pydantic.BaseModel):
         # names.update(self.namespaces)
         self.simple.names[self.xname] = x
         try:
+            # HACK: We use the internal _eval function to avoid re parsing ast
+            self.simple._max_count = 0  # See EvalWithCompoundTypes.eval()
             res = self.simple._eval(self.astexpr)
             # res = SimpleEval.eval(
             #     self.expr,
