@@ -197,10 +197,15 @@ class TypeContainer(metaclass=utils.Singleton):
         + Real
     - PintValue
         Incomplete
-    - QantitiesValue
+    - QuantitiesValue
         Incomplete
+    - Number
+    - Integral
+    - Real
+    - DType
+        Numpy data type object.
     - NPType
-        Numpy dtypes. Use as `NPType[np.float64]`.
+        Numpy numerical types. Use as `NPType[np.float64]`.
     - Array
         Numpy ndarray. Use as `Array[np.float64]`, or `Array[np.float64,2]`.
 
@@ -509,7 +514,7 @@ typing.add_json_encoder(slice, Slice.json_encoder)
 #         return value
 #     @classmethod
 #     def __modify_schema__(cls, field_schema):
-#         field_scheam.update(type="array")
+#         field_schema.update(type="array")
 typing.Sequence = Union[Range, Sequence]
 
 
@@ -630,7 +635,8 @@ typing.Integral = Integral
 
 class Real(numbers.Real):
     """
-    This type does not support coercion, only validation.
+    This type generally does not support coercion, only validation.
+    Exception: integer values are cast with `float`.
     """
     @classmethod
     def __get_validators__(cls):
@@ -640,6 +646,9 @@ class Real(numbers.Real):
         if not isinstance(value, numbers.Real):
             raise TypeError(f"Field {field.name} expects a real number. "
                             f"It received {value} [type: {type(value)}].")
+        elif isinstance(value, numbers.Integral):
+            # Convert ints to floating point
+            return float(value)
         return value
     @classmethod
     def __modify_schema__(cls, field_schema):
@@ -853,3 +862,73 @@ typing.Array = Array
 typing.add_numerical_type(Array[np.number])
 typing.add_scalar_type(Array[np.number, 0])
 typing.add_json_encoder(np.ndarray, _ArrayType.json_encoder)
+
+#####
+# Numpy random generators
+
+class RNGenerator(np.random.Generator):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field):
+        if isinstance(value, np.random.Generator):
+            return value
+        elif (isinstance(value, dict)
+              and 'bit_generator' in value and 'state' in value):
+            # Looks like a json-serialized state dictionary
+            BG = getattr(np.random, value['bit_generator'])()
+            BG.state = value
+            return np.random.Generator(BG)
+        else:
+            raise TypeError(f"Field {field.name} expects an instance of "
+                            f"np.random.Generator.\nProvided value: {value}")
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type=object)
+    @classmethod
+    def json_encoder(cls, v):
+        """See typing.json_encoders."""
+        # Generators are containers around a BitGenerator; it's the state of
+        # BitGenerator that we need to save. Default BitGenerator is 'PCG64'.
+        # State is a dict with two required fields: 'bit_generator' and 'state',
+        # plus 1-3 extra fields depending on the generator.
+        # 'state' field is itself a dictionary, which may contain arrays of
+        # type uint32 or uint64
+        return v.bit_generator.state
+            # Pydantic will recursively encode state entries, and use Array's
+            # json_encoder when needed
+
+class RandomState(np.random.RandomState):
+    """Pydantic typing support for the legacy RandomState object."""
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field):
+        if isinstance(value, np.random.RandomState):
+            return value
+        elif (isinstance(value, (tuple, list)) and 'MT19937' in value):
+            # Looks like a json-serialized state tuple
+            rs = np.random.RandomState()
+            rs.set_state(value)
+            return rs
+        else:
+            raise TypeError(f"Field {field.name} expects an instance of "
+                            f"np.random.RandomState.\nProvided value: {value}")
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type='array',
+                            items=[{'type': 'string'},
+                                   {'type': 'array', 'items': {'type': 'integer'}},
+                                   {'type': 'integer'}, {'type': 'integer'},
+                                   {'type': 'number'}])
+    @classmethod
+    def json_encoder(cls, v):
+        """See typing.json_encoders."""
+        return v.get_state()
+
+typing.RNGenerator = RNGenerator
+typing.RandomState = RandomState
+typing.add_json_encoder(np.random.Generator, RNGenerator.json_encoder)
+typing.add_json_encoder(np.random.RandomState, RandomState.json_encoder)

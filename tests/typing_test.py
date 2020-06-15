@@ -18,6 +18,8 @@ def test_pydantic(caplog):
         a: float
         # dt: float=0.01
         dt: float
+        class Config:
+            json_encoders = mtbT.json_encoders
         def integrate(self, x0, T, y0=0):
             x = x0; y=y0
             a = self.a; dt = self.dt
@@ -205,7 +207,6 @@ def test_pydantic(caplog):
     assert set(m2_stt32.params.keys()) == set(['a', 'dt', 'b', 'w'])
     assert shim.is_pure_symbolic(m2_stt32.params.w)
 
-
     # Aggregate types, dimension testing
     class Foo(BaseModel):
         a : mtb.typing.AnyNumericalType   # arrays, symbolics ok
@@ -227,3 +228,93 @@ def test_pydantic(caplog):
     Foo(a=1, b=2, c=2, d=np.float)
     Foo(a=1, b=2, c=2, d='float32')
     Foo(a=1, b=2, c=2, d=shim.config.floatX)
+
+def test_pydantic_rng():
+    class RandomModel(BaseModel):
+        rng: mtbT.RNGenerator
+        class Config:
+            json_encoders = mtbT.json_encoders
+
+    RandomModel.schema()
+
+    from numpy.random import Generator, PCG64, MT19937, SFC64, Philox
+    seed = 953235987
+    rm_pcg = RandomModel(rng=Generator(PCG64(seed)))
+    rm_mt  = RandomModel(rng=Generator(MT19937(seed)))
+    rm_sfc = RandomModel(rng=Generator(SFC64(seed)))
+    rm_phi = RandomModel(rng=Generator(Philox(seed)))
+
+    # Save models in their current initialized state
+    pcg_json = rm_pcg.json()
+    mt_json  = rm_mt.json()
+    sfc_json = rm_sfc.json()
+    phi_json = rm_phi.json()
+
+    # Draw from models, advancing the bit generator
+    pcg_draws = rm_pcg.rng.random(size=5)
+    mt_draws  = rm_mt.rng.random(size=5)
+    sfc_draws = rm_sfc.rng.random(size=5)
+    phi_draws = rm_phi.rng.random(size=5)
+
+    # Create new model copies, in their original initialized states
+    rm_pcg2 = RandomModel.parse_raw(pcg_json)
+    rm_mt2  = RandomModel.parse_raw(mt_json)
+    rm_sfc2 = RandomModel.parse_raw(sfc_json)
+    rm_phi2 = RandomModel.parse_raw(phi_json)
+
+    # Draw again => same numbers as before
+    assert np.all(pcg_draws == rm_pcg2.rng.random(size=5))
+    assert np.all(mt_draws  == rm_mt2.rng.random(size=5))
+    assert np.all(sfc_draws == rm_sfc2.rng.random(size=5))
+    assert np.all(phi_draws == rm_phi2.rng.random(size=5))
+
+    # Drawing _again_ produces different numbers => these really are random numbers
+    assert np.all(pcg_draws != rm_pcg2.rng.random(size=5))
+    assert np.all(mt_draws  != rm_mt2.rng.random(size=5))
+    assert np.all(sfc_draws != rm_sfc2.rng.random(size=5))
+    assert np.all(phi_draws != rm_phi2.rng.random(size=5))
+
+def test_pydantic_legacy_rng():
+    class RandomModel(BaseModel):
+        rng: mtbT.RandomState
+        class Config:
+            json_encoders = mtbT.json_encoders
+
+    RandomModel.schema()
+
+    from numpy.random import RandomState
+    seed = 953235987
+    rm_leg = RandomModel(rng=RandomState(seed))
+
+    # Save models in their current initialized state
+    leg_json = rm_leg.json()
+
+    # Draw from models, advancing the bit generator
+    leg_draws = rm_leg.rng.random(size=5)
+
+    # Create new model copies, in their original initialized states
+    rm_leg2 = RandomModel.parse_raw(leg_json)
+
+    # Draw again => same numbers as before
+    assert np.all(leg_draws == rm_leg2.rng.random(size=5))
+
+    # Drawing _again_ produces different numbers => these really are random numbers
+    assert np.all(leg_draws != rm_leg2.rng.random(size=5))
+
+def _test_pydantic_shim_rng(cgshim):
+    # TODO: test that random state is saved and restored
+    shim.load(cghim)
+    mtbT.freeze_types()
+    class RandomModel(BaseModel):
+        rng: cgshim.typing.RNG
+        class Config:
+            json_encoders = mtbT.json_encoders
+
+    m = RandomModel(rng=shim.config.RandomStreams())
+
+    RandomModel.parse_raw(m.json())
+
+def test_pydantic_shimtheano_rng():
+    return _test_pydantic_shim_rng('theano')
+def test_pydantic_shimnumpy_rng():
+    return _test_pydantic_shim_rng('numpy')

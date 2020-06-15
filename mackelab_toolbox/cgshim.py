@@ -8,20 +8,24 @@ Provides
     Function which casts to current type of 'floatX'
   - types: interface for symbolic types for type hinting/annotations
     Has the elements:
-    + FloatX: retrieved as `cgshim.types.FloatX`
+    + FloatX: retrieved as `cgshim.typing.FloatX`
       A type which maps to `.typing.NPType[shim.config.floatX]`.
-    + Symbolic: retrieved as `cgshim.types.Symbolic`
+    + Symbolic: retrieved as `cgshim.typing.Symbolic`
       A type, compatible with pydantic, to indicate a symbolic value in
       annotations. Which type that corresponds to depends on the currently
       loaded symbolic library.
-    + Shared: retrieved as `cgshim.types.Shared`
+    + Shared: retrieved as `cgshim.typing.Shared`
       A type, compatible with pydantic, to indicate a shared value in
       annotations. Which type that corresponds to depends on the currently
       loaded symbolic library.
-    + Tensor: retrieved as `cgshim.types.Tensor`
+    + Tensor: retrieved as `cgshim.typing.Tensor`
       A type, compatible with pydantic, corresponding to the union of
       Array, Symbolic and Shared types. (In other words, allowing both Numpy
       and symbolic inputs.)
+    + RNG: retrieved as `cgshim.typing.RNG`
+      A type, compatible with pydantic, corresponding to eithen NumPy's
+      RandomState or Theano's shared_randomstreams.RandomStreams.
+      Supports import/export to json.
 
 Side-effects
 ------------
@@ -122,6 +126,45 @@ class TypeContainer(metaclass=utils.Singleton):
                     return Union[tuple(T[args] for T in types)]
             self.__validation_types[types] = ShimUnion()
         return self.__validation_types[types]
+
+    @property
+    def RNG(self):
+        if shim.config.library == 'numpy':
+            return mtb.typing.RandomState
+        else:
+            if 'TheanoRandomStreams' not in self.__validation_types:
+                class TheanoRandomStreams:
+                    # Theano shared random streams store a np.random.RandomState
+                    # instance as `gen_seedgen`, and use that to seed further
+                    # generators for each Op.
+                    # Thus as long as we store the state of `gen_seedgen`, we
+                    # will recreate subsequent ops with the same seeds.
+                    @classmethod
+                    def __get_validators__(cls):
+                        yield cls.validate
+                    @classmethod
+                    def validate(cls, value, field):
+                        # WARNING: I haven't thoroughly tested that state is fully restored
+                        if isinstance(value, shim.config.SymbolicRNGType):
+                            return value
+                        elif isinstance(value, shim.config.RandomStateType):
+                            random_state = value
+                        else:
+                            random_state = mtb.typing.RandomState.validate(value, field)
+                        random_streams = shim.config.RandomStreams()
+                        random_streams.gen_seedgen.set_state(random_state.get_state())
+                        return random_streams
+                    @classmethod
+                    def __modify_schema__(cls, field_schema):
+                        return mtb.typing.RandomState(field_schema)
+                    @classmethod
+                    def json_encoder(cls, v):
+                        return v.gen_seedgen.get_state()
+                mtb.typing.add_json_encoder(
+                    shim.config.SymbolicRNGType,
+                    TheanoRandomStreams.json_encoder)
+                self.__validation_types['TheanoRandomStreams'] = TheanoRandomStreams
+            return self.__validation_types['TheanoRandomStreams']
 
     def get_type(self, baseT, Tname, namedesc):
         """
