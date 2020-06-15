@@ -67,6 +67,8 @@ class GraphCache:
         List of modules which when changed, should invalidate a cache.
         If a module is imported as `import foo`, then pass it as
         `GraphCache([cachename], [classes], foo)`.
+        A module name can also be passed a string ``mname``, in which case
+        it is retrieved as ``sys.modules[mname]``.
     """
     on_cache_fail = 'warn'  # One of 'ignore', 'warn', 'raise'
     num_dep_caches = 5  # Keep caches for this many different dependency hashes
@@ -89,7 +91,7 @@ class GraphCache:
             for C in inspect.getmro(cls):
                 try:
                     src = inspect.getsource(C)
-                except TypeError:
+                except (OSError, TypeError):
                     # Can't get source for built-in types, or which are
                     # not defined in a source file (e.g. those defined in a
                     # REPL or a Jupyter notebook).
@@ -99,6 +101,10 @@ class GraphCache:
                     if getattr(builtins, C.__name__, None) is C:
                         # Built-in type, no worries
                         pass
+                    elif 'pydantic' in str(C):
+                        # Don't print warnings for pydantic types – they're
+                        # compiled with Cython.
+                        pass
                     else:
                         # Non built-in type, print warning
                         logger.warning(
@@ -106,7 +112,7 @@ class GraphCache:
                             "'{}', because it was not defined in a source "
                             "file. This can happen e.g. if you try to create "
                             "a cache depending on a class defined within a "
-                            "Jupyter notebook."
+                            "Jupyter notebook, or in a module compiled with Cython."
                             .format(cachename, C))
                 else:
                     # We got the class' source code, now hash it
@@ -114,10 +120,12 @@ class GraphCache:
         classhashes = tuple(classhashes)
         # Add the module dependencies
         if not isinstance(modules, (list, tuple)):
-            modules = (modules,)
+            modules = [modules]
+        modules = [sys.modules[m] if isinstance(m, str) else m
+                   for m in modules]
         modulehashes = tuple(utils.stabledigest(inspect.getsource(m))
                              for m in modules)
-        dependencyhash = utils.stabledigest(classhashes+modulehashes)
+        dependencyhash = utils.stablehexdigest(classhashes+modulehashes)
 
         # Open the cache (`shelve` will create it if needed) and check
         # if the dependency hash is new. If it is and the we already have
