@@ -333,7 +333,7 @@ def stableintdigest(o, byte_len=4):
     -------
     int
     """
-    return int.from_bytes(stablehash(o)[:byte_len], 'little')
+    return int.from_bytes(stablebytesdigest(o)[:byte_len], 'little')
 stabledigest = stableintdigest
 
 def _tobytes(o):
@@ -341,6 +341,9 @@ def _tobytes(o):
         return o
     elif isinstance(o, str):
         return o.encode('utf8')
+    elif isinstance(o, int):
+        l = ((o + (o<0)).bit_length() + 8) // 8  # Based on https://stackoverflow.com/a/54141411
+        return o.to_bytes(length=l, byteorder='little', signed=True)
     elif isinstance(o, Iterable):
         return b''.join(_tobytes(oi) for oi in o)
     else:
@@ -600,6 +603,13 @@ class Singleton(type):
     Although singletons are usually an anti-pattern, I've found them useful in
     a few cases, notably for a configuration class storing dynamic attributes
     in the form of properties.
+    Before using a singleton, consider these alternate, more
+    pythonic options:
+
+      - Enum
+        For defining unique constants
+      - SimpleNamespace
+        For defining configuration containers
 
     Example
     -------
@@ -631,7 +641,7 @@ def sentinel(name, repr_str=None):
     to a variable to signal a particular state.
     It is guaranteed not equal to any other value (in contrast to `None` or 0),
     and guaranteed to only ever have one instance (so can be used in tests like
-    `a is Sentinel`).
+    `a is sentinel_object`).
 
     Example
     -----

@@ -42,3 +42,12 @@ def test_sentinel():
     assert str(a) == "<Foo>"
     assert str(b) == "<Foo>"
     assert str(c) == "<Baz>"
+
+def test_hashing():
+    # WIP
+    assert len(_tobytes(-127)) == 1
+    assert len(_tobytes(127)) == 1
+    assert len(_tobytes(-128)) == 1
+    assert len(_tobytes(128)) == 2
+    assert len(_tobytes(-129)) == 2
+    assert len(_tobytes(129)) == 2
