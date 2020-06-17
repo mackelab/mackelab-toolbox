@@ -87,6 +87,8 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     tmpparams = []
     param_masks = []
     # Standardize the form of params
+    if isinstance(params, shim.config.GraphTypes):
+        params = [params]
     if isinstance(params, dict):
         # Convert dictionary to a list of (param, mask_descriptor) tuples
         params = list(params.items())
@@ -101,7 +103,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
               "or as a dictionary with a key matching each parameter. "
               "Provided learning rate: {}".format(lr))
     if shim.isscalar(lr):
-        lr = {p: lr for p in params}
+        lr = {p[0]: lr for p in params}
     elif not isinstance(lr, dict):
         raise ValueError(errmsg)
     _lr = lr.copy()
