@@ -467,7 +467,29 @@ class GraphCache:
 
 class CompiledGraphCache(GraphCache):
     def get(self, graph, updates=None, other_inputs=None, rng=None):
+        """
+        Parameters
+        ----------
+        ...
+        rng:
+            - None
+            - List|Tuple (length 0) : equivalent to None
+            - List|Tuple (length 1) : The RNG instance to use for the RNG
+                                      dependencies of the loaded graph
+            - List|Tuple (length >1): Not currently supported
+                                      Function will return None (no cache hit)
+        """
         if updates is None: updates = OrderedDict()
+        # Normalize RNG argument
+        if isinstance(rng, (list, tuple)):
+            if len(rng) == 0:
+                rng = None
+            elif len(rng) == 1:
+                rng = rng[0]
+            else:
+                warn("Caching with more than one RNG instance is not "
+                     "currently supported.")
+                return None  # No cache hit. TODO?: If no RNG is needed, we could continue
         with shelve.open(self.cachename) as cache:
             cache = cache[cache['dependencyhashes'][-1]]
                 # Latest dependency hash is always the current one
@@ -534,6 +556,16 @@ class CompiledGraphCache(GraphCache):
             updates = OrderedDict()
         elif updates is None:
             updates = OrderedDict()
+        # Normalize RNG argument
+        if isinstance(rng, (list, tuple)):
+            if len(rng) == 0:
+                rng = None
+            elif len(rng) == 1:
+                rng = rng[0]
+            else:
+                warn("Caching with more than one RNG instance is not "
+                     "currently supported.")
+                return None  # No cache hit. TODO?: If no RNG is needed, we could continue
 
         # Check that argument types are correct
         if not isinstance(updates, OrderedDict):
