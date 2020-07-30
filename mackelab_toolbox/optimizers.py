@@ -68,6 +68,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     """
     # The MIT License (MIT)
     # Copyright (c) 2015 Alec Radford
+    # Copyright (c) 2018-2020 Alexandre René
     # Permission is hereby granted, free of charge, to any person obtaining a copy
     # of this software and associated documentation files (the "Software"), to deal
     # in the Software without restriction, including without limitation the rights
@@ -93,8 +94,12 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
         # Convert dictionary to a list of (param, mask_descriptor) tuples
         params = list(params.items())
     else:
-        # Params have no masks: set it to None for all parameters
-        params = [(p, None) for p in params]
+        for p in params:
+            if isinstance(p, tuple):
+                tmpparams.append(p)
+            else:
+                # Param has no mask: set it to None
+                tmpparams.append((p, None))
     # `params` is a list of size 2 tuples
     assert(isinstance(p, tuple) and len(p) == 2 for p in params)
 
