@@ -306,7 +306,7 @@ def _test_pydantic_shim_rng(cgshim):
     shim.load(cghim)
     mtbT.freeze_types()
     class RandomModel(BaseModel):
-        rng: cgshim.typing.RNG
+        rng: mtbT.AnyRNG
         class Config:
             json_encoders = mtbT.json_encoders
 

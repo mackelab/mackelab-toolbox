@@ -5,6 +5,7 @@ For almost all cases, you should not import this module directly but use
 """
 
 import sys
+from textwrap import dedent
 import builtins
 import importlib
 import numbers
@@ -15,15 +16,28 @@ import mackelab_toolbox.utils as utils
 import typing
 from typing import Union, Type
 from collections import namedtuple
+from pydantic.dataclasses import dataclass
 
 import logging
 logger = logging.getLogger(__file__)
 
 ############
-# Postponed class instantiation
+# Postponed class and module
 
+postponed_modules = set()
 postponed_classes = {}
 types_frozen = False
+
+@dataclass(frozen=True)
+class PostponedModule:
+    """
+    Both `source_module` and `target_module` must be python modules.
+    When `freeze_types` is called, the list of attributes `attrs` is
+    retrieved from `source_module` and injected into `targete_module`.
+    """
+    source_module: str
+    target_module: str
+    attrs: tuple
 
 def PostponedClass(clsname: str, source_module: str, target_module: str):
     """
@@ -79,12 +93,12 @@ def PostponedClass(clsname: str, source_module: str, target_module: str):
     and from here on the class can be used. However dynamic types can no longer
     be modified.
     """
-    msg = \
-f"""
-This is a placeholder for the class {clsname}, which depends on the
-dynamic types defined in `mackelab_toolbox.typing`. Before using the
-class you need to call `mackelab_toolbox.typing.freeze_types()`.
-"""
+    msg = dedent(f"""
+        This is a placeholder for the class {clsname}, which depends on
+        dynamic types (i.e. types which depend on runtime variables, or "
+        "whether another library is loaded). Before using the
+        class you need to call `mackelab_toolbox.typing.freeze_types()`.
+        """)
     class PostponedClass:
         # __slots__ = ('source_module', 'target_module', 'target_name')
         __slots__ = ()
@@ -121,19 +135,39 @@ def freeze_types():
     if types_frozen:
         logger.error("`mackelab_toolbox.typing.freeze_types()` was called "
                      "more than once.")
-    postponed_modules = set(C.source_module for C in postponed_classes.values())
-    too_soon = [m for m in postponed_modules if m in sys.modules]
-    if len(too_soon) > 0:
+    cls_postponed_modules = set(C.source_module for C in postponed_classes.values())
+    mod_postponed_modules = set(m.source_module for m in postponed_modules)
+    all_postponed_modules = mod_postponed_modules | cls_postponed_modules
+    loaded_postponed_modules = [m for m in all_postponed_modules if m in sys.modules]
+    if len(loaded_postponed_modules) > 0:
         raise RuntimeError("The following modules contain dynamic types and "
                            "must not be loaded before those have been frozen: "
-                           f"\n{too_soon}\n There is no need to import these "
-                           "modules: it is done automatically by "
-                           "`mtb.typing.freeze_types()`.")
-    for m in postponed_modules:
+                           f"\n{loaded_postponed_modules}\n There is no need "
+                           "to import these modules: it is done automatically "
+                           "witin `mtb.typing.freeze_types()`.")
+    for m in all_postponed_modules:
         importlib.import_module(m)
     for C in postponed_classes.values():
         newC = getattr(sys.modules[C.source_module], C.target_name)
         setattr(sys.modules[C.target_module], C.target_name, newC)
+    for mdesc in postponed_modules:
+        source = sys.modules[mdesc.source_module]
+        target = sys.modules[mdesc.target_module]
+        for attr in mdesc.attrs:
+            if hasattr(target, attr):
+                raise RuntimeError(
+                    f"Attempted to import the postponed attribute '{attr}' "
+                    f"from module '{mdesc.source_module}' to module "
+                    f"'{mdesc.target_module}', but it is already present in "
+                    f"{mdesc.target_module}.")
+            elif hasattr(target, attr):
+                raise RuntimeError(
+                    f"Attempted to import the postponed attribute '{attr}' "
+                    f"from module '{mdesc.source_module}' to module "
+                    f"'{mdesc.target_module}', but it is not present in "
+                    f"{mdesc.source_module}.")
+            else:
+                setattr(target, attr, getattr(source, attr))
     types_frozen = True
 
 ############
@@ -263,6 +297,9 @@ class TypeContainer(metaclass=utils.Singleton):
     @staticmethod
     def PostponedClass(*args, **kwargs):
         return PostponedClass(*args, **kwargs)
+    @staticmethod
+    def add_postponed_module(*args, **kwargs):
+        postponed_modules.add(PostponedModule(*args, **kwargs))
     @staticmethod
     def freeze_types():
         if 'pint' in sys.modules:
