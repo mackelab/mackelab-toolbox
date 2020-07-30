@@ -1,5 +1,6 @@
 from theano import function, config, shared, tensor
 import numpy
+from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class GraphCache:
         List of modules which when changed, should invalidate a cache.
         If a module is imported as `import foo`, then pass it as
         `GraphCache([cachename], [classes], foo)`.
-        A module name can also be passed a string ``mname``, in which case
+        A module name can also be passed as a string ``mname``, in which case
         it is retrieved as ``sys.modules[mname]``.
     """
     on_cache_fail = 'warn'  # One of 'ignore', 'warn', 'raise'
@@ -79,6 +80,7 @@ class GraphCache:
         # Append the version info to cachename. Loading from the cache
         # will fail if versions differ (e.g. when running on 2 machines)
         self.cachename = cachename + ''.join([str(x) for x in sys.version_info])
+        Path(self.cachename).parent.mkdir(parents=True, exist_ok=True)
 
         if type(self) not in Classes:
             Classes += (type(self),)
