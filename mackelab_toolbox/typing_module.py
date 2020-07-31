@@ -18,6 +18,8 @@ from typing import Union, Type
 from collections import namedtuple
 from pydantic.dataclasses import dataclass
 
+from .units import UnitlessT
+
 import logging
 logger = logging.getLogger(__file__)
 
@@ -311,6 +313,7 @@ class TypeContainer(metaclass=utils.Singleton):
     def __init__(self):
         self._AllNumericalTypes = TypeSet([int, float])
         self._AllScalarTypes    = TypeSet([int, float])
+        self._AllUnitTypes      = TypeSet([UnitlessT])
         self._NotCastableToArrayTypes = TypeSet()
         self.type_map = {}
         self._json_encoders = {}
@@ -323,6 +326,10 @@ class TypeContainer(metaclass=utils.Singleton):
         return Union[tuple(T if isinstance(T, type) else T()
                            for T in self._AllScalarTypes)]
     @property
+    def AnyUnitType(self):
+        return Union[tuple(T if isinstance(T, type) else T()
+                           for T in self._AllUnitTypes)]
+    @property
     def NotCastableToArray(self):
         return tuple(T if isinstance(T, type) else T()
                      for T in self._NotCastableToArrayTypes)
@@ -333,6 +340,8 @@ class TypeContainer(metaclass=utils.Singleton):
         self._AllScalarTypes.add(type)
     def add_nonarray_type(self, type):
         self._NotCastableToArrayTypes.add(type)
+    def add_unit_type(self, type):
+        self._AllUnitTypes.add(type)
 
     ####################
     # Managing JSON encoders
@@ -392,6 +401,7 @@ class TypeContainer(metaclass=utils.Singleton):
         import pint
         typing.add_json_encoder(pint.quantity.Quantity, PintValue.json_encoder)
         typing.add_json_encoder(pint.unit.Unit, PintUnit.json_encoder)
+        typing.add_unit_type(PintUnit)
 
     @staticmethod
     def load_quantities():
@@ -403,6 +413,7 @@ class TypeContainer(metaclass=utils.Singleton):
         typing.add_json_encoder(quantities.dimensionality.Dimensionality,
                                 QuantitiesUnit.json_encoder,
                                 priority=5)
+        typing.add_unit_type(QuantitiesUnit)
 
 typing = TypeContainer()
 
@@ -558,23 +569,78 @@ typing.Sequence = Union[Range, Sequence]
 ################
 # Recognizing unit types
 
-class PintValue:
-    """At present only used to define JSON encoder/decoder."""
+class SimplePydanticType:
+    """
+    Base class reducing boilerplate when defining Pydantic-compatible types,
+    with better symmetry of the json encoder+decoder.
+
+    Subclass should define three methods:
+
+    >>> @staticmethod(v):
+    >>>   return isinstance(v, ...)
+    >>> @staticmethod
+    >>> def json_encoder(v):
+    >>>   return ...
+    >>> @staticmethod
+    >>> def json_decoder(v):
+    >>>   return ...
+
+    They must all be decorated by either @staticmethod or @classmethod.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if cls.is_target_type(v):
+            return v
+        else:
+            return cls.json_decoder(v)
+
+class PintValue(SimplePydanticType):
+    """
+    Before parsing a serialized PintValue, one needs to set the Pint unit
+    registry. There should only be one unit registry within a project, so this
+    is set as a *class* variable of `PintValue`.
+    >>> import pint
+    >>> ureg = pint.UnitRegistry()
+    >>> from mackelab_toolbox.typing import PintValue
+    >>> PintValue.ureg = ureg
+    """
+    # TODO: Type check assignment to ureg
+    ureg: "pint.registry.UnitRegistry" = None
+    @staticmethod
+    def is_target_type(v):
+        pint = sys.modules.get('pint', None)
+        if pint is None:
+            raise ValueError("'pint' module is not loaded.")
+        return isinstance(v, pint.Quantity)
     @staticmethod
     def json_encoder(v):
         return ("PintValue", v.to_tuple())
-    @staticmethod
-    def json_decoder(v, ureg: "pint.registry.UnitRegistry"):
+    @classmethod
+    def json_decoder(cls, v):
         if pint is None:
             raise ValueError("'pint' module is not loaded.")
-        if isinstance(v, tuple) and len(v) > 0 and v[0] == "PintValue":
+        elif cls.ureg is None:
+            raise RuntimeError(
+                "The Pint unit registry is not set. Do this by assigning to "
+                "`PintValue.ureg` before attempting to parse a Pint value.")
+        if isinstance(v, ureg.Quantity):
+            return v
+        elif isinstance(v, tuple) and len(v) > 0 and v[0] == "PintValue":
             return ureg.Quantity.from_tuple(v[1])
         else:
-            raise ("Input is incompatible with PintValue.json_decoder. "
+            raise ValueError("Input is incompatible with PintValue.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class PintUnit:
-    """At present only used to define JSON encoder/decoder."""
+class PintUnit(SimplePydanticType):
+    @staticmethod
+    def is_target_type(v):
+        pint = sys.modules.get('pint', None)
+        if pint is None:
+            raise ValueError("'pint' module is not loaded.")
+        return isinstance(v, pint.Unit)
     @staticmethod
     def json_encoder(v):
         return ("PintUnit", (str(v),))
@@ -583,14 +649,19 @@ class PintUnit:
         pint = sys.modules.get('pint', None)
         if pint is None:
             raise ValueError("'pint' module is not loaded.")
-        if isinstance(v, tuple) and len(v) > 0 and v[0] == "PintUnit":
+        if isinstance(v, (tuple, list)) and len(v) > 0 and v[0] == "PintUnit":
             return pint.unit.Unit(v[1][0])
         else:
-            raise ("Input is incompatible with PintUnit.json_decoder. "
+            raise ValueError("Input is incompatible with PintUnit.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class QuantitiesValue:
-    """At present only used to define JSON encoder."""
+class QuantitiesValue(SimplePydanticType):
+    @staticmethod
+    def is_target_type(v):
+        pq = sys.modules.get('quantities', None)
+        if pq is None:
+            raise ValueError("'Quantities' module is not loaded.")
+        return isinstance(v, pq.Quantity)
     @staticmethod
     def json_encoder(v):
         return ("QuantitiesValue", (v.magnitude, str(v.dimensionality)))
@@ -598,16 +669,21 @@ class QuantitiesValue:
     def json_decoder(v):
         pq = sys.modules.get('quantities', None)
         if pq is None:
-            raise ValueError("'Quanties' module is not loaded.")
+            raise ValueError("'Quantities' module is not loaded.")
         elif (isinstance(v, tuple)
               and len(v) > 0 and v[0] == "QuantitiesValue"):
             return pq.Quantity(v[1][0], units=v[1][1])
         else:
-            raise ("Input is incompatible with QuantitiesValue.json_decoder. "
+            raise ValueError("Input is incompatible with QuantitiesValue.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class QuantitiesUnit:
-    """At present only used to define JSON encoder/decoder."""
+class QuantitiesUnit(SimplePydanticType):
+    @staticmethod
+    def is_target_type(v):
+        pq = sys.modules.get('quantities', None)
+        if pq is None:
+            raise ValueError("'Quantities' module is not loaded.")
+        return isinstance(v, pq.dimensionality.Dimensionality)
     @staticmethod
     def json_encoder(v):
         return ("QuantitiesUnit", (str(v),))
@@ -615,18 +691,18 @@ class QuantitiesUnit:
     def json_decoder(v):
         pq = sys.modules.get('quantities', None)
         if pq is None:
-            raise ValueError("'Quanties' module is not loaded.")
+            raise ValueError("'Quantities' module is not loaded.")
         if isinstance(v, tuple) and len(v) > 0 and v[0] == "QuantitiesUnit":
-            return pq.validate_dimensionality(v[1][0])
+            return pq.quantity.validate_dimensionality(v[1][0])
         else:
-            raise ("Input is incompatible with QuantitiesUnit.json_decoder. "
+            raise ValueError("Input is incompatible with QuantitiesUnit.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
 typing.PintValue = PintValue
 typing.PintUnit  = PintUnit
 typing.QuantitiesValue = QuantitiesValue
 typing.QuantitiesUnit = QuantitiesUnit
-# JSON encoders added typing.load_pint/load_quantities
+# JSON encoders added by typing.load_pint/load_quantities
 
 ################
 # Types based on numbers module
@@ -798,10 +874,10 @@ typing.add_json_encoder(np.generic, _NPTypeType.json_encoder)
 class _ArrayType(np.ndarray):
     @classmethod
     def __get_validators__(cls):
-        yield cls.validate_type
+        yield cls.validate
 
     @classmethod
-    def validate_type(cls, value, field):
+    def validate(cls, value, field):
         if isinstance(value, typing.NotCastableToArray):
             raise TypeError(f"Values of type {type(value)} cannot be casted "
                              "to a numpy array.")

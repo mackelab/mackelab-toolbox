@@ -20,9 +20,18 @@ class UnitlessT(int, metaclass=Singleton):
     checks are always valid. It is important to use ``is`` and not ``==``
     because a lot of things can be equal to 1.
     """
-    pass
+    # Pydantic-compatible validators
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        # Raising an error signals to calling code e.g. a Pydantic parser,
+        # to know it should try casting to another type.
+        if v is not None and v != unitless:
+            raise ValueError
+        return cls(v)
 unitless = UnitlessT(1)
-
 
 def detect_unit_library(value: Any):
     """
