@@ -175,7 +175,20 @@ def freeze_types():
 ############
 # Type Container
 
-class TypeSet(set):
+class TypeSet(dict):
+    """
+    Effectively an order-preserving set, with input checking and flattening.
+    Note that the iterator returns elements in the reverse order in which they
+    were added, so that later additions have precedence for type resolution.
+    """
+    # Although this acts as a set (no duplicate elements), we subclass dict
+    # because preserving order is important (Pydantic attempts coercions in order)
+    # Dict values are all assigned 'None' and discarded
+    def __init__(self, iterable=()):
+        for T in iterable:
+            self.check_input(T)
+            self[T] = None
+
     def check_input(self, type):
         if isinstance(type, Iterable):
             for T in type:
@@ -194,7 +207,7 @@ class TypeSet(set):
 
     def add(self, type):
         """
-        Makes two changes to set.add:
+        Makes two changes compared to set.add:
           - Flattens iterable inputs
           - Ensures inputs are types (or arg-less callables returning types)
         """
@@ -203,11 +216,14 @@ class TypeSet(set):
                 self.add(T)
         else:
             self.check_input(type)
-            super().add(type)
+            self[type] = None
 
     def update(self, types):
         self.check_input(types)
-        super().update(types)
+        super().update({T:None for T in types})
+
+    def __iter__(self):
+        return iter(list(self.keys())[::-1])
 
 JsonEncoder = namedtuple("JsonEncoder", ["encoder", "priority"])
 
@@ -568,36 +584,36 @@ typing.Sequence = Union[Range, Sequence]
 
 ################
 # Recognizing unit types
+#
+# class SimplePydanticType:
+#     """
+#     Base class reducing boilerplate when defining Pydantic-compatible types,
+#     with better symmetry of the json encoder+decoder.
+#
+#     Subclass should define three methods:
+#
+#     >>> @staticmethod(v):
+#     >>>   return isinstance(v, ...)
+#     >>> @staticmethod
+#     >>> def json_encoder(v):
+#     >>>   return ...
+#     >>> @staticmethod
+#     >>> def json_decoder(v):
+#     >>>   return ...
+#
+#     They must all be decorated by either @staticmethod or @classmethod.
+#     """
+#     @classmethod
+#     def __get_validators__(cls):
+#         yield cls.validate
+#     @classmethod
+#     def validate(cls, v):
+#         if cls.is_target_type(v):
+#             return v
+#         else:
+#             return cls.json_decoder(v)
 
-class SimplePydanticType:
-    """
-    Base class reducing boilerplate when defining Pydantic-compatible types,
-    with better symmetry of the json encoder+decoder.
-
-    Subclass should define three methods:
-
-    >>> @staticmethod(v):
-    >>>   return isinstance(v, ...)
-    >>> @staticmethod
-    >>> def json_encoder(v):
-    >>>   return ...
-    >>> @staticmethod
-    >>> def json_decoder(v):
-    >>>   return ...
-
-    They must all be decorated by either @staticmethod or @classmethod.
-    """
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    @classmethod
-    def validate(cls, v):
-        if cls.is_target_type(v):
-            return v
-        else:
-            return cls.json_decoder(v)
-
-class PintValue(SimplePydanticType):
+class PintValue:
     """
     Before parsing a serialized PintValue, one needs to set the Pint unit
     registry. There should only be one unit registry within a project, so this
@@ -607,101 +623,195 @@ class PintValue(SimplePydanticType):
     >>> from mackelab_toolbox.typing import PintValue
     >>> PintValue.ureg = ureg
     """
-    # TODO: Type check assignment to ureg
-    ureg: "pint.registry.UnitRegistry" = None
+    @classmethod
+    def __get_validators__(cls):
+        # partial doesn't work because Pydantic expects a particular signature
+        yield from (lambda v: cls.json_decoder(v, noerror=True),
+                    cls.validate_value)
+
     @staticmethod
-    def is_target_type(v):
-        pint = sys.modules.get('pint', None)
-        if pint is None:
-            raise ValueError("'pint' module is not loaded.")
-        return isinstance(v, pint.Quantity)
+    def validate_value(v):
+        if isinstance(v, PintUnit.pint().Quantity):
+            return v
+        raise TypeError
+
     @staticmethod
     def json_encoder(v):
         return ("PintValue", v.to_tuple())
     @classmethod
-    def json_decoder(cls, v):
-        if pint is None:
-            raise ValueError("'pint' module is not loaded.")
-        elif cls.ureg is None:
+    def json_decoder(cls, v, noerror=False):
+        pint = PintUnit.pint()
+        if PintUnit.ureg is None:
             raise RuntimeError(
                 "The Pint unit registry is not set. Do this by assigning to "
-                "`PintValue.ureg` before attempting to parse a Pint value.")
-        if isinstance(v, ureg.Quantity):
+                "`PintUnit.ureg` before attempting to parse a Pint value.")
+        if isinstance(v, (tuple,list)) and len(v) > 0 and v[0] == "PintValue":
+            return PintUnit.ureg.Quantity.from_tuple(v[1])
+        elif noerror:
+            # Let another validator try to parse the value
             return v
-        elif isinstance(v, tuple) and len(v) > 0 and v[0] == "PintValue":
-            return ureg.Quantity.from_tuple(v[1])
         else:
             raise ValueError("Input is incompatible with PintValue.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class PintUnit(SimplePydanticType):
+class PintUnit:
+    # TODO: Type check assignment to ureg
+    # TODO?: ureg, pint as (meta)class properties ?
+    ureg: "pint.registry.UnitRegistry" = None
     @staticmethod
-    def is_target_type(v):
+    def pint():
         pint = sys.modules.get('pint', None)
         if pint is None:
             raise ValueError("'pint' module is not loaded.")
-        return isinstance(v, pint.Unit)
+        return pint
+
+    @classmethod
+    def __get_validators__(cls):
+        yield from (lambda v: cls.json_decoder(v, noerror=True),
+                    lambda v: cls.validate_value(v, noerror=True),
+                    cls.validate_unit)
+
+    @staticmethod
+    def validate_unit(v):
+        if isinstance(v, PintUnit.pint().Unit):
+            return v
+        else:
+            raise TypeError
+    @staticmethod
+    def validate_value(v, noerror=False):
+        if isinstance(v, PintUnit.pint().Quantity):
+            if v.magnitude != 1:
+                raise ValueError("Quantities can only be converted to units "
+                                 "if they have unit magnitude.")
+            return v.units
+        elif noerror:
+            # Let another validator try to parse the value
+            return v
+        else:
+            raise TypeError
+
     @staticmethod
     def json_encoder(v):
         return ("PintUnit", (str(v),))
-    @staticmethod
-    def json_decoder(v):
-        pint = sys.modules.get('pint', None)
-        if pint is None:
-            raise ValueError("'pint' module is not loaded.")
+    @classmethod
+    def json_decoder(cls, v, noerror=False):
+        pint = PintUnit.pint()
+        if PintUnit.ureg is None:
+            raise RuntimeError(
+                "The Pint unit registry is not set. Do this by assigning to "
+                "`PintValue.ureg` before attempting to parse a Pint value.")
         if isinstance(v, (tuple, list)) and len(v) > 0 and v[0] == "PintUnit":
-            return pint.unit.Unit(v[1][0])
+            return PintUnit.ureg.Unit(v[1][0])
+        elif noerror:
+            # Let another validator try to parse the value
+            return v
         else:
             raise ValueError("Input is incompatible with PintUnit.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class QuantitiesValue(SimplePydanticType):
-    @staticmethod
-    def is_target_type(v):
-        pq = sys.modules.get('quantities', None)
-        if pq is None:
-            raise ValueError("'Quantities' module is not loaded.")
-        return isinstance(v, pq.Quantity)
+class QuantitiesValue():
+    @classmethod
+    def __get_validators__(cls):
+        yield from (cls.json_noerror,  # For whatever reason, lambda doesn't work
+                    cls.validate_value)
+
+    @classmethod
+    def json_noerror(cls, v):
+        return cls.json_decoder(v, noerror=True)
+
+    @classmethod
+    def validate_value(cls, v):
+        pq = QuantitiesUnit.pq()
+        if isinstance(v, pq.Quantity):
+            return v
+        raise TypeError
+
     @staticmethod
     def json_encoder(v):
         return ("QuantitiesValue", (v.magnitude, str(v.dimensionality)))
     @staticmethod
-    def json_decoder(v):
+    def json_decoder(v, noerror=False):
         pq = sys.modules.get('quantities', None)
         if pq is None:
             raise ValueError("'Quantities' module is not loaded.")
-        elif (isinstance(v, tuple)
+        elif (isinstance(v, (tuple,list))
               and len(v) > 0 and v[0] == "QuantitiesValue"):
             return pq.Quantity(v[1][0], units=v[1][1])
+        elif noerror:
+            # Let another validator try to parse the value
+            return v
         else:
             raise ValueError("Input is incompatible with QuantitiesValue.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
-class QuantitiesUnit(SimplePydanticType):
+class QuantitiesUnit(QuantitiesValue):
+    """
+    Exactly the same as QuantitiesValue, except that we enforce the magnitude
+    to be 1. In contrast to Pint, Quantities doesn't seem to have a unit type.
+    """
     @staticmethod
-    def is_target_type(v):
+    def pq():
         pq = sys.modules.get('quantities', None)
         if pq is None:
             raise ValueError("'Quantities' module is not loaded.")
-        return isinstance(v, pq.dimensionality.Dimensionality)
+        return pq
+
+    @classmethod
+    def validate_value(cls, v, field):
+        pq = QuantitiesUnit.pq()
+        if isinstance(v, pq.Quantity):
+            if v.magnitude != 1:
+                raise ValueError(f"Field {field.name}: Units must have "
+                                 "magnitude of one.")
+            return v
+        raise TypeError
+
+class QuantitiesDimension():
+
+    @classmethod
+    def __get_validators__(cls):
+        yield from (lambda v: cls.json_decoder(v, noerror=True),
+                    lambda v: cls.validate_value(v, noerror=True),
+                    cls.validate_dim)
+
+    @staticmethod
+    def validate_dim(v):
+        pq = QuantitiesUnit.pq()
+        if isinstance(v, pq.dimensionality.Dimensionality):
+            return v
+        raise TypeError
+    @staticmethod
+    def validate_value(v, noerror=False):
+        pq = QuantitiesUnit.pq()
+        if isinstance(v, pq.Quantity):
+            return v.dimensionality
+        elif noerror:
+            return v
+        else:
+            raise TypeError
+
     @staticmethod
     def json_encoder(v):
-        return ("QuantitiesUnit", (str(v),))
+        return ("QuantitiesDimension", (str(v),))
     @staticmethod
-    def json_decoder(v):
+    def json_decoder(v, noerror=False):
         pq = sys.modules.get('quantities', None)
         if pq is None:
             raise ValueError("'Quantities' module is not loaded.")
-        if isinstance(v, tuple) and len(v) > 0 and v[0] == "QuantitiesUnit":
+        if isinstance(v, (tuple,list)) and len(v) > 0 and v[0] == "QuantitiesDimension":
             return pq.quantity.validate_dimensionality(v[1][0])
+        elif noerror:
+            # Let another validator try to parse
+            return v
         else:
-            raise ValueError("Input is incompatible with QuantitiesUnit.json_decoder. "
+            raise ValueError("Input is incompatible with QuantitiesDimension.json_decoder. "
                    f"Input value: {v} (type: {type(v)})")
 
 typing.PintValue = PintValue
 typing.PintUnit  = PintUnit
 typing.QuantitiesValue = QuantitiesValue
 typing.QuantitiesUnit = QuantitiesUnit
+typing.QuantitiesDimension = QuantitiesDimension
 # JSON encoders added by typing.load_pint/load_quantities
 
 ################
@@ -931,12 +1041,18 @@ class _ArrayMeta(type):
             T = args
             ndim = None
             extraargs = []
+        if isinstance(T, np.dtype):
+            T = T.type
         if (not isinstance(T, type) or len(extraargs) > 0
             or not isinstance(ndim, (int, type(None)))):
+            # if isinstance(args, (tuple, list)):
+            #     argstr = ', '.join((str(a) for a in args))
+            # else:
+            #     argstr = str(args)
             raise TypeError(
                 "`Array` must be specified as either `Array[T]`"
                 "or `Array[T, n], where `T` is a type and `n` is an int. "
-                f"(received: {', '.join((str(a) for a in args))}]).")
+                f"(received: {args}]).")
         dtype=typing.convert_dtype(T)
         specifier = str(dtype)
         if ndim is not None:
