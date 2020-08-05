@@ -75,8 +75,12 @@ class GraphCache:
     num_dep_caches = 5  # Keep caches for this many different dependency hashes
                         # Least recently used dependencies are dropped when
                         # their number exceeds `num_dep_caches`
+    activated = True    # Set to False to deactivate caching
 
     def __init__(self, cachename, *Classes, modules=()):
+        if not self.activated:
+            return
+
         # Append the version info to cachename. Loading from the cache
         # will fail if versions differ (e.g. when running on 2 machines)
         self.cachename = cachename + ''.join([str(x) for x in sys.version_info])
@@ -159,6 +163,8 @@ class GraphCache:
             cache[dependencyhash] = {}
 
     def __str__(self):
+        if not self.activated:
+            return "Deactivated cache"
         with shelve.open(self.cachename) as cache:
             d = dict(cache)
         return str(d)
@@ -252,7 +258,17 @@ class GraphCache:
             loaded from cache.
         rng: random stream object (shim.RandomStreams or symbolic equivalent)
             If graphs depend on random numbers, the source RNG must be provided.
+
+        Returns
+        -------
+        On cache hit:
+            (graphs: list, updates: dict)
+        On cache miss:
+            (None, None)
         """
+        if not self.activated:
+            return None, None
+
         graphs = [graph] if isinstance(graph, shim.cf.GraphTypes) else graph
         if updates is None: updates = OrderedDict()
         all_graphs = (graphs + list(updates.keys())
@@ -357,8 +373,25 @@ class GraphCache:
         or as a tuple.
         :param:val_graph itself may be a single symbolic expression, or a
         list or tuple of such expressions.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        AssertionError:
+            If arguments are inconsistent (TODO: list consistency requirements)
+        TypeError:
+            If arguments are invalid.
+        CachingError:
+            If caching fails, and self.on_cache_fail == 'raise'.
         """
+        if not self.activated:
+            return
+
         # Check that argument types are correct
+        # FIXME: Why do we only check key_graph when val_graph is None ?
         if val_graph is None:
             # key, val are either packaged as tuples, or consist of only
             # a graph.
@@ -480,7 +513,17 @@ class CompiledGraphCache(GraphCache):
                                       dependencies of the loaded graph
             - List|Tuple (length >1): Not currently supported
                                       Function will return None (no cache hit)
+
+        Returns
+        -------
+        On cache hit:
+            Callable
+        On cache miss:
+            None
         """
+        if not self.activated:
+            return None
+
         if updates is None: updates = OrderedDict()
         # Normalize RNG argument
         if isinstance(rng, (list, tuple)):
@@ -553,6 +596,9 @@ class CompiledGraphCache(GraphCache):
         """
         :param:updates may be omitted: `set(graph, compiled_graph)`
         """
+        if not self.activated:
+            return
+
         if isinstance(updates, shim.cf.CompiledType):
             compiled_graph = updates
             updates = OrderedDict()
