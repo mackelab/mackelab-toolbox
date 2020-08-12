@@ -10,6 +10,7 @@ TODO: Use npy by default on numpy arrays
 import sys
 import os
 import os.path
+from warnings import warn
 import builtins
 from pathlib import Path
 import io
@@ -122,7 +123,7 @@ def get_free_file(path, bytes=True, max_files=100, force_suffix=False, start_suf
         Path name. Can be absolute or relative to the current directory.
     bytes: bool (Default: True)
         (Optional) Specify whether to open the file for byte (True) or plain
-text (False) output. Default is to open for byte output, which
+        text (False) output. Default is to open for byte output, which
         is suitable for passing to `numpy.save`.
     max_files: int
         (Optional) Maximum allowed number of files with the same name. If this
@@ -146,7 +147,9 @@ text (False) output. Default is to open for byte output, which
 
     # Get a full path
     # TODO: is cwd always what we want here ?
-    if path[0] == '/':
+    if isinstance(path, Path):
+        pathname = str(path.absolute())
+    elif path[0] == '/':
         #path is already a full path name
         pathname = path
     else:
@@ -223,10 +226,10 @@ def save(file, data, format=None, overwrite=False):
             Objects using this format should implement the `from_repr` method.
           - 'dill' A dill pickle.
             Output file has the extension 'dill'
-        Formats can also be combined as e.g. 'npr+dill'. :fun:save()
+        Formats can also be combined as e.g. 'npr+dill'.
     overwrite: bool
-        If True, allow overwriting previously saved files. Default is false, in which case
-        a number is appended to the filename to make it unique.
+        If True, allow overwriting previously saved files. Default is false, in
+        which case a number is appended to the filename to make it unique.
 
     Returns
     -------
@@ -537,7 +540,14 @@ def find_file(file, format=None):
         if isinstance(format, str):
             formatext = defined_formats.get(format, None).ext
         elif isinstance(format, type):
-            formatext = defined_formats.get(find_registered_typename(format), None).ext
+            def_format = defined_formats.get(find_registered_typename(format), None)
+            if def_format is not None:
+                formatext = def_format.ext
+            else:
+                warn("The type {} does not correspond to one of the types "
+                     "registered with `mackelab_toolbox.iotools.register_datatype`"
+                     .format(format))
+                formatext = None
         else:
             formatext = None
 
@@ -662,7 +672,10 @@ def load(file, types=None, load_function=None, format=None, input_format=None):
     if format is None:
         format = get_format_from_ext(ext[1:])
     if format not in defined_formats:
-        raise ValueError("Unrecognized format `{}`.".format(format))
+        warn("mackelab_toolbox.iotools.load: Unrecognized format `{}`. "
+             "Ignoring `format` argument and using file extension instead."
+             .format(format))
+        format = get_format_from_ext(ext[1:])
 
     if format not in ('npr', 'repr', 'dill'):
         # TODO: Define following load functions separately, add them to

@@ -721,8 +721,7 @@ class class_or_instance_method:
     is called on the class) or the instance (when method is called on an
     instance). Adapted from https://stackoverflow.com/a/48809254.
 
-    .. Note:: This is clever, but it's likely to really hinder maintainability
-    of your code.
+    .. Note:: This is clever, but it may hinder maintainability of your code.
     """
     def __init__(self, method, instance=None, owner=None):
         self.method = method
