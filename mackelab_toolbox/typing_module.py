@@ -470,6 +470,11 @@ typing = TypeContainer()
 # Custom Types for annotations / pydantic
 
 ####
+# Complex values
+
+typing.add_json_encoder(complex, lambda z: str(z))
+
+####
 # Range type
 
 class Range:
@@ -757,7 +762,9 @@ class QuantitiesUnit(QuantitiesValue):
         return pq
 
     @classmethod
-    def validate_value(cls, v, field):
+    def validate_value(cls, v, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         pq = QuantitiesUnit.pq()
         if isinstance(v, pq.Quantity):
             if v.magnitude != 1:
@@ -825,7 +832,9 @@ class Number(numbers.Number):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         if not isinstance(value, numbers.Number):
             raise TypeError(f"Field {field.name} expects a number. "
                             f"It received {value} [type: {type(value)}].")
@@ -845,7 +854,9 @@ class Integral(numbers.Integral):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         if not isinstance(value, numbers.Integral):
             raise TypeError(f"Field {field.name} expects an integer. "
                             f"It received {value} [type: {type(value)}].")
@@ -865,7 +876,9 @@ class Real(numbers.Real):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         if not isinstance(value, numbers.Real):
             raise TypeError(f"Field {field.name} expects a real number. "
                             f"It received {value} [type: {type(value)}].")
@@ -906,7 +919,9 @@ class _NPTypeType(np.generic):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         if isinstance(value, np.ndarray):
             # Allow scalar arrays
             if value.ndim==0:
@@ -987,7 +1002,9 @@ class _ArrayType(np.ndarray):
         yield cls.validate
 
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         if isinstance(value, typing.NotCastableToArray):
             raise TypeError(f"Values of type {type(value)} cannot be casted "
                              "to a numpy array.")
@@ -1002,8 +1019,8 @@ class _ArrayType(np.ndarray):
             elif np.can_cast(value, cls.dtype):
                 result = value.astype(cls.dtype)
             else:
-                raise TypeError(f"Cannot safely cast '{field.name}' type  "
-                                f"({value.dtype}) to type {cls.dtype}.")
+                raise TypeError(f"Cannot safely cast '{field.name}' (type  "
+                                f"{value.dtype}) to type {cls.dtype}.")
         else:
             result = np.array(value)
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
@@ -1012,13 +1029,14 @@ class _ArrayType(np.ndarray):
             elif np.can_cast(result, cls.dtype):
                 if cls._ndim is not None and result.ndim != cls._ndim:
                     raise TypeError(
-                        f"The shape of the data ({result.shape}) does not " "correspond to the expected of dimensions "
+                        f"The shape of the data ({result.shape}) does not "
+                        "correspond to the expected of dimensions "
                         f"({cls._ndim} for '{field.name}').")
                 elif result.dtype != cls.dtype:
                     result = result.astype(cls.dtype)
             else:
-                raise TypeError(f"Cannot1 safely cast '{field.name}' (type  "
-                                f"{result.dtype}) to type {cls.dtype}.")
+                raise TypeError(f"Cannot safely cast '{field.name}' (type  "
+                                f"{result.dtype}) to an array of type {cls.dtype}.")
         return result
 
     @classmethod
@@ -1100,7 +1118,9 @@ class RNGenerator(np.random.Generator):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name='')
         if isinstance(value, np.random.Generator):
             return value
         elif (isinstance(value, dict)
@@ -1134,7 +1154,9 @@ class RandomState(np.random.RandomState):
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, value, field):
+    def validate(cls, value, field=None):
+        if field is None:
+            field = SimpleNamespace(name='')
         if isinstance(value, np.random.RandomState):
             return value
         elif (isinstance(value, (tuple, list)) and 'MT19937' in value):
