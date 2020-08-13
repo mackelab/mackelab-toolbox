@@ -1,5 +1,8 @@
 """
 Collection of functions for manipulating colors, e.g. to darken or desaturate.
+
+NOTE: This functionality is in fact provided by Seaborn, which naturally does
+a much better job.
 """
 
 from collections import Iterable
