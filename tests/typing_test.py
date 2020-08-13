@@ -150,7 +150,7 @@ def test_pydantic(caplog):
 
     # Import after defining Model to test difference in mapping of `float` type
 
-    shim.load(True)
+    shim.load('theano')
     # If we define Model2symb before loading theano, Tensor, Shared & Symbolic
     # will not include shared types
     # Types are fixed when class is defined
@@ -303,7 +303,7 @@ def test_pydantic_legacy_rng():
 
 def _test_pydantic_shim_rng(cgshim):
     # TODO: test that random state is saved and restored
-    shim.load(cghim)
+    shim.load(cgshim)
     mtbT.freeze_types()
     class RandomModel(BaseModel):
         rng: mtbT.AnyRNG

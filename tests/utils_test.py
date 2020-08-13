@@ -1,5 +1,5 @@
-from mackelab_toolbox.utils import *
 
+from mackelab_toolbox.utils import int_if_close
 def int_if_close_test():
     xint = 5
     xfloat = 5.1
@@ -22,6 +22,7 @@ def int_if_close_test():
 
     assert(ml.utils.int_if_close(arrmixed) is arrmixed)
 
+from mackelab_toolbox.utils import Singleton
 def test_singleton():
     class FooType(metaclass=Singleton):
         pass
@@ -33,6 +34,7 @@ def test_singleton():
     assert a is b
     assert a is not c
 
+from mackelab_toolbox.utils import sentinel
 def test_sentinel():
     a = sentinel('Foo')
     b = sentinel('Foo', "<Bar>")
@@ -43,6 +45,7 @@ def test_sentinel():
     assert str(b) == "<Foo>"
     assert str(c) == "<Baz>"
 
+from mackelab_toolbox.utils import _tobytes
 def test_hashing():
     # WIP
     assert len(_tobytes(-127)) == 1

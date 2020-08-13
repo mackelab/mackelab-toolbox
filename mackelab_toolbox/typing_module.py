@@ -941,7 +941,7 @@ class _NPValueType(np.generic):
             and np.issubdtype(type(value), cls.dtype.type)):
             return value
         elif (np.can_cast(value, cls.dtype)
-              or np.issubdtype(value.dtype, np.dtype(str))):
+              or np.issubdtype(np.dtype(value), np.dtype(str))):
             # Exception for strings, as stated above
             return cls.dtype.type(value)
         else:
@@ -1027,7 +1027,7 @@ class _ArrayType(np.ndarray):
             if np.issubdtype(value.dtype, cls.dtype):
                 result = value
             elif (np.can_cast(value, cls.dtype)
-                  or np.issubdtype(value.dtype, np.dtype(str))):
+                  or np.issubdtype(np.dtype(value), np.dtype(str))):
                 # We make a exception to always allow casting strings
                 result = value.astype(cls.dtype)
             else:
