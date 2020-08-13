@@ -98,7 +98,7 @@ def get_type(baseT, Tname, namedesc, validators=()):
 
     return __validation_types[baseT]
 
-FloatX = mtb.typing.NPType[shim.config.floatX]
+FloatX = mtb.typing.NPValue[shim.config.floatX]
 
 """
 A type-hint compatible symbolic type.

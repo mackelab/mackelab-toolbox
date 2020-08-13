@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from pydantic.dataclasses import dataclass
 import dataclasses
 import mackelab_toolbox as mtb
-# from mackelab_toolbox.typing import NPType, Array
+# from mackelab_toolbox.typing import NPValue, Array
 import mackelab_toolbox.typing as mtbT
 import mackelab_toolbox.cgshim as cgshim
 from mackelab_toolbox.cgshim import shim
@@ -36,7 +36,7 @@ def test_pydantic(caplog):
     assert type(m.a) is float
 
     class Model2(Model):
-        b: mtbT.NPType[np.float64]
+        b: mtbT.NPValue[np.float64]
         w: mtbT.Array[np.float32]
         def integrate(self, x0, T, y0=0):
             x = w*x0; y = w*y0
@@ -68,7 +68,7 @@ def test_pydantic(caplog):
     #       new every attribute in the derived class
     class Model3(Model):
         a: cgshim.typing.FloatX  = 0.3      #  <<< Setting default does not work with dataclass (a comes before non-keyword b)
-        β: mtbT.NPType[float] = None
+        β: mtbT.NPValue[float] = None
         @validator('β', pre=True, always=True)
         def set_β(cls, v, values):
             a, dt = (values.get(x, None) for x in ('a', 'dt'))
@@ -88,7 +88,7 @@ def test_pydantic(caplog):
     # NOTE: Following previous note: with vanilla dataclasses Model4 would need
     #       to define defaults for every attribute.
     class Model4(Model3):
-        b: mtbT.NPType[np.float32]
+        b: mtbT.NPValue[np.float32]
         w: mtbT.Array[np.float32] = (np.float32(1), np.float32(0.2))
         γ: mtbT.Array[np.float32] = None
         @validator('γ', pre=True, always=True)
@@ -211,7 +211,7 @@ def test_pydantic(caplog):
     class Foo(BaseModel):
         a : mtb.typing.AnyNumericalType   # arrays, symbolics ok
         b : mtb.typing.AnyScalarType      # symbolics ok, but not arrays
-        c : mtb.typing.NPType[np.number]
+        c : mtb.typing.NPValue[np.number]
         d : mtb.typing.DType = 'int8'
 
     with pytest.raises(ValidationError):

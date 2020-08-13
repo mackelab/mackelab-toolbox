@@ -9,7 +9,7 @@ Provides
   - Injects the following types into `mackelab_toolbox.typing`:
     Has the elements:
     + FloatX: retrieved as `typing.FloatX`
-      A type which maps to `.typing.NPType[shim.config.floatX]`.
+      A type which maps to `.typing.NPValue[shim.config.floatX]`.
     + Symbolic: retrieved as `typing.Symbolic`
       A type, compatible with pydantic, to indicate a symbolic value in
       annotations. Which type that corresponds to depends on the currently
@@ -87,7 +87,7 @@ mtb.typing.add_postponed_module(
 #
 #     @property
 #     def FloatX(self):
-#         return mtb.typing.NPType[shim.config.floatX]
+#         return mtb.typing.NPValue[shim.config.floatX]
 #
 #     @property
 #     def Symbolic(self):

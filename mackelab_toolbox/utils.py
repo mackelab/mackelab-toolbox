@@ -448,7 +448,7 @@ def broadcast_shapes(*shapes):
 
 # A dictionary mapping string representations to numpy types like np.float32
 # Note that these aren't the same as numpy dtypes
-# str_to_nptype ={
+# str_to_NPValue ={
 #     'int8'   : np.int8,
 #     'int16'  : np.int16,
 #     'int32'  : np.int32,

@@ -256,8 +256,8 @@ class TypeContainer(metaclass=utils.Singleton):
     - Real
     - DType
         Numpy data type object.
-    - NPType
-        Numpy numerical types. Use as `NPType[np.float64]`.
+    - NPValue
+        Numpy numerical types. Use as `NPValue[np.float64]`.
     - Array
         Numpy ndarray. Use as `Array[np.float64]`, or `Array[np.float64,2]`.
 
@@ -283,14 +283,14 @@ class TypeContainer(metaclass=utils.Singleton):
         >>> import mackelab_toolbox as mtb
         >>> Union[mtb.typing.AllNumericalTypes]`
         Value without additional imports:
-            (int, float, NPType[np.number], Array[np.number]
+            (int, float, NPValue[np.number], Array[np.number]
     - AllScalarTypes: tuple
         Similar to AllNumericalTypes, but restricted to scalars
         Use as
         >>> import mackelab_toolbox as mtb
         >>> Union[mtb.typing.AllScalarTypes]`
         Value without additional imports:
-            (int, float, NPType[np.number], Array[np.number, 0]
+            (int, float, NPValue[np.number], Array[np.number, 0]
     - NotCastableToArray
         Modules can add types to `NotCastableToArray`
             mtb.typing.add_nonarray_type(mytype)
@@ -405,7 +405,7 @@ class TypeContainer(metaclass=utils.Singleton):
         T = self.type_map.get(annotation_type, annotation_type)
         if not isinstance(T, type) and isinstance(T, Callable):
             T = T()
-        if isinstance(T, type) and issubclass(T, _NPTypeType):
+        if isinstance(T, type) and issubclass(T, _NPValueType):
             T = T.dtype
         return np.dtype(T)
 
@@ -912,14 +912,18 @@ typing.DType = DType
 typing.add_json_encoder(np.dtype, DType.json_encoder)
 
 ################
-# NPType type
+# NPValue type
 
-class _NPTypeType(np.generic):
+class _NPValueType(np.generic):
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
     def validate(cls, value, field=None):
+        # NOTE:
+        # We make an exception to always allow casting from a string.
+        # This allows for complex values, which may not be converted to numbers
+        # by the JSON deserializer and still be represented as strings
         if field is None:
             field = SimpleNamespace(name="")
         if isinstance(value, np.ndarray):
@@ -936,7 +940,9 @@ class _NPTypeType(np.generic):
         if (isinstance(value, np.generic)
             and np.issubdtype(type(value), cls.dtype.type)):
             return value
-        elif np.can_cast(value, cls.dtype):
+        elif (np.can_cast(value, cls.dtype)
+              or np.issubdtype(value.dtype, np.dtype(str))):
+            # Exception for strings, as stated above
             return cls.dtype.type(value)
         else:
             raise TypeError(f"Cannot safely cast '{field.name}' type  "
@@ -953,13 +959,13 @@ class _NPTypeType(np.generic):
         """See typing.json_encoders."""
         return v.item()  #  Convert Numpy to native Python type
 
-class _NPTypeMeta(type):
+class _NPValueMeta(type):
     def __getitem__(self, dtype):
         dtype=typing.convert_dtype(dtype)
-        return type(f'NPType[{dtype}]', (_NPTypeType,),
+        return type(f'NPValue[{dtype}]', (_NPValueType,),
                     {'dtype': typing.convert_dtype(dtype)})
 
-class NPType(np.generic, metaclass=_NPTypeMeta):
+class NPValue(np.generic, metaclass=_NPValueMeta):
     """
     Use this to use a NumPy dtype for type annotation; `pydantic` will
     recognize the type and execute appropriate validation/parsing.
@@ -967,10 +973,10 @@ class NPType(np.generic, metaclass=_NPTypeMeta):
     This may become obsolete, or need to be updated, when NumPy officially
     supports type hints (see https://github.com/numpy/numpy-stubs).
 
-    - `NPType[T]` specifies an object to be casted with dtype `T`. Any
+    - `NPValue[T]` specifies an object to be casted with dtype `T`. Any
        expression for which `np.dtype(T)` is valid is accepted.
 
-    .. Note:: Difference with `DType`. The annotation `NPType[np.int8]`
+    .. Note:: Difference with `DType`. The annotation `NPValue[np.int8]`
     matches any value of the same type as would be returned by `np.int8`.
     `DType` describes an instance of `dtype` and would match `np.dtype('int8')`,
     but also `np.dtype(float)`, etc.
@@ -978,20 +984,20 @@ class NPType(np.generic, metaclass=_NPTypeMeta):
     Example
     -------
     >>> from pydantic.dataclasses import dataclass
-    >>> from mackelab_toolbox.typing import NPType
+    >>> from mackelab_toolbox.typing import NPValue
     >>>
     >>> @dataclass
     >>> class Model:
-    >>>     x: NPType[np.float64]
-    >>>     y: NPType[np.int8]
+    >>>     x: NPValue[np.float64]
+    >>>     y: NPValue[np.int8]
 
     """
     pass
 
-typing.NPType = NPType
-typing.add_numerical_type(NPType[np.number])
-typing.add_scalar_type(NPType[np.number])
-typing.add_json_encoder(np.generic, _NPTypeType.json_encoder)
+typing.NPValue = NPValue
+typing.add_numerical_type(NPValue[np.number])
+typing.add_scalar_type(NPValue[np.number])
+typing.add_json_encoder(np.generic, _NPValueType.json_encoder)
 
 ####
 # Array type
@@ -1003,6 +1009,10 @@ class _ArrayType(np.ndarray):
 
     @classmethod
     def validate(cls, value, field=None):
+        # NOTE:
+        # We make an exception to always allow casting from a string.
+        # This allows for cases where an array is serialized as a list
+        # of strings, rather than a string of a list.
         if field is None:
             field = SimpleNamespace(name="")
         if isinstance(value, typing.NotCastableToArray):
@@ -1016,7 +1026,9 @@ class _ArrayType(np.ndarray):
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
             if np.issubdtype(value.dtype, cls.dtype):
                 result = value
-            elif np.can_cast(value, cls.dtype):
+            elif (np.can_cast(value, cls.dtype)
+                  or np.issubdtype(value.dtype, np.dtype(str))):
+                # We make a exception to always allow casting strings
                 result = value.astype(cls.dtype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' (type  "
@@ -1026,7 +1038,9 @@ class _ArrayType(np.ndarray):
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
             if np.issubdtype(result.dtype, cls.dtype):
                 pass
-            elif np.can_cast(result, cls.dtype):
+            elif (np.can_cast(result, cls.dtype)
+                  or np.issubdtype(result.dtype, np.dtype(str))):
+                # We make a exception to always allow casting strings
                 if cls._ndim is not None and result.ndim != cls._ndim:
                     raise TypeError(
                         f"The shape of the data ({result.shape}) does not "

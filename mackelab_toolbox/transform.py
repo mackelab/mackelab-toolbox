@@ -252,7 +252,7 @@ class Bijection(pydantic.BaseModel):
     __slots__ = ('_inverse',)
     map         : Transform = Field(..., alias='to')
     inverse_map : Transform = Field(..., alias='back')
-    test_value  : Union[mtb.typing.NPType[np.number],mtb.typing.Array[np.number]] = 0.5
+    test_value  : Union[mtb.typing.NPValue[np.number],mtb.typing.Array[np.number]] = 0.5
 
     class Config:
         schema_extra  = {'single arg format': '[x] -> [f(x)] ; [y] -> [f⁻¹(y)]'}
