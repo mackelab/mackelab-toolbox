@@ -290,8 +290,8 @@ from collections.abc import Iterable
 
 def stablehash(o):
     """
-    Builtin `hash` is not stable across sessions for security reasons.
-    This function can be used when consistency of a hash is required, e.g.
+    The builtin `hash` is not stable across sessions for security reasons.
+    This `stablehash` can be used when consistency of a hash is required, e.g.
     for on-disk caches.
 
     For obtaining a usable digest, see the convenience functions
@@ -299,8 +299,20 @@ def stablehash(o):
     `stabledigest` is a synonym for `stableintdigest` and is suitable as the
     return value of a `__hash__` method.
 
-    .. Note:: For exactly the reason stated above, none of hash functions in
-    this module are cryptographically secure.
+    .. Note:: For exactly the reason stated above, none of the hash functions
+       in this module are cryptographically secure.
+
+    .. Tip:: The following function can be used to calculate the likelihood
+       of a hash collision::
+
+           def p_coll(N, M):
+             '''
+             :param N: Number of distinct hashes. For a 6 character hex digest,
+                this would be 16**6.
+             :param M: Number of hashes we expect to create.
+             '''
+             logp = np.sum(np.log(N-np.arange(M))) - M*np.log(N)
+             return 1-np.exp(logp)
     """
     return hashlib.sha1(_tobytes(o))
 def stablehexdigest(o):
