@@ -49,7 +49,9 @@ def serialize_function(f):
     user is responsible for ensuring any names referred to within the function
     body are available in the decoder's scope.
     """
-    if isinstance(f, FunctionType):
+    if hasattr(f, '__func_src__'):
+        return f.__func_src__
+    elif isinstance(f, FunctionType):
         s = inspect.getsource(f)
         decorator_lines, s = split_decorators(s)
         if not s.startswith("def "):
@@ -110,6 +112,7 @@ def deserialize_function(s: str,
         raise ValueError("[deserialize]: Passing `locals` argument requires "
                          "also passing `globals`.")
     if isinstance(s, str):
+        s_orig = s
         decorator_lines, s = split_decorators(s)
         if not s[:4] == "def ":
             raise ValueError(msg)
@@ -127,6 +130,8 @@ def deserialize_function(s: str,
             globals.update(config.default_namespace)
             exec(s, globals, locals)  # Adds the function to `locals` dict
             f = locals[fname]
+        # Store the source with the function, so it can be serialized again
+        f.__func_src__ = s_orig
         return f
     else:
         raise ValueError(msg)
