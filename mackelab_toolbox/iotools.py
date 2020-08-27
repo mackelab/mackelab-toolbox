@@ -45,13 +45,22 @@ defined_formats = OrderedDict([
 _load_types = {}
 _format_types = {}
 
-def register_datatype(type, typename=None, format=None):
+def register_datatype(type, typename=None, format=None, alias=None):
+    """
+    :param alias: alternative name, usually a shortened form of the full typename.
+    """
     global _load_types, _format_types
     assert(isclass(type))
     if typename is None:
-        typename = type.__qualname__
+        typename = type.__module__ + '.' + type.__qualname__
+    if alias is None:
+        alias = type.__qualname__
+        if alias in _load_types:  # Don't let default override existing alias
+            alias = None
     assert(isinstance(typename, str))
     _load_types[typename] = type
+    if alias is not None:
+        _load_types[alias] = type
     if format is not None:
         assert isinstance(format, str)
         _format_types[typename] = format
