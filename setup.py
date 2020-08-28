@@ -15,6 +15,7 @@ setup(
         'dill',
         'tqdm',
         'pandas',
+        'blosc'    # Serialization typing_module.Array. Make optional ?
     ],
 
     packages=['mackelab_toolbox'],

@@ -11,14 +11,20 @@ import importlib
 import numbers
 import numpy as np
 import abc
+from types import SimpleNamespace
+import typing
 from typing import Iterable, Callable, Sequence
 import mackelab_toolbox.utils as utils
-import typing
 from typing import Union, Type
 from collections import namedtuple
 from pydantic.dataclasses import dataclass
 
 from .units import UnitlessT
+
+# For Array
+import io
+import blosc
+import base64
 
 import logging
 logger = logging.getLogger(__file__)
@@ -432,39 +438,6 @@ class TypeContainer(metaclass=utils.Singleton):
         typing.add_unit_type(QuantitiesUnit)
 
 typing = TypeContainer()
-
-############
-# Constants, sentinel objects
-
-# class _NotCastableToArrayType(metaclass=utils.Singleton):
-#     """
-#     Modules can add types to `NotCastableToArray`
-#         mtb.typing.NotCastableToArray.add(mytype)
-#     to prevent `pydantic` from trying to cast them to a NumPy array
-#     """
-#     def __init__(self):
-#         self._fixed_types = set()
-#         self._callable_types = set()
-#     def add(self, types):
-#         if isinstance(types, Iterable):
-#             for T in types:
-#                 self.add(T)
-#         else:
-#             T = types
-#             if isinstance(T, Callable):
-#                 self._callable_types.add(T)
-#             else:
-#                 self._fixed_types.add(T)
-#     def _types(self):
-#         for T in self._fixed_types:
-#             yield T
-#         for T in self._callable_types:
-#             yield T()
-#     @property
-#     def types(self):
-#         return tuple(self._types())
-# NotCastableToArray = _NotCastableToArrayType()
-#
 
 ####################
 # Custom Types for annotations / pydantic
@@ -1002,6 +975,13 @@ typing.add_json_encoder(np.generic, _NPValueType.json_encoder)
 ####
 # Array type
 
+# TODO: Configurable threshold for compression
+# TODO: Allow different serialization methods:
+#       - str(A.tolist())
+#       - base64(blosc) (with configurable keywords for blosc)
+#       - base64(zlib)
+#       - external file
+
 class _ArrayType(np.ndarray):
     @classmethod
     def __get_validators__(cls):
@@ -1018,7 +998,16 @@ class _ArrayType(np.ndarray):
         if isinstance(value, typing.NotCastableToArray):
             raise TypeError(f"Values of type {type(value)} cannot be casted "
                              "to a numpy array.")
-        if isinstance(value, np.ndarray):
+
+        if isinstance(value, Sequence) and value[0] == 'Array':
+            assert value[1]['encoding'] == 'b85'
+            assert value[1]['compression'] == 'blosc'
+            encoded_array = value[1]['data']
+            with io.BytesIO(blosc.decompress(base64.b85decode(encoded_array))) as f:
+                decoded_array = np.load(f)
+            return decoded_array
+
+        elif isinstance(value, np.ndarray):
             # Don't create a new array unless necessary
             if cls._ndim  is not None and value.ndim != cls._ndim:
                 raise TypeError(f"{field.name} expects a variable with "
@@ -1055,13 +1044,26 @@ class _ArrayType(np.ndarray):
 
     @classmethod
     def __modify_schema__(cls, field_schema):
-        # FIXME: Figure out how to use get schema of subfield
+        # FIXME: Figure out how to use schema of subfield
         field_schema.update(type ='array',
                             items={'type': 'number'})
     @classmethod
     def json_encoder(cls, v):
         """See typing.json_encoders."""
-        return v.tolist()
+        threshold = 100  # ~ break-even point for 64-bit floats, blosc, base85
+        if v.size <= threshold:
+            # For short array, just save it as a string
+            return v.tolist()
+        else:
+            # Save longer arrays in base85 encoding, with short summary
+            with io.BytesIO() as f:  # Use file object to keep bytes in memory
+                np.save(f, v)        # Convert array to plateform-independent bytes  (`tobytes` not meant for storage)
+                v_b85 = base64.b85encode(blosc.compress(f.getvalue()))  # Compress and encode the bytes to a compact string representation
+            # Set print threshold to ensure str returns a summary
+            with np.printoptions(threshold=threshold):
+                v_sum = str(v)
+            return ('Array', {'encoding': 'b85', 'compression': 'blosc',
+                              'data': v_b85, 'summary': v_sum})
 
 class _ArrayMeta(type):
     def __getitem__(self, args):
@@ -1075,6 +1077,8 @@ class _ArrayMeta(type):
             extraargs = []
         if isinstance(T, np.dtype):
             T = T.type
+        elif isinstance(T, str):
+            T = np.dtype(T).type
         if (not isinstance(T, type) or len(extraargs) > 0
             or not isinstance(ndim, (int, type(None)))):
             # if isinstance(args, (tuple, list)):
@@ -1173,9 +1177,14 @@ class RandomState(np.random.RandomState):
             field = SimpleNamespace(name='')
         if isinstance(value, np.random.RandomState):
             return value
-        elif (isinstance(value, (tuple, list)) and 'MT19937' in value):
+        elif (isinstance(value, Sequence) and 'MT19937' in value):
             # Looks like a json-serialized state tuple
             rs = np.random.RandomState()
+            # Deserialize arrays that were serialized in the Array format
+            for i, v in enumerate(value):
+                if isinstance(v, Sequence) and v[0] == "Array":
+                    value[i] = _ArrayType.validate(v)
+            # Set the RNG to the state saved in the file
             rs.set_state(value)
             return rs
         else:

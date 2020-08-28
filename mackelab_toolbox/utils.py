@@ -120,6 +120,39 @@ from enum import Enum
 from collections import OrderedDict
 from collections.abc import Iterable, Callable
 
+class LongList(list):
+    """
+    A subclass of `list` which abridges its representation when it is long,
+    in the same way NumPy shortens the display of long arrays.
+    Will shorten if:
+        - The full string representation is longer than `self.threshold`
+          (default: 300)
+        - AND the number elements is greater than 5
+        
+    The threshold value can be changed by assignment::
+    >>> from macklab_toolbox.utils import LongList
+    >>> l1 = LongList(range(700))
+    >>> print(l1)
+    '<List of 700 elements> [0, 1...698, 699]'
+    >>> l2 = LongList(range(8))
+    [0, 1, 2, 3, 4, 5, 6, 7]
+    >>> LongList.threshold = 10            # Change default
+    >>> print(l2)
+    <List of 8 elements> [0, 1...6, 7]
+    >>> l2.threshold = 300                 # Change only for l2
+    >>> print(l2)
+    [0, 1, 2, 3, 4, 5, 6, 7]
+    """
+    threshold = 300
+    def __repr__(self):
+        s = super().__repr__()
+        if len(self) <= 5 or len(s) <= self.threshold:
+            return s
+        else:
+            return f"<List of {len(self)} elements> " \
+                   f"[{self[0]}, {self[1]}...{self[-2]}, {self[-1]}]"
+
+
 class OrderedEnum(Enum):
     """
     Copied from python docs:
