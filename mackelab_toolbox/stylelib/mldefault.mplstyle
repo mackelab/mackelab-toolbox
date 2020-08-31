@@ -3,6 +3,7 @@
 font.family: sans-serif
 font.style: normal
 font.sans-serif: CMU Bright, Helvetica, Arial, Liberation Sans, DejaVu Sans
+font.serif: Computer Modern Roman, DejaVu Serif, serif
 font.size: 11
   # Relative font size are based on font.size. They are
   # xx-small, x-small, small, medium, large, x-large, xx-large, larger, smaller
