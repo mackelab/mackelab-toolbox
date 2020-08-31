@@ -1121,7 +1121,10 @@ class Array(np.ndarray, metaclass=_ArrayMeta):
 
 
     """
-    pass
+    @classmethod
+    def __get_validators__(cls):
+        raise NotImplementedError("You must specify a data type with Array, "
+                                  "e.g. Array[np.float64].")
 
 typing.Array = Array
 typing.add_numerical_type(Array[np.number])
