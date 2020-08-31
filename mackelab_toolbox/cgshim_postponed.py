@@ -13,6 +13,9 @@ import numpy as np
 import mackelab_toolbox as mtb
 import mackelab_toolbox.typing
 from mackelab_toolbox.cgshim import *
+import logging
+logger = logging.getLogger(__name__)
+
 
 __validation_types = {}  # Serves to ensure get_type() doesn't define the same type twice
 def get_type(baseT, Tname, namedesc, validators=()):
@@ -61,13 +64,13 @@ def get_type(baseT, Tname, namedesc, validators=()):
                     value.name = field.name
                 if not np.can_cast(value.dtype, field.type_):
                     logger.error(
-                        f"{field.name} expects a variable of type {field.type_}. "
+                        f"{field.name} expects a variable of type {field.type_} <{np.dtype(field.type_)}>. "
                         f"Provided value has type {value.dtype}, which is not a "
                         "permitted cast. Note that for symbolic variables, we "
                         "perform no casting, so types must match exactly.")
                 elif not np.dtype(value.dtype) is np.dtype(field.type_):
                     logger.warning(
-                        f"{field.name} expects a variable of type {field.type_}. "
+                        f"{field.name} expects a variable of type {field.type_} <{np.dtype(field.type_)}>. "
                         f"Provided value has type {value.dtype}. "
                         "Note that for symbolic variables, we perform "
                         "no casting, so types must match exactly.")
