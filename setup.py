@@ -15,7 +15,8 @@ setup(
         'dill',
         'tqdm',
         'pandas',
-        'blosc'    # Serialization typing_module.Array. Make optional ?
+        'blosc',    # Serialization typing_module.Array. Make optional ?
+        'astunparse'  # Serialization of functions. Make optional ?
     ],
 
     packages=['mackelab_toolbox'],

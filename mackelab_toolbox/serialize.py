@@ -28,6 +28,19 @@ def split_decorators(s):
         # print(line); print(decorator_lines); print(s)
     return decorator_lines, s
 
+import ast, astunparse
+def remove_comments(s):
+    """
+    Remove comments and doc strings from Python source code passed as string.
+    Based on https://stackoverflow.com/a/56285204
+    """
+    lines = astunparse.unparse(ast.parse(s)).split('\n')
+    out_lines = []
+    for line in lines:
+        if line.lstrip()[:1] not in ("'", '"'):
+            out_lines.append(line)
+    return '\n'.join(out_lines)
+
 def serialize_function(f):
     """
     WIP. Encode a function into a string.
@@ -52,7 +65,7 @@ def serialize_function(f):
     if hasattr(f, '__func_src__'):
         return f.__func_src__
     elif isinstance(f, FunctionType):
-        s = inspect.getsource(f)
+        s = remove_comments(inspect.getsource(f))
         decorator_lines, s = split_decorators(s)
         if not s.startswith("def "):
             raise ValueError(
