@@ -2,6 +2,7 @@ import builtins
 import inspect
 from itertools import chain
 from dataclasses import dataclass, field
+from .utils import Singleton
 
 from types import FunctionType
 from typing import Callable, Optional
@@ -11,7 +12,7 @@ import math
 import numpy as np
 
 @dataclass
-class Config:  #TODO? A singleton class would be nice, but .utils.Singleton doesn't work with dataclass
+class Config(metaclass=Singleton):
     trust_all_inputs: bool = False
     default_namespace: dict = field(
         default_factory=lambda: {'__builtins__': __builtins__,
