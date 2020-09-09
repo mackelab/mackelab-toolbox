@@ -960,7 +960,7 @@ class RecordListSummary(OrderedDict):
         # breaks to the data (`self.dataframe()` returns a copy)
         colwidth = pd.get_option('display.max_colwidth')
         df.transform(self._add_newlines, colwidth=colwidth)
-        pd.set_option('display.max_colwidth', -1)
+        pd.set_option('display.max_colwidth', None)
             # Deactivate line truncation for call to `_repr_html_`
         df_html = df._repr_html_()
         pd.set_option('display.max_colwidth', colwidth)
