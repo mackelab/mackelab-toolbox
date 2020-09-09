@@ -137,11 +137,11 @@ def deserialize_function(s: str,
             exec(s, globals)
             f = globals[fname]
         elif locals is None:
-            globals.update(config.default_namespace)
+            globals = {**config.default_namespace, **globals}
             exec(s, globals)
             f = globals[fname]
         else:
-            globals.update(config.default_namespace)
+            globals = {**config.default_namespace, **globals}
             exec(s, globals, locals)  # Adds the function to `locals` dict
             f = locals[fname]
         # Store the source with the function, so it can be serialized again
