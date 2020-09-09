@@ -30,12 +30,31 @@ def split_decorators(s):
     return decorator_lines, s
 
 import ast, astunparse
-def remove_comments(s):
+import textwrap
+def remove_comments(s, on_fail='warn'):
     """
     Remove comments and doc strings from Python source code passed as string.
     Based on https://stackoverflow.com/a/56285204
+
+    This function will fail if the string `s` is not valid Python code.
+
+    By default, if an error is raised, the string `s` is
+    is returned unchanged and a warning is printed. This follows from the
+    idea that `remove_comments` is a 'nice to have' feature, and we would
+    rather still save / operator on an unchanged `s` than terminate.
+
+    :param on_fail: Default: 'warn'. Change to 'raise' to raise the error
+        instead of simply printing a warning.
     """
-    lines = astunparse.unparse(ast.parse(s)).split('\n')
+    try:
+        lines = astunparse.unparse(ast.parse(textwrap.dedent(s))).split('\n')
+    except Exception as e:
+        if on_fail == 'warn':
+            warn(f"{str(e)}\n`remove_comments` encountered the error above. "
+                 "The string was returned unmodified.")
+            return s
+        else:
+            raise e
     out_lines = []
     for line in lines:
         if line.lstrip()[:1] not in ("'", '"'):
