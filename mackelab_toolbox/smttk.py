@@ -23,7 +23,7 @@ from sumatra.recordstore import DjangoRecordStore as RecordStore
     # The usual RecordStore, provided as a convenience
 from sumatra.records import Record
 
-import mackelab_toolbox as ml
+import mackelab_toolbox as mtb
 import mackelab_toolbox.parameters
 # FIXME!!!!: should not depend on fsGIF project
 # from fsGIF import core
@@ -873,12 +873,12 @@ class RecordList:
 
         # Check to make sure that all records have the same parameters
         if common_params is not None:
-            test_params = ml.parameters.prune(records[0].parameters, common_params)
+            test_params = mtb.parameters.prune(records[0].parameters, common_params)
             for rec in records:
                 # FIXME: Following does not work with numpy arrays
                 #        Need to specialize comparisons on ParameterSets to apply
                 #        .any() / .all() comparisons between numpy components.
-                if ml.parameters.prune(rec.parameters, common_params) != test_params:
+                if mtb.parameters.prune(rec.parameters, common_params) != test_params:
                     raise ValueError("Parameters differ between records")
 
         # Get the data paths
@@ -990,7 +990,7 @@ class RecordListSummary(OrderedDict):
                     value = getattr(rec, attr)
                     if hash_parameter_sets and isinstance(value, ParameterSet):
                         # Get a hash fingerprint (first 7 hash chars) of the file
-                        h = ml.parameters.get_filename(value)
+                        h = mtb.parameters.get_filename(value)
                         value = '#' + h[:7]
                     return value
             if attr == 'duration':
@@ -1006,7 +1006,7 @@ class RecordListSummary(OrderedDict):
                     except (AttributeError, KeyError):
                         # Add string indicating this rec does not have attr
                         vals.append("undefined")
-                return ', '.join(str(a) for a in set(ml.utils.flatten(vals)))
+                return ', '.join(str(a) for a in set(mtb.utils.flatten(vals)))
         def format_field(field):
             # Take a field key and output the formatted string to display
             # in the dataframe header
@@ -1431,7 +1431,7 @@ if click_loaded:
 
         # FIXME: Parameter expansion does not work with nested files
         param_paths = itertools.chain.from_iterable(
-            ml.parameters.expand_param_file(
+            mtb.parameters.expand_param_file(
                 paramfile, tmpparam_path, max_files=max_tasks)
             for paramfile in params)
 
