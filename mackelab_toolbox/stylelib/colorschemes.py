@@ -1,6 +1,6 @@
 from collections import namedtuple
 import logging
-logger = logging.getLogger('sinn.analyze.stylelib.color_schemes')
+logger = logging.getLogger(__file__)
 
 import numpy as np
 from cycler import cycler

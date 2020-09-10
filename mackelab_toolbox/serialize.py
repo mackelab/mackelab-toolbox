@@ -126,7 +126,7 @@ def deserialize_function(s: str,
     .. note:: A few namespaces are added automatically to globals; by default,
        these are ``__builtins__``, ``np`` and ``math``. This can
        be changed by modifying the module variable
-       `~sinn.function_serialization.default_namespace`.
+       `~mackelab_toolbox.serialization.config.default_namespace`.
 
     .. note:: Both `locals` and `globals` will be mutated by the call (in
        particular, the namespaces mentioned above are added to `globals` if not
