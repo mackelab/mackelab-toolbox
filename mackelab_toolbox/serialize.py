@@ -29,7 +29,12 @@ def split_decorators(s):
         # print(line); print(decorator_lines); print(s)
     return decorator_lines, s
 
-import ast, astunparse
+
+import ast
+try:
+    astunparse
+except (NameError, ModuleNotFoundError):
+    pass
 import textwrap
 def remove_comments(s, on_fail='warn'):
     """
