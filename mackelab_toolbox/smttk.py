@@ -64,7 +64,7 @@ def get_record(recordstore, project, label):
 def get_records(recordstore, project, labels=None,
                 script=None,
                 before=None, after=None,
-                min_data=1,
+                min_data=1
                 ):
     """
     Return the records whose labels match `label`.
@@ -1470,7 +1470,7 @@ if click_loaded:
         # 'b' => signed char (1 byte)
         assert('process_idcs' not in globals())
         global process_idcs
-        process_idcs = multiprocessing.Array('b', [0] *  cores)
+        process_idcs = multiprocessing.Array('b', [0] * cores)
 
         if dry_run:
             # Dry-run
