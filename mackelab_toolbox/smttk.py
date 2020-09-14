@@ -899,6 +899,31 @@ class RecordList:
 import re
 import pandas as pd
 class RecordListSummary(OrderedDict):
+    """
+    **Class attributes**
+
+    - `re_merge_labels`: Records are merged if the first match group this regex
+      results in the same string.
+      Default matches the standard timestamp label format with number-only suffix:
+      YYYYMMDD-HHMMSS_[nn]
+
+      Timestamps must match but the suffix may differ, as long as it is composed
+      only of numbers. So records with the following labels would be merged:
+
+      - 20200604-123060
+      - 20200604-123060_1
+      - 20200604-123060_10
+
+      But the following wouldn't
+
+      - 20200604-123060_a4ef
+      - 20200604-123160
+      - 20200604-123260
+
+      Default value: ``r'^(\d{8,8}-\d{6,6})(_\d+)?$'``
+
+    """
+    re_merge_labels = r'^(\d{8,8}-\d{6,6})(_\d+)?$'
     def __init__(self, recordlist, base=None):
         """
         Parameters
@@ -912,8 +937,6 @@ class RecordListSummary(OrderedDict):
             is initialized as an empty dictionary to which the entries of
             `recordlist` are then added.
         """
-        lbltest = re.compile(r'^\d{8,8}-\d{6,6}$')
-            # RegEx for the standard label format YYYYMMDD-HHMMSS
         if base is None: base = ()  # Empty initialization
         elif not isinstance(base, OrderedDict):
             raise ValueError("`base` argument to `RecordListSummary` most be "
@@ -925,12 +948,11 @@ class RecordListSummary(OrderedDict):
             return  # Skip iteration over `recordlist`
         for r in recordlist:
             # For labels following the standard format, merge records whose
-            # labels differ only by a suffix
+            # labels differ only by a numeric suffix
             # Scripts for these records were started within the same second,
             # thus almost assuredly at the same time with a dispatch script
             # such as smttk's `run`.
-            lbl_timestamp = r.label[:15]
-            m = lbltest.match(lbl_timestamp)
+            m = re.match(self.re_merge_labels, r.label)
             if m is None:
                 # Not a standard label format -- no merging
                 assert(r.label not in self)
@@ -963,6 +985,8 @@ class RecordListSummary(OrderedDict):
         pd.set_option('display.max_colwidth', None)
             # Deactivate line truncation for call to `_repr_html_`
         df_html = df._repr_html_()
+        # Print newlines in text fields correctly
+        df_html = df_html.replace("\\n", "<br>")
         pd.set_option('display.max_colwidth', colwidth)
             # Return `max_colwidth` to previous value
         return df_html
@@ -999,14 +1023,27 @@ class RecordListSummary(OrderedDict):
                 m, s = s // 60, s % 60
                 return "{:01}h {:02}m {:02}s".format(int(h),int(m),int(s))
             else:
-                vals = deque()
+                vals = []
                 for r in recs:
                     try:
                         vals.append(get(r, attr))
                     except (AttributeError, KeyError):
                         # Add string indicating this rec does not have attr
                         vals.append("undefined")
-                return ', '.join(str(a) for a in set(mtb.utils.flatten(vals)))
+                vals = set(mtb.utils.flatten(vals))
+                # Choose the most appropriate join character
+                if any('\\n' in v for v in vals):
+                    join_str = '\\n'
+                elif sum(len(v) for v in vals) > pd.get_option('display.max_colwidth'):
+                    join_str = '\\n'
+                elif not any(',' in v for v in vals):
+                    join_str = ', '
+                elif not any(';' in v for v in vals):
+                    join_str = '; '
+                else:
+                    join_str = ' | '
+                # Join all parameters from the merged records into a single string
+                return join_str.join(str(a) for a in vals)
         def format_field(field):
             # Take a field key and output the formatted string to display
             # in the dataframe header
