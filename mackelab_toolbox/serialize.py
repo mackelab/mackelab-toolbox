@@ -1,3 +1,5 @@
+import logging
+from warnings import warn
 import builtins
 import inspect
 from itertools import chain
@@ -10,6 +12,8 @@ from typing import Callable, Optional
 # These are added to the namespace when deserializing a function
 import math
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Config(metaclass=Singleton):
@@ -32,8 +36,8 @@ def split_decorators(s):
 
 import ast
 try:
-    astunparse
-except (NameError, ModuleNotFoundError):
+    import astunparse
+except ModuleNotFoundError:
     pass
 import textwrap
 def remove_comments(s, on_fail='warn'):
