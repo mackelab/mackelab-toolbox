@@ -904,27 +904,30 @@ class RecordListSummary(OrderedDict):
 
     - `re_merge_labels`: Records are merged if the first match group this regex
       results in the same string.
-      Default matches the standard timestamp label format with number-only suffix:
-      YYYYMMDD-HHMMSS_[nn]
+      Default matches the standard timestamp label format with alphanumerical
+      suffix: YYYYMMDD-HHMMSS_[aa]
 
       Timestamps must match but the suffix may differ, as long as it is composed
-      only of numbers. So records with the following labels would be merged:
+      only of alphanumerical characters. So records with the following labels
+      would be merged:
 
       - 20200604-123060
       - 20200604-123060_1
       - 20200604-123060_10
+      - 20200604-123060_a4ef
 
       But the following wouldn't
 
-      - 20200604-123060_a4ef
+      - 20200604-123060_a4ef_
+      - 20200604-123060_a4-ef
       - 20200604-123160
       - 20200604-123260
 
-      Default value: ``r'^(\d{8,8}-\d{6,6})(_\d+)?$'``
+      Default value: ``r'^(\d{8,8}-\d{6,6})_([a-zA-Z0-9]+)?$'``
 
     """
-    re_merge_labels = r'^(\d{8,8}-\d{6,6})(_\d+)?$'
-    def __init__(self, recordlist, base=None):
+    re_merge_labels = r'^(\d{8,8}-\d{6,6})_([a-zA-Z0-9]+)?$'
+    def __init__(self, recordlist, base=None, merge=False):
         """
         Parameters
         ----------
@@ -936,33 +939,52 @@ class RecordListSummary(OrderedDict):
             Initialize the summary with this dictionary. If `None`, summary
             is initialized as an empty dictionary to which the entries of
             `recordlist` are then added.
+        merge: bool
+            Whether to merge similar labels according to `re_merge_labels`.
+            Default is ``False``.
         """
         if base is None: base = ()  # Empty initialization
         elif not isinstance(base, OrderedDict):
             raise ValueError("`base` argument to `RecordListSummary` most be "
                              "an OrderedDict or a derived class, like "
-                              "RecordListSummary.")
+                             "RecordListSummary.")
         super().__init__(base)
 
         if recordlist is None:
             return  # Skip iteration over `recordlist`
+        if not merge:
+            for r in recordlist:
+                assert r.label not in self
+                self[r.label] = [r]
+            return
+        assert merge
         for r in recordlist:
             # For labels following the standard format, merge records whose
-            # labels differ only by a numeric suffix
+            # labels differ only by a suffix
             # Scripts for these records were started within the same second,
             # thus almost assuredly at the same time with a dispatch script
             # such as smttk's `run`.
             m = re.match(self.re_merge_labels, r.label)
-            if m is None:
+            if m is None or not m.groups():
                 # Not a standard label format -- no merging
                 assert(r.label not in self)
                 self[r.label] = [r]
             else:
                 # Standard label format
-                if lbl_timestamp in self:
-                    self[lbl_timestamp].append(r)
+                shared_lbl = m[1]
+                if shared_lbl in self:
+                    self[shared_lbl].append(r)
                 else:
-                    self[lbl_timestamp] = [r]
+                    self[shared_lbl] = [r]
+
+    @property
+    def merged(self):
+        """Return a copy of the summary where similar labels are merged."""
+        return RecordListSummary(mtb.utils.flatten(self.values()), merge=True)
+    @property
+    def unmerged(self):
+        """Return a copy of the summary where similar labels are unmerged."""
+        return RecordListSummary(mtb.utils.flatten(self.values()), merge=False)
 
     def __call__(self, *args, **kwargs):
         """
