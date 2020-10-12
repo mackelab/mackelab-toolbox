@@ -1023,8 +1023,39 @@ class RecordListSummary(OrderedDict):
         tailrecs = OrderedDict( (key, self[key]) for key in tailkeys )
         return RecordListSummary(None, tailrecs)
 
+    @staticmethod
+    def _truncate_value(attr, value, max_chars, max_lines):
+        if attr == 'tags':
+            # There's ordering of more relevant information with tags, and they
+            # are usually short anyway.
+            return value
+        if isinstance(value, tuple):
+            return tuple(RecordListSummary._truncate_value(attr, v, max_chars, max_lines)
+                         for v in value)
+        value = '\n'.join(value.splitlines()[:max_lines])
+        if len(value) > max_chars:
+            if attr == 'main_file':
+                value = '…'+value[-max_chars+1:]
+            else:
+                value = value[:max_chars-1]+'…'
+        return value
+
     def dataframe(self, fields=('reason', 'outcome', 'tags', 'main_file', 'duration'),
-                  parameters=(), hash_parameter_sets=True):
+                  parameters=(), hash_parameter_sets=True,
+                  max_chars=50, max_lines=1):
+        """
+        Parameters
+        ----------
+        ...
+        max_chars: int
+            Truncate record value after this many characters.
+            Special case:
+                'main_file' is truncated from the end instead of the beginning.
+                'tags' are never truncated
+        max_lines: int
+            Keep only this number of lines, even if more lines would fit
+            within the character limit.
+        """
         def combine(recs, attr):
             # Combine the values from different records in a single entry
             def get(rec, attr):
@@ -1038,7 +1069,8 @@ class RecordListSummary(OrderedDict):
                         # Get a hash fingerprint (first 7 hash chars) of the file
                         h = mtb.parameters.get_filename(value)
                         value = '#' + h[:7]
-                    return value
+                    return self._truncate_value(
+                        attr, value, max_chars, max_lines)
             if attr == 'duration':
                 s = sum(getattr(r, attr) for r in recs) / len(recs)
                 h, s = s // 3600, s % 3600
