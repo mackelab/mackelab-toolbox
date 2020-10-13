@@ -24,6 +24,7 @@ import hashlib
 from numbers import Number
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 import logging
 logger = logging.getLogger(__file__)
 
@@ -772,11 +773,11 @@ def make_paramrecs(params, labels=None):
         labels = []
     i = 0
     recs = []
-    for p in params:
+    for p in tqdm(params):
         if smttk_loaded and isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
             recs.append(ParamRec(p.label, p.parameters))
         else:
-            assert(isinstance(p, ParameterSet))
+            assert(isinstance(p, ParameterSetBase))
             if i >= len(labels):
                 raise ValueError("A label must be given for each element of "
                                  "`params` which is not a Sumatra record.")
