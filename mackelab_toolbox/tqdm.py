@@ -4,7 +4,7 @@ import sys
 import logging
 from time import sleep
 import contextlib
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 class LoggingStreamHandler(logging.StreamHandler):
     """
@@ -22,7 +22,7 @@ class LoggingStreamHandler(logging.StreamHandler):
         tqdm.write(msg)
 
 class DummyTqdmFile(object):
-    """Dummy file-like that will write to tqdm"""
+    """Dummy file-like object that will write to tqdm"""
     file = None
     def __init__(self, file):
         self.file = file
