@@ -1000,10 +1000,15 @@ class _ArrayType(np.ndarray):
                              "to a numpy array.")
 
         if isinstance(value, Sequence) and value[0] == 'Array':
-            assert value[1]['encoding'] == 'b85'
-            assert value[1]['compression'] == 'blosc'
+            encoding = value[1]['encoding']
+            compression = value[1]['compression']
+            assert encoding == 'b85'
+            assert compression in ['blosc', 'none']
             encoded_array = value[1]['data']
-            with io.BytesIO(blosc.decompress(base64.b85decode(encoded_array))) as f:
+            v_bytes = base64.b85decode(encoded_array)
+            if compression == 'blosc':
+                v_bytes = blosc.decompress(v_bytes)
+            with io.BytesIO(v_bytes) as f:
                 decoded_array = np.load(f)
             return decoded_array
 
@@ -1048,7 +1053,7 @@ class _ArrayType(np.ndarray):
         field_schema.update(type ='array',
                             items={'type': 'number'})
     @classmethod
-    def json_encoder(cls, v):
+    def json_encoder(cls, v, compression='blosc', encoding='b85'):
         """See typing.json_encoders."""
         threshold = 100  # ~ break-even point for 64-bit floats, blosc, base85
         if v.size <= threshold:
@@ -1056,14 +1061,28 @@ class _ArrayType(np.ndarray):
             return v.tolist()
         else:
             # Save longer arrays in base85 encoding, with short summary
+            if encoding != 'b85':
+                raise NotImplementedError("The only supported encoding "
+                                          "currently is 'b85'.")
+            if compression not in ['none', 'blosc', None]:
+                raise NotImplementedError("The only supported compressions "
+                                          "currently are 'blosc' and 'none'.")
+            elif compression is None:
+                compression = 'none'
             with io.BytesIO() as f:  # Use file object to keep bytes in memory
                 np.save(f, v)        # Convert array to plateform-independent bytes  (`tobytes` not meant for storage)
-                v_b85 = base64.b85encode(blosc.compress(f.getvalue()))  # Compress and encode the bytes to a compact string representation
+                v_bytes = f.getvalue()
+            # Compress and encode the bytes to a compact string representation
+            if compression == 'blosc':
+                v_bytes = blosc.compress(v_bytes)
+            v_b85 = base64.b85encode(v_bytes)
             # Set print threshold to ensure str returns a summary
             with np.printoptions(threshold=threshold):
                 v_sum = str(v)
-            return ('Array', {'encoding': 'b85', 'compression': 'blosc',
-                              'data': v_b85, 'summary': v_sum})
+            return ('Array', {'encoding': f'{encoding}',
+                              'compression': f'{compression}',
+                              'data': v_b85,
+                              'summary': v_sum})
 
 class _ArrayMeta(type):
     def __getitem__(self, args):
@@ -1096,6 +1115,9 @@ class _ArrayMeta(type):
         return type(f'Array[{specifier}]', (_ArrayType,),
                     {'dtype': dtype, '_ndim': ndim})
 
+# TODO: Make the json_encoder & validate methods available in Array,
+#       so we don't have to do things like `Array[float].validate(x)`,
+#       where `float` is ignored and without consequence.
 class Array(np.ndarray, metaclass=_ArrayMeta):
     """
     Use this to specify a NumPy array type annotation; `pydantic` will
