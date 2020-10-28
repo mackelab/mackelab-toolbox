@@ -775,9 +775,20 @@ def make_paramrecs(params, labels=None):
     recs = []
     for p in tqdm(params):
         if smttk_loaded and isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
-            recs.append(ParamRec(p.label, p.parameters))
+            if isinstance(p.parameters, str):
+                # Parameters were simply stored as a string
+                params = ParameterSet(p.parameters)
+            else:
+                assert isinstance(p.parameters, ParameterSetBase)
+                params = p.parameters
+            recs.append(ParamRec(p.label, params))
+        elif isinstance(params, ParameterSetBase):
+            raise TypeError("Wrap ParameterSets in a list so they are passed "
+                            "as a single argument.")
         else:
-            assert(isinstance(p, ParameterSetBase))
+            if not isinstance(p, ParameterSetBase):
+                raise TypeError("Each element of `params` must be a "
+                                "ParameterSet.")
             if i >= len(labels):
                 raise ValueError("A label must be given for each element of "
                                  "`params` which is not a Sumatra record.")
