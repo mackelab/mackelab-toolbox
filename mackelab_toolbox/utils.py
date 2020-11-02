@@ -128,7 +128,7 @@ class LongList(list):
         - The full string representation is longer than `self.threshold`
           (default: 300)
         - AND the number elements is greater than 5
-        
+
     The threshold value can be changed by assignment::
     >>> from macklab_toolbox.utils import LongList
     >>> l1 = LongList(range(700))
@@ -365,6 +365,15 @@ def stablebytesdigest(o):
 def stableintdigest(o, byte_len=4):
     """
     Suitable as the return value of a `__hash__` method.
+
+    .. Note:: Although this method is provided, note that the purpose of a
+       digest (a unique fingerprint) is not the same as the intended use of
+       the `__hash__` magic method (fast hash tables, in particular for
+       dictionaries). In the latter case, a certain degree of hash collisions
+       is in fact desired, since that is required for the most efficient tables.
+       Because this function uses SHA1 to obtain almost surely unique digests,
+       it is much slower than typical `__hash__` implementations. This can
+       become noticeable if it is involved in a lot of dictionary lookups.
 
     Parameters
     ----------
