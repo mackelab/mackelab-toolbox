@@ -8,9 +8,23 @@ import mackelab_toolbox as mtb
 import mackelab_toolbox.typing as mtbT
 import mackelab_toolbox.cgshim as cgshim
 from mackelab_toolbox.cgshim import shim
-from mackelab_toolbox.dataclasses import retrieve_attributes
 from typing import List, Tuple
 import numpy as np
+
+def test_IndexableNamespace():
+
+    class Foo(BaseModel):
+        bar: mtbT.IndexableNamespace
+        class Config:
+            json_encoders={mtbT.IndexableNamespace: mtbT.IndexableNamespace.json_encoder}
+
+    foo = Foo(bar=mtbT.IndexableNamespace(a=[], b=3))
+    foo2 = Foo.parse_raw(foo.json())
+
+    assert foo == foo2
+    assert foo.bar is not foo2.bar
+    assert foo.bar.a is not foo2.bar.a
+    assert foo.bar.b is foo2.bar.b  # Python reuses literals
 
 def test_pydantic(caplog):
 

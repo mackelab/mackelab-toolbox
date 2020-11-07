@@ -560,6 +560,82 @@ typing.add_json_encoder(slice, Slice.json_encoder)
 typing.Sequence = Union[Range, Sequence]
 
 
+####
+# Light structs
+
+class IndexableNamespace(SimpleNamespace):
+    """
+    A structure allowing elements to be accessed either by attribute or index.
+    Inherits from `SimpleNamespace` and adds dict-like access.
+
+    Intended as a simple unstructured container types, like `dict` and
+    `SimpleNamespace`, that simply associate names to variables.
+
+    Motivation: Attribute access is often cleaner and more compact, but
+    awkward when the attribute name is a variable. For simple structures, there
+    seems no reason not to allow both.
+
+    .. note:: In contrast to a dictionary, the iterator returns both keys and
+       values. This allows an `IndexableNamespace` to be used in place of a
+       pydantic `~pydantic.BaseModel`.
+
+    Example
+    -------
+    >>> ns = IndexableNamespace(name='John', phone='555', age=20)
+    >>> print(ns.name)
+    >>> attr = 'phone'
+    >>> print(ns[attr])
+    >>> for attr, value in ns:
+    >>>   print(attr, value)
+
+    **Usage with Pydantic**
+
+    To use within a Pydantic model, add `IndexableNamespace.json_encoder` to
+    the model's encoders:
+
+    >>> class Foo(Pydantic.BaseModel):
+    >>>   ns: IndexableNamespace
+    >>>   ...
+    >>>   class Config:
+    >>>     json_encoders: {'ns': IndexableNamespace.json_encoder}
+    """
+
+    # Dict-like interface
+    def __getitem__(self, key):
+        return self.__dict__[key]
+    def __contains__(self, key):
+        return key in self.__dict__
+
+    # Required to behave like a mapping, otherwise Pydantic gets confused
+    def __iter__(self):
+        return iter(self.__dict__.items())
+    def keys(self):
+        return self.__dict__.keys()
+    def values(self):
+        return self.__dict__.values()
+
+    # Encoder/decoder required for use within a Pydantic model
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value):
+        # `value` can be any mapping
+        return cls(**value)
+    @classmethod
+    def json_encoder(cls, value, **kwargs):
+        if not isinstance(value, IndexableNamespace):
+            logger.error("`IndexableNamespace.json_encoder` expects an "
+                         f"IndexableNamespace as `value`; received {value} "
+                         f"(type: {type(value)}). Continuing, but behaviour "
+                         "is undefined.")
+        return value.__dict__
+    def json(self):
+        return self.json_encoder(self)
+
+typing.IndexableNamespace = IndexableNamespace
+typing.add_json_encoder(IndexableNamespace, IndexableNamespace.json_encoder)
+
 ################
 # Recognizing unit types
 #
