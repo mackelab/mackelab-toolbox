@@ -103,7 +103,8 @@ def serialize_function(f):
                 "expressions are not accepted.")
         return "\n".join(chain(decorator_lines, [s]))
     else:
-        raise TypeError
+        raise TypeError(f"Type {type(f)} is not recognized as a "
+                        "serializable function.")
 
 def deserialize_function(s: str,
                 globals: Optional[dict]=None, locals: Optional[dict]=None):
