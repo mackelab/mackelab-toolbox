@@ -94,14 +94,16 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
         # Convert dictionary to a list of (param, mask_descriptor) tuples
         params = list(params.items())
     else:
+        _params = []
         for p in params:
             if isinstance(p, tuple):
-                tmpparams.append(p)
+                _params.append(p)
             else:
                 # Param has no mask: set it to None
-                tmpparams.append((p, None))
+                _params.append((p, None))
+        params = _params
     # `params` is a list of size 2 tuples
-    assert(isinstance(p, tuple) and len(p) == 2 for p in params)
+    assert all(isinstance(p, tuple) and len(p) == 2 for p in params)
 
     # Standardize the learning rate form
     errmsg = ("Learning rate must be specified either as a scalar, "
