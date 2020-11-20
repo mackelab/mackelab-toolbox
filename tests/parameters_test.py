@@ -2,14 +2,13 @@
 """
 Created on Wed Sep 20 15:53:49 2017
 
-@author: alex
+Copyright 2017, 2020 Alexandre René
 """
 
 import numpy as np
 from collections import OrderedDict
 import hashlib
 from parameters import ParameterSet
-from parameters.validators import ValidationError
 import mackelab_toolbox as mtb
 import mackelab_toolbox.parameters
 
@@ -57,79 +56,76 @@ def test_digest():
         #basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
 
 
-def parameterspec_test():
-    class Foo:
-        class Parameters(mtb.parameters.ParameterSpec):
-            schema = {'x': 0., 'y': 1.}
-    def __init__(self, *args, **kwargs):
-        self.params = Foo.Parameters(*args, **kwargs)
-        self.x = self.params.x
-        self.y = self.params.y
+def test_ComputedParams():
+    import numpy as np
+    from dataclasses import dataclass
+    from parameters import ParameterSet, ParameterRange, ParameterReference
+    from mackelab_toolbox.parameters import ComputedParams
 
-    class Bar:
-        class Parameters(mtb.parameters.ParameterSpec):
-            schema = {'xy': Foo.Parameters,
-                      'n': 1, 'name': Subclass(str)}
-            def parse(self, desc, name='default_name'):
-                if n in desc: self.n = desc['n']
-                self.name = name
-        def __init__(self, *args, **kwargs):
-            self.params = Bar.Parameters(*args, **kwargs)
-            self.foo = Foo(self.params.xy)
-            self.n = self.params.n
-            self.name = self.params.name
+    import pytest
 
-    # Standard construction of parameters
-    bar1 = Bar(name='bar1', n=10, xy={'x': 0., 'y': 1.})
-    bar2 = Bar(n=100, xy=Foo.Parameters(x=10., y=1.))
-    try:
-        # Fails because of type of name
-        Bar(**{'name': 3, 'n': 10, 'xy': {'x': 0., 'y': 1.}})
-    except ValidationError:
-        pass
-    else:
-        assert False
-    try:
-        # Fails because of type of y
-        Bar(**{'name': 'bar4', 'n': 10, 'xy': {'x': 0., 'y': 1}})
-    except ValidationError:
-        pass
-    else:
-        assert False
-    # Re-using instantiated parameters
-    bar5 = Bar(bar1.params)
-    foo1 = Foo(bar5.foo.params)
-    bar6 = Bar(bar1.params, bar2.params, name='bar6')
-    bar7 = Bar(bar1.params, xy=bar2.foo.params, name='bar7')
-    assert bar6.name == 'bar6' and bar6.n == 100 and bar6.xy.x == 10.
-    assert bar7.name == 'bar7' and bar7.n == 10  and bar7.xy.x == 10.
+    # Example model: dynamical system with n x n random (Gaussian) connectivity
+    @dataclass
+    class Params(ComputedParams):
+        n       : int   # dimension size
+        σ       : float # scale of the Gaussian from which the J_ii are drawn
+        J_seed  : int
+        sim_seed: int
 
-def expansion_test():
-    """TODO: Use ParameterRange instead of custom `expand_params`"""
-    input_str = (
-"""
-'angles': [ [[*[5.655, 4, 3, 2, 1],
-                  1.57],
-              [1.57, 1.57]], # w
-            [1.57, *{0, 3}],          # logτ_m
-            [1.57]              # c
-          ]
-""")
+        # Computed params (need to assign a value so they aren't required as arguments)
+        # Alternatively we could just not define them at all, and let
+        # `compute_params` create them.
+        J      : np.ndarray = None
+        sim_rng: np.random.Generator = None
 
-    target_output = (
-    ["\n'angles': [ [[5.655,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57, 0],\n            [1.57]\n          ]",
-     "\n'angles': [ [[5.655,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57,  3],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 4,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57, 0],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 4,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57,  3],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 3,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57, 0],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 3,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57,  3],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 2,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57, 0],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 2,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57,  3],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 1,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57, 0],\n            [1.57]\n          ]",
-     "\n'angles': [ [[ 1,\n                  1.57],\n              [1.57, 1.57]],\n            [1.57,  3],\n            [1.57]\n          ]"]
+        non_param_fields = ('n', 'J_seed', 'sim_seed')
+
+        def compute_params(self):
+            J_rng = np.random.default_rng(self.J_seed)
+            self.J = J_rng.normal(0, self.σ, size=(self.n, self.n))
+            self.sim_rng = np.random.default_rng(self.sim_seed)
+
+    # The use of ParameterReference is for illustration; there's not really
+    # a need here to ensure the two RNGs are seeded differently.
+    θspace = Params(
+        n       =5,
+        σ       =ParameterRange([0.02, 0.1, 0.5]),
+        J_seed  =5,
+        sim_seed=ParameterReference('J_seed')+1
     )
-    assert( mtb.parameters.expand_params(input_str) == target_output )
 
+    θspace.describe()
+
+    θ0 = next(iter(θspace))
+    sim_rng_bytes = θ0.sim_rng.bytes(5)
+
+    assert θspace.size == 3   # Total number of parameter sets; == to product of lengths of ParameterRange values
+    for θ, σ in zip(θspace, [0.02, 0.1, 0.5]):
+        # Each returned parameter set has a different σ
+        assert θ.σ == σ
+        # RNGs draw the same numbers
+        assert sim_rng_bytes == θ.sim_rng.bytes(5)
+        # J have the same size (although not the same value b/c σ is different)
+        assert θ.J.shape == (5,5)
+        assert np.any(θ.J != θ0.sim_rng)
+
+
+
+    # Create a new parameter space with different parameter values
+    θspace2 = θspace.copy().update(n=3, σ=0.5)
+    assert θspace2.n == 3
+    assert θspace2.σ == 0.5
+    # The original parameter space is unmodified
+    assert θspace.n == 5
+
+    # The original parameter space can't be cast as a parameter set because
+    # it defines an ensemble of parameter sets.
+    with pytest.raises(ValueError):
+        θspace.param_set
+    # But the new one can
+    pset = θspace2.param_set
+    # 'n' and seeds are not included in the parameter set
+    assert set(pset.keys()) == set(('σ', 'J', 'sim_rng'))
 
 if __name__ == '__main__':
     test_digest()

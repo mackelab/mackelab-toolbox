@@ -28,6 +28,24 @@ Comparing ParameterSets
     - `dfdiff`
     - `ParameterComparison`
 
+Computed ParameterSets
+    When computational tasks require large numbers of parameters, it can be
+    difficult to keep track of their requirements. The `ComputedParams` base
+    class serves to define task requirements and helps in a few ways:
+
+    - Easy to read summaries of the required parameters within interactive
+      sessions (like a Jupyter notebook)
+    - If some parameters can be derived from others, these rules can be
+      implemented.
+    - Simple definition of ensembles of parameter sets (a.k.a. “parameter spaces”)
+      (e.g. a set of simulations differing only by their initialization),
+      which can then be iterated over.
+
+    .. note:: A `~pydantic.BaseModel` can also implement validation and derived
+       parameters, but will not deal with parameter spaces. If the validation
+       rules are simply to check that values match the expected types, it may
+       even be less verbose.
+
 Sampling ParameterSets
     Provides *reproducible* and *non-interfering* sampling of ParameterSets
     containing distributions.
@@ -407,6 +425,212 @@ def structure_keys(keys):
 
     return ParameterSet({root: None if subkeys == [] else structure_keys(subkeys)
                          for root, subkeys in tree.items()})
+
+
+###################
+# Computed ParameterSets
+###################
+
+from warnings import warn
+import copy
+from math import prod
+from dataclasses import dataclass, fields, _MISSING_TYPE
+from typing import Optional, Union, Callable, Tuple
+import parameters
+
+@dataclass
+class ComputedParams:
+    """
+    A `ComputedParams` object is used to define a set of required or optional
+    parameters. Users are expected to subclass `ComputedParams` for each
+    parameter set; all subclasses should be decorated with @`~dataclasses.dataclass`
+    and parameters defined as class attributes.
+
+    Derived (computed) parameters can be defined by adding a ``compute_params``
+    to the subclass.
+
+    Validation rules can also be added to ``compute_params``, although they
+    may also be added to a ``__post_init__`` method. (The latter having the
+    advantage of catching errors earlier.)
+
+    Ensembles of parameters are defined by having at least one parameter value
+    be an instance of `parameters.ParameterRange`.
+
+    The returned object has the following functionality:
+
+    - Provide a summary of parameters within an interactive session
+      (typically the Jupyter notebook which will be triggering the task generator).
+      See `~TaskParams.describe`.
+    - Simplify the definition of ensembles of parameters.
+      Any parameter value can be specified with `ParameterRange`.
+      The provided iterator will perform an outer product of all combinations
+      and return one `ParameterSet` for each combination.
+      The `~TaskParams.param_space` method returns the `ParameterSpace` defining this
+      outer product, and `~TaskParams.__iter__` returns the iterator for that ParameterSpace.
+    - Provide convenience transformations (i.e. computed parameters).
+      For example, initialization conditions may be specified as simply
+      ``number_of_fits`` and then expanded to an appropriate `ParameterRange`
+      with initialization keys.
+      These transformations should be implemented in subclasses, within the
+      ``compute_params`` method.
+    - Remove convenience arguments (like ``number_of_fits`` in the example above)
+      when producing `ParameterSet`s. In order for arguments to be removed,
+      subclasses must add their names to the `non_param_fields` class attribute.
+
+    Class attributes (these can be modified to customize the class' behaviour):
+
+    - `non_param_fields`: Fields to exclude when casting to ParameterSet/ParameterSpace
+    - `ParameterSet`: Class to use when casting to ParameterSet.
+    - `ParameterSpace`: Class to use when casting to ParameterSpace.
+    - `_required_param_marker`: Prefix marker to use for required parameters
+      when printing the description. Default: "" (no marker).
+    - `_optional_param_marker`: Prefix marker to use for optional parameters
+      when printing the description. Default: "| ".
+    """
+
+    # Class variables – these are used internally and don't show up as fields
+    non_param_fields = ()
+    ParameterSet = parameters.ParameterSet
+    ParameterSpace = parameters.ParameterSpace
+    _required_param_marker = ""
+    _optional_param_marker = "| "
+
+    ## Description of parameters##
+    @classmethod
+    def _get_field_marker(cls, field):
+        if (isinstance(field.default, _MISSING_TYPE)
+              and isinstance(field.default_factory, _MISSING_TYPE)):
+            return cls._required_param_marker  # Mandatory argument
+        else:
+            return cls._optional_param_marker  # Optional argument
+    @classmethod
+    def describe(cls):
+        """
+        Print a list of the expected parameters.
+        Optional parameters are preceded by a pipe '|' to differentiate them
+        from mandatory ones.
+
+        .. note::
+           The markers can be changed by setting the `_required_param_marker`
+           and `_optional_param_marker` attributes of the `TaskParams` (sub)class.
+        """
+        print(f"{cls.__name__}\n  "
+              +"\n  ".join((f"{cls._get_field_marker(field)}{field.name}: {field.type}"
+                           for field in fields(cls)))
+        )
+
+    ## Computing dynamic parameters ##
+    def compute_params(self):
+        """Override this function to define computed params."""
+        pass
+    @property
+    def _compute_params(self):
+        # If `compute_params` is a method, return the underlying function
+        # This allows us to call it on a created parameter set
+        return getattr(self.compute_params, '__func__', self.compute_params)
+
+    ## Copying & updating ##
+    def copy(self):
+        "Return a shallow copy."
+        return copy.copy(self)
+    def update(self, d: dict=None, **kwargs):
+        """Update parameter values in place.
+
+        .. warning:: This will not trigger a recomputation of derived values.
+           If needed, one can call `__post_init__` explicitely after updating
+           parameters.
+
+        Parameters
+        ----------
+        d:  A dictionary of updates may be passed as first argument.
+            It will be merged with `**kwargs`, with precedence given to `**kwargs`.
+
+        Returns
+        -------
+        self
+
+        Raises
+        ------
+        TypeError:
+            If `d` is neither `None` nor a dictionary.
+        ValueError:
+            If one of the passed keywords does not match a class attribute.
+        """
+        if d is not None:
+            if not isinstance(d, dict):
+                raise TypeError("If passed, the positional argument should be a dict.")
+            kwargs = {**d, **kwargs}
+        for k, v in kwargs.items():
+            if k not in self.__dict__:
+                raise ValueError(f"{k} is not one of the parameter names "
+                                 f"defined by {type(self).__name__}.")
+            setattr(self, k, v)
+        return self
+
+    ## Conversion to ParameterSpace & Iteration ##
+    def __iter__(self):
+        """
+        Return an iterator which iterates over all possible combinations
+        of the values containing `ParameterRange` values.
+        Each value returned by the iterator is a `ParameterSet` instance.
+        """
+        for pset in self.param_space.iter_inner(copy=True):
+            pset.replace_references()
+            self._compute_params(pset)
+            # Delete those arguments which aren't used by task_template
+            for name in self.non_param_fields:
+                del pset[name]
+            yield pset
+
+    @property
+    def param_space(self):
+        """
+        Convert the fields into a `ParameterSpace`. This is an object which,
+        when iterated over, will yield a sequence of `ParameterSet`s.
+        `ParameterReference` are resolved before the ParameterSpace is returned.
+        """
+        # We don't use dataclasses.asdict here because we don't want to recurse
+        # into the fields – really just convert attribute access to dict access
+        # so that ParameterSet knows how to parse it.
+        # We make a copy to leave `self` unmodified
+        param_space = self.ParameterSpace(self.__dict__.copy())
+        param_space.replace_references()
+        return param_space
+
+    @property
+    def size(self):
+        """Return the number of ParameterSets in the ParameterSpace."""
+        return prod(
+            len(v) for v in self.param_space.get_ranges_values().values())
+
+    ## Conversion to ParameterSet ##
+    @property
+    def param_set(self):
+        """
+        Convert the fields into a `ParameterSet`.
+
+        Raises
+        ------
+        ValueError:
+            If the ParameterSet is in fact a `ParameterSpace`
+            (i.e. it defines an ensemble of ParameterSets).
+        """
+        # We don't use dataclasses.asdict here because we don't want to recurse
+        # into the fields – really just convert attribute access to dict access
+        # so that ParameterSet knows how to parse it.
+        # We make a copy to leave `self` unmodified
+        param_set = self.ParameterSet(self.__dict__.copy())
+        # Delete those arguments which aren't used by task_template
+        param_set.replace_references()
+        if param_set._is_space():
+            raise ValueError("Cannot convert to ParameterSet: Parameters "
+                             "contain either ParameterRange or ParameterDist "
+                             "values.")
+        self._compute_params(param_set)
+        for name in self.non_param_fields:
+            del param_set[name]
+        return param_set
+
 
 ###################
 # ParameterSet sampler
