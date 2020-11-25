@@ -67,10 +67,10 @@ def test_ComputedParams():
     # Example model: dynamical system with n x n random (Gaussian) connectivity
     @dataclass
     class Params(ComputedParams):
-        n       : int   # dimension size
-        σ       : float # scale of the Gaussian from which the J_ii are drawn
-        J_seed  : int
-        sim_seed: int
+        n     : int   # dimension size
+        σ     : float # scale of the Gaussian from which the J_ii are drawn
+        J_seed: int
+        n_sims: int
 
         # Computed params (need to assign a value so they aren't required as arguments)
         # Alternatively we could just not define them at all, and let
@@ -78,38 +78,36 @@ def test_ComputedParams():
         J      : np.ndarray = None
         sim_rng: np.random.Generator = None
 
-        non_param_fields = ('n', 'J_seed', 'sim_seed')
+        non_param_fields = ('n', 'J_seed', 'n_sims')
 
         def compute_params(self):
             J_rng = np.random.default_rng(self.J_seed)
             self.J = J_rng.normal(0, self.σ, size=(self.n, self.n))
-            self.sim_rng = np.random.default_rng(self.sim_seed)
+            self.sim_rng = ParameterRange([np.random.default_rng(seed)
+                                           for seed in range(self.n_sims)])
 
     # The use of ParameterReference is for illustration; there's not really
-    # a need here to ensure the two RNGs are seeded differently.
+    # a reason to match number of sims with dimension size.
     θspace = Params(
-        n       =5,
-        σ       =ParameterRange([0.02, 0.1, 0.5]),
-        J_seed  =5,
-        sim_seed=ParameterReference('J_seed')+1
+        n     =5,
+        σ     =ParameterRange([0.02, 0.1, 0.5]),
+        J_seed=5,
+        n_sims=ParameterReference('n')-2
     )
 
     θspace.describe()
 
-    θ0 = next(iter(θspace))
-    sim_rng_bytes = θ0.sim_rng.bytes(5)
+    from itertools import product
 
-    assert θspace.size == 3   # Total number of parameter sets; == to product of lengths of ParameterRange values
-    for θ, σ in zip(θspace, [0.02, 0.1, 0.5]):
+    assert θspace.size == 3*3   # Total number of parameter sets; == to product of lengths of ParameterRange values
+    for θ, (σ, seed) in zip(θspace, product([0.02, 0.1, 0.5], range(3))):
         # Each returned parameter set has a different σ
         assert θ.σ == σ
         # RNGs draw the same numbers
-        assert sim_rng_bytes == θ.sim_rng.bytes(5)
+        assert np.random.default_rng(seed).bytes(5) == θ.sim_rng.bytes(5)
         # J have the same size (although not the same value b/c σ is different)
         assert θ.J.shape == (5,5)
-        assert np.any(θ.J != θ0.sim_rng)
-
-
+        # assert np.any(θ.J != θ0.J)
 
     # Create a new parameter space with different parameter values
     θspace2 = θspace.copy().update(n=3, σ=0.5)

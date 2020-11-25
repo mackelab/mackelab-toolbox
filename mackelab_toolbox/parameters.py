@@ -433,7 +433,6 @@ def structure_keys(keys):
 
 from warnings import warn
 import copy
-from math import prod
 from dataclasses import dataclass, fields, _MISSING_TYPE
 from typing import Optional, Union, Callable, Tuple
 import parameters
@@ -572,15 +571,22 @@ class ComputedParams:
         """
         Return an iterator which iterates over all possible combinations
         of the values containing `ParameterRange` values.
+        Also calls `replace_references` on each returned ParameterSet.
         Each value returned by the iterator is a `ParameterSet` instance.
         """
+        # We loop over parameter spaces twice because
+        # - `compute_params` may depend on arguments which need to be expanded
+        # - But `compute_params` may itself define a ParameterRange, which
+        #   then also needs to be expanded.
         for pset in self.param_space.iter_inner(copy=True):
             pset.replace_references()
             self._compute_params(pset)
-            # Delete those arguments which aren't used by task_template
-            for name in self.non_param_fields:
-                del pset[name]
-            yield pset
+            for subpset in pset.iter_inner(copy=True):
+                subpset.replace_references()
+                # Delete those arguments which aren't parameters
+                for name in self.non_param_fields:
+                    del subpset[name]
+                yield subpset
 
     @property
     def param_space(self):
@@ -600,8 +606,8 @@ class ComputedParams:
     @property
     def size(self):
         """Return the number of ParameterSets in the ParameterSpace."""
-        return prod(
-            len(v) for v in self.param_space.get_ranges_values().values())
+        # We have to consume the iterator because of the nested iterations
+        return sum(1 for _ in self)
 
     ## Conversion to ParameterSet ##
     @property
