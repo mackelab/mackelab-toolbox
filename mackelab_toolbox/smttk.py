@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence, Callable
 from datetime import datetime
 import logging
 import numpy as np
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 try:
     import pandas as pd
     pandas_loaded = True
@@ -88,24 +88,8 @@ def get_records(recordstore, project, labels=None,
 
     if before is not None:
         reclist = reclist.filter.before(before)
-        #if isinstance(before, tuple):
-            #before = datetime(*before)
-        #if not isinstance(before, datetime):
-            #tnorm = lambda tstamp: tstamp.date()
-        #else:
-            #tnorm = lambda tstamp: tstamp
-        #record_list = [rec for rec in record_list if tnorm(rec.timestamp) < before]
     if after is not None:
         reclist = reclist.filter.after(after)
-        #if isinstance(after, tuple):
-            #after = datetime(*after)
-        #if not isinstance(after, datetime):
-            #tnorm = lambda tstamp: tstamp.date()
-        #else:
-            #tnorm = lambda tstamp: tstamp
-        #record_list = [rec for rec in record_list if tnorm(rec.timestamp) >= after]
-
-
     if min_data > 0:
         reclist = reclist.filter.output(minimum=min_data)
 
@@ -471,7 +455,7 @@ class _AnyRecordFilter:
         def __call__(self, arglist):
             recordlists = [self.f(arg).list for arg in arglist]
                 # We use .list to make sure we have separate iterators for each arg
-                # TODO: Use itertools.tee instead ? That would avoid allocating the lists
+                # TODO: Build the returned RecordList as we go along to avoid allocating the whole list ?
             return RecordList(set(itertools.chain.from_iterable(recordlists)))
     def __init__(self, recordfilter):
         self.recordfilter = recordfilter
@@ -538,6 +522,10 @@ class RecordFilter:
 
     # Custom filters
     def output(self, minimum=1, maximum=None):
+        """
+        Keep only records whose number of output files is between `minimum`
+        and `maximum`.
+        """
         # TODO: Use iterable that doesn't need to allocate all the data
         iterable = [rec for rec in self.reclst
                     if ((minimum is None or len(rec.output_data) >= minimum)
@@ -546,8 +534,13 @@ class RecordFilter:
 
     def before(self, date, *args):
         """
-        Keep only records which occured before the given date. Date is exclusive
-        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        Keep only records which occured before the given date. Date is exclusive.
+        Can provide date either as a single tuple, or multiple arguments as for
+        `datetime.datetime()`; a `datetime` instance is also accepted.
+
+        As a convenience, tuple values may be concatenated and replaced by a
+        single integer of 4 to 8 digits; if it has less than 8 digits, it is
+        extended to the earliest date (so 2018 -> 20180101).
         """
         if isinstance(date, datetime):
             if len(args) > 0:
@@ -556,8 +549,6 @@ class RecordFilter:
             date = datetime(*(date+args))
         elif isinstance(date, int) and len(str(date)) <= 8:
             # Convenience interface to allow dropping the commas
-            # Date can be an integer of length 4, 5, 6, 7 or 8; if less than 8
-            # digits, well be extended with the earliest date (so 2018 -> 20180101)
             datestr = str(date)
             if len(datestr) < 4:
                 raise ValueError("Date integer must give at least the year.")
@@ -578,7 +569,12 @@ class RecordFilter:
     def after(self, date, *args):
         """
         Keep only records which occurred after the given date. Date is inclusive.
-        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        Can provide date either as a single tuple, or multiple arguments as for
+        `datetime.datetime()`; a `datetime` instance is also accepted.
+
+        As a convenience, tuple values may be concatenated and replaced by a
+        single integer of 4 to 8 digits; if it has less than 8 digits, it is
+        extended to the earliest date (so 2018 -> 20180101).
         """
         if isinstance(date, datetime):
             if len(args) > 0:
@@ -588,7 +584,7 @@ class RecordFilter:
         elif isinstance(date, int) and len(str(date)) <= 8:
             # Convenience interface to allow dropping the commas
             # Date can be an integer of length 4, 5, 6, 7 or 8; if less than 8
-            # digits, well be extended with the earliest date (so 2018 -> 20180101)
+            # digits, will be extended with the earliest date (so 2018 -> 20180101)
             datestr = str(date)
             if len(datestr) < 4:
                 raise ValueError("Date integer must give at least the year.")
@@ -609,7 +605,12 @@ class RecordFilter:
     def on(self, date, *args):
         """
         Keep only records which occurred on the given date.
-        Can provide date either as a single tuple, or multiple arguments as for datetime.datetime()
+        Can provide date either as a single tuple, or multiple arguments as for
+        `datetime.datetime()`; a `datetime` instance is also accepted.
+
+        As a convenience, tuple values may be concatenated and replaced by a
+        single integer of 4 to 8 digits; if it has less than 8 digits, it is
+        extended to the earliest date (so 2018 -> 20180101).
         """
         if isinstance(date, datetime):
             if len(args) > 0:
@@ -638,19 +639,23 @@ class RecordFilter:
             tnorm = lambda tstamp: tstamp
         return RecordList(rec for rec in self.reclst if tnorm(rec.timestamp) >= after and tnorm(rec.timestamp) < before)
 
-    def script(self, script):
-        return RecordList(record for record in self.reclst if script in record.main_file)
+    def script(self, substr):
+        """Keep records for which the “script” value contains `substr`."""
+        return RecordList(record for record in self.reclst if substr in record.main_file)
 
-    def label(self, label):
-        return RecordList(rec for rec in self.reclst if label in rec.label)
+    def label(self, substr):
+        """Keep records for which the label contains `substr`."""
+        return RecordList(rec for rec in self.reclst if substr in rec.label)
 
-    def reason(self, reason):
+    def reason(self, substr):
+        """Keep records for which the “reason” value contains `substr`."""
         return RecordList(rec for rec in self.reclst
-                              if any(reason in line for line in rec.reason))
+                              if any(substr in line for line in rec.reason))
 
-    def outputpath(self, output):
+    def outputpath(self, substr):
+        """Keep records for which at least one output file path contains `substr`."""
         return RecordList(rec for rec in self.reclst
-                          if any(output in path for path in rec.outputpath))
+                          if any(substr in path for path in rec.outputpath))
 
 class RecordList:
     """
@@ -741,7 +746,8 @@ class RecordList:
         -------
         self
         """
-        self.iterable = list(self.iterable)
+        if not isinstance(self.iterable, list):
+            self.iterable = list(self.iterable)
         return self
 
     @property
@@ -854,6 +860,8 @@ class RecordList:
 
 import re
 import pandas as pd
+# TODO: For unmerged summaries, don't display # of records, and use 'duration'
+#       instead of 'avg duration' as a column heading.
 class RecordListSummary(OrderedDict):
     """
     **Class attributes**

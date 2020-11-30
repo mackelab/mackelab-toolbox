@@ -27,7 +27,7 @@ import blosc
 import base64
 
 import logging
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 ############
 # Postponed class and module

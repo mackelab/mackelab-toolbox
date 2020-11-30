@@ -1,6 +1,6 @@
 from collections import namedtuple
 import logging
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from cycler import cycler
