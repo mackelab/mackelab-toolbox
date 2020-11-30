@@ -54,3 +54,9 @@ def test_hashing():
     assert len(_tobytes(128)) == 2
     assert len(_tobytes(-129)) == 2
     assert len(_tobytes(129)) == 2
+
+from mackelab_toolbox.utils import prune_dict
+def test_prune_dict():
+    d = {'a': {'b': 3, 'c': {'b': 2}}, 'b': 1}
+    assert prune_dict(d, {'c'}) == {'a': {'b': 3}, 'b': 1}
+    assert prune_dict(d, {'b'}) == {'a': {'c': {}}}

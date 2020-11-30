@@ -33,7 +33,7 @@ Author: Alexandre René
 """
 
 import logging
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 ########################
 # Functions imported by __init__.py into top level
@@ -113,6 +113,7 @@ class FixedGenerator:
         return iter(self.iterable)
     def __len__(self):
         return self.length
+
 
 ############################
 # Specialized types
@@ -543,6 +544,22 @@ def comparedicts(dict1, dict2):
         if not r: return False
     return True
 
+def prune_dict(data: dict, keys: set):
+    """
+    Recursively remove a set of keys from nested dictionaries.
+    Returns a copy of `data`.
+    """
+    data = data.copy()
+    if not isinstance(keys, set):
+        raise TypeError("`recursive_dict_prune` expects a 'set' as `keys` "
+                        f"argument; received {keys} (type: {type(keys)}).")
+    for k in keys:
+        data.pop(k, None)
+    for k, v in data.items():
+        if isinstance(v, dict):
+            data[k] = recursive_dict_prune(v, keys)
+    return data
+
 ############################
 # Unit conversion utilities
 from collections.abc import Iterable
@@ -722,6 +739,8 @@ sentinel.__instances = {}
 ###################
 # Introspection / Class-hacking / Metaprogramming
 import builtins
+import inspect
+import textwrap
 
 def fully_qualified_name(o):
     """
@@ -788,6 +807,48 @@ class class_or_instance_method:
     def __call__(self, *args, **kwargs):
         clsself = self.instance if self.instance is not None else self.owner
         return self.method(clsself, *args, **kwargs)
+
+def print_api(obj_or_type,
+              docstring_indent: int=4,
+              show_class_docstring: bool=True,
+              show_attributes: bool=False):
+    """
+    A quick method for printing the public API of an object.
+    Attributes and methods beginning with an underscore are excluded.
+    (I.e. neither private nor dunder methods are printed.)
+    In IPython, a similar output can be achieved by calling `?` on each of the
+    object's methods, although the output of this function is more compact
+    and doesn't require knowing and typing each method name.
+
+    The output begins with the object's own docstring, unless `show_class_docstring`
+    is `False.
+    By default only public methods are printed, along with their signature and
+    docstring. Public attributes (i.e. those not starting with an underscore)
+    will also be listed if `show_attributes` is `True`.
+
+    Ordering of printed methods and attributes reflects that in which they
+    appear in the class' definition.
+    """
+    if not isinstance(obj_or_type, type):
+        type_ = type(obj_or_type)
+    else:
+        type_ = obj_or_type
+    indent_prefix = " "*docstring_indent
+    if show_class_docstring:
+        print(type_.__doc__)
+    for attr, val in type_.__dict__.items():
+        if not attr.startswith('_'):
+            if inspect.isfunction(val) or inspect.ismethod(val):
+                docstring = val.__doc__
+                if docstring is None:
+                    docstring = ""
+                else:
+                    docstring = textwrap.dedent(docstring).strip("\n")
+                print(f"{attr}{inspect.signature(val)}")
+                print(textwrap.indent(docstring+"\n", indent_prefix))
+            elif show_attributes:
+                print(attr)
+
 
 #########################
 # IPython / Jupyter Notebook utilities
