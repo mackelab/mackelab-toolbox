@@ -84,7 +84,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 import logging
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 # from parameters import ParameterSet
 
@@ -246,11 +246,12 @@ ParamRec = namedtuple('ParamRec', ['label', 'parameters'])
 
 class ParameterComparison:
     """
-    Example usage:
-        testparams = ParameterSet("path/to/file")
-        records = mackelab_toolbox.smttk.get_records('project').list
-        cmp = ParameterComparison([testparams] + records, ['test params'])
-        cmp.dataframe(depth=3)
+    Example
+    -------
+    >>>  testparams = ParameterSet("path/to/file")
+    >>>  records = mackelab_toolbox.smttk.get_records('project').list
+    >>>  cmp = ParameterComparison([testparams] + records, ['test params'])
+    >>>  cmp.dataframe(depth=3)
     """
     def __init__(self, params, labels=None):
         """
@@ -426,6 +427,48 @@ def structure_keys(keys):
     return ParameterSet({root: None if subkeys == [] else structure_keys(subkeys)
                          for root, subkeys in tree.items()})
 
+KeyDiff = namedtuple('KeyDiff', ['name1', 'name2', 'keys'])
+NestingDiff = namedtuple('NestingDiff', ['key', 'name'])
+TypeDiff = namedtuple('TypeDiff', ['key', 'name1', 'name2'])
+ValueDiff = namedtuple('ValueDiff', ['key', 'name1', 'name2'])
+diff_types = {'keys': KeyDiff,
+              'nesting': NestingDiff,
+              'type': TypeDiff,
+              'value': ValueDiff}
+def _param_diff(params1, params2, name1="", name2=""):
+    diffs = {key: set() for key in diff_types.keys()}
+    keys1, keys2 = set(params1.keys()), set(params2.keys())
+    if keys1 != keys2:
+        diffs['keys'].add( KeyDiff(name1, name2, frozenset(keys1.symmetric_difference(keys2))) )
+    def diff_vals(val1, val2):
+        if isinstance(val1, np.ndarray) or isinstance(val2, np.ndarray):
+            return (val1 != val2).any()
+        else:
+            return val1 != val2
+    for key in keys1.intersection(keys2):
+        if isinstance(params1[key], ParameterSetBase):
+            if not isinstance(params2[key], ParameterSetBase):
+                diffs['nesting'].add((key, name1))
+            else:
+                for diffkey, diffval in _param_diff(params1[key], params2[key],
+                                                    name1 + "." + key, name2 + "." + key).items():
+                    # Prepend key to all nested values
+                    if hasattr(diff_types[diffkey], 'key'):
+                        diffval = {val._replace(key = key+"."+val.key) for val in diffval}
+                    if hasattr(diff_types[diffkey], 'keys') and len(diffval) > 0:
+                        iter_type = type(next(iter(diffval)).keys)  # Assumes all key iterables have same type
+                        diffval = {val._replace(keys = iter_type(key+"."+valkey for valkey in val.keys))
+                                   for val in diffval}
+                    # Update differences dictionary with the nested differences
+                    diffs[diffkey].update(diffval)
+        elif isinstance(params2[key], ParameterSetBase):
+            diffs['nesting'].add(NestingDiff(key, name2))
+        elif type(params1[key]) != type(params2[key]):
+            diffs['type'].add(TypeDiff(key, name1, name2))
+        elif diff_vals(params1[key], params2[key]):
+            diffs['value'].add(ValueDiff(key, name1, name2))
+
+    return diffs
 
 ###################
 # Computed ParameterSets
