@@ -190,11 +190,34 @@ def prune(params, keep, exclude=None):
 #   + dfdiff
 #         A bit more straightforward, but less flexible.
 
-def dfdiff(pset1, pset2, name1='pset 1', name2='pset 2'):
+from typing import Optional, Sequence
+
+def dfdiff(pset1: ParameterSet, pset2: ParameterSet,
+           name1: str='pset 1', name2: str='pset 2',
+           ignore: Optional[Sequence[str]]=None):
     """
     Uses `pset1`'s `diff` method to compare `pset1` and `pset2`.
     Falls back to `pset2`'s method if `pset1` doesn't have one, and to
     `NTParameterSet.diff` if neither pset does.
+
+    Parameters
+    ----------
+    pset1, pset2: ParameterSet | dict
+        The parameter sets to compare.
+        Dicts are also supported, but not recommended because they don't
+        provide a `diff` method.
+    name1, name2: str (default: 'pset 1', 'pset 2')
+        Labels for each parameter set. These are the column labels in the
+        return DataFrame.
+    ignore: Tuple[str] | List[str]
+        List of parameter names to exclude from the comparison, even if they
+        differ.
+
+        .. note:: Names not evaluated hierarchically, but compared at each
+           level. So ``['timestamp']`` will ignore any parameter named
+           'timestamp' at any level, and ``['task.timestamp']`` will not ignore
+           anything (because '.' is invalid in a key name of a hierarchical
+           parameter set).
     """
 
     if not hasattr(ParameterSet, 'diff'):
@@ -212,7 +235,11 @@ def dfdiff(pset1, pset2, name1='pset 1', name2='pset 2'):
             # Cast to a type which has a diff method
             pset1 = ParameterSet(pset1)
     diff = pset1.diff(pset2)
-    return psets_to_dataframe(**{name1:diff[0], name2:diff[1]})
+    df = psets_to_dataframe(**{name1:diff[0], name2:diff[1]})
+    if ignore:
+        df.loc[[idx for idx in df.index
+                if not any(s == d for d in idx for s in ignore)]]
+    return df
 
 def psets_to_dataframe(*args, **psets):
     from itertools import count, chain
@@ -306,7 +333,7 @@ def make_paramrecs(params, labels=None):
     """
     Parameters
     ----------
-    params: iterable of ParameterSet's or sumatra Records
+    params: iterable of ParameterSets or sumatra Records
     labels: list or tuple of strings
         Names for the elements of `params` which are parameter sets. Records
         don't need a specified name since we use the label.
@@ -316,7 +343,7 @@ def make_paramrecs(params, labels=None):
     i = 0
     recs = []
     for p in tqdm(params):
-        if smttk_loaded and isinstance(p, (smttk.sumatra.records.Record, smttk.RecordView)):
+        if not isinstance(p, dict) and hasattr(p, 'parameters'):
             if isinstance(p.parameters, str):
                 # Parameters were simply stored as a string
                 params = ParameterSet(p.parameters)
@@ -330,7 +357,7 @@ def make_paramrecs(params, labels=None):
         else:
             if not isinstance(p, ParameterSetBase):
                 raise TypeError("Each element of `params` must be a "
-                                "ParameterSet.")
+                                f"ParameterSet. Received '{type(p)}'.")
             if i >= len(labels):
                 raise ValueError("A label must be given for each element of "
                                  "`params` which is not a Sumatra record.")
