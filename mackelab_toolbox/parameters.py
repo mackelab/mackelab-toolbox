@@ -522,8 +522,8 @@ class ComputedParams:
     may also be added to a ``__post_init__`` method. (The latter having the
     advantage of catching errors earlier.)
 
-    Ensembles of parameters are defined by having at least one parameter value
-    be an instance of `parameters.ParameterRange`.
+    Ensembles of parameters (so called “parameter spaces”) are defined by having
+    at least one parameter value be an instance of `parameters.ParameterRange`.
 
     The returned object has the following functionality:
 
@@ -545,6 +545,10 @@ class ComputedParams:
     - Remove convenience arguments (like ``number_of_fits`` in the example above)
       when producing `ParameterSet`s. In order for arguments to be removed,
       subclasses must add their names to the `non_param_fields` class attribute.
+    - Integer index access. This is meant mostly to get a sample parameter set
+      from a parameter space. Since ``params[i]`` is O(i) (i.e. access time is
+      proportional to the index), it is recommended to use small index numbers.
+      Slices are also supported, but not negative indices nor steps ≠ 1.
 
     Class attributes (these can be modified to customize the class' behaviour):
 
@@ -657,6 +661,41 @@ class ComputedParams:
                 for name in self.non_param_fields:
                     del subpset[name]
                 yield subpset
+
+    def __getitem__(self, key: Union[int,slice]):
+        """
+        Meant as a convenience, especially for accessing the first parameter
+        set(s) of a space. Does not support negative indices or steps ≠ 1.
+        """
+        if isinstance(key, int):
+            if key < 0:
+                raise IndexError("Negative indices are not supported.")
+            it = iter(self)
+            for _ in range(key):
+                next(it)
+            return next(it)
+        elif isinstance(key, slice):
+            for idx in (key.start, key.stop):
+                if idx is not None:
+                    if not isinstance(idx, int):
+                        raise TypeError("Only integer indices are supported.")
+                    elif idx < 0:
+                        raise IndexError("Negative indices are not supported.")
+            if key.step not in (None, 1):
+                raise ValueError("Only steps of size 1 are supported.")
+            start = key.start or 0
+            it = iter(self)
+            for _ in range(start):
+                try:
+                    next(it)
+                except StopIteration as e:
+                    raise IndexError from e
+            if key.stop is None:
+                return [ps for ps in it]
+            else:
+                return [next(it) for _ in range(start, key.stop)]
+        else:
+            raise TypeError("Only indexing by int or slice[int] is supported.")
 
     @property
     def param_space(self):
