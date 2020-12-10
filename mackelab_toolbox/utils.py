@@ -829,25 +829,35 @@ def print_api(obj_or_type,
     Ordering of printed methods and attributes reflects that in which they
     appear in the class' definition.
     """
-    if not isinstance(obj_or_type, type):
+    indent_prefix = " "*docstring_indent
+    if inspect.isfunction(obj_or_type) or inspect.ismethod(obj_or_type):
+        print_function_api(obj_or_type)
+        return   # EARLY EXIT
+    elif not isinstance(obj_or_type, type):
         type_ = type(obj_or_type)
     else:
         type_ = obj_or_type
-    indent_prefix = " "*docstring_indent
     if show_class_docstring:
         print(type_.__doc__)
     for attr, val in type_.__dict__.items():
         if not attr.startswith('_'):
             if inspect.isfunction(val) or inspect.ismethod(val):
-                docstring = val.__doc__
-                if docstring is None:
-                    docstring = ""
-                else:
-                    docstring = textwrap.dedent(docstring).strip("\n")
-                print(f"{attr}{inspect.signature(val)}")
-                print(textwrap.indent(docstring+"\n", indent_prefix))
+                print_function_api(val, name=attr)
             elif show_attributes:
                 print(attr)
+
+def print_function_api(fn, name=None, docstring_indent: int=4):
+    indent_prefix = " "*docstring_indent
+    if name is None:
+        name = fn.__name__
+    docstring = fn.__doc__
+    if docstring is None:
+        docstring = ""
+    else:
+        docstring = textwrap.dedent(docstring).strip("\n")
+    print(f"{name}{inspect.signature(fn)}")
+    print(textwrap.indent(docstring+"\n", indent_prefix))
+
 
 
 #########################
