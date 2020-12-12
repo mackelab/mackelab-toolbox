@@ -640,6 +640,13 @@ class ComputedParams:
             setattr(self, k, v)
         return self
 
+    ## Concatenation with other ComputedParams ##
+    def __add__(self, other):
+        if isinstance(other, ComputedParams):
+            return ChainedComputedParams(self, other)
+        else:
+            return NotImplemented
+
     ## Conversion to ParameterSpace & Iteration ##
     def __iter__(self):
         """
@@ -698,6 +705,12 @@ class ComputedParams:
             raise TypeError("Only indexing by int or slice[int] is supported.")
 
     @property
+    def size(self):
+        """Return the number of ParameterSets in the ParameterSpace."""
+        # We have to consume the iterator because of the nested iterations
+        return sum(1 for _ in self)
+
+    @property
     def param_space(self):
         """
         Convert the fields into a `ParameterSpace`. This is an object which,
@@ -711,12 +724,6 @@ class ComputedParams:
         param_space = self.ParameterSpace(self.__dict__.copy())
         param_space.replace_references()
         return param_space
-
-    @property
-    def size(self):
-        """Return the number of ParameterSets in the ParameterSpace."""
-        # We have to consume the iterator because of the nested iterations
-        return sum(1 for _ in self)
 
     ## Conversion to ParameterSet ##
     @property
@@ -745,6 +752,91 @@ class ComputedParams:
         for name in self.non_param_fields:
             del param_set[name]
         return param_set
+
+class ChainedComputedParams:
+    """
+    Return type of ComputedParams + ComputedParams: chains the iterables of
+    each contained parameter space. Not all methods of
+    ComputedParams are supported (in particular, `update` is not).
+
+    In normal usage one normally does not create this directly, but by
+    concatenating ComputerParams instances.
+    """
+    def __init__(self, *param_spaces):
+        self.param_spaces = param_spaces
+
+    @classmethod
+    def describe(cls):
+        raise NotImplementedError
+
+    def copy(self):
+        "Return a shallow copy."
+        return ChainedComputedParams(
+            *(pspace.copy() for pspace in self.param_spaces))
+
+    def update(self, d: dict=None, **kwargs):
+        raise NotImplementedError
+
+    def __iter__(self):
+        """"
+        Return parameter sets from each attached 'ComputedParams' instance.
+        Param sets are returned in order: the first parameter space is
+        entirely consumed before the second is begun.
+        """
+        for pspace in self.param_spaces:
+            yield from pspace
+
+    # TODO: This is an exact copy of ComputedParams.__getitem__. Any way to avoid the duplication ?
+    def __getitem__(self, key: Union[int,slice]):
+        """
+        Meant as a convenience, especially for accessing the first parameter
+        set(s) of a space. Does not support negative indices or steps ≠ 1.
+        However, slices may span across the underlying parameter spaces.
+        """
+        if isinstance(key, int):
+            if key < 0:
+                raise IndexError("Negative indices are not supported.")
+            it = iter(self)
+            for _ in range(key):
+                next(it)
+            return next(it)
+        elif isinstance(key, slice):
+            for idx in (key.start, key.stop):
+                if idx is not None:
+                    if not isinstance(idx, int):
+                        raise TypeError("Only integer indices are supported.")
+                    elif idx < 0:
+                        raise IndexError("Negative indices are not supported.")
+            if key.step not in (None, 1):
+                raise ValueError("Only steps of size 1 are supported.")
+            start = key.start or 0
+            it = iter(self)
+            for _ in range(start):
+                try:
+                    next(it)
+                except StopIteration as e:
+                    raise IndexError from e
+            if key.stop is None:
+                return [ps for ps in it]
+            else:
+                return [next(it) for _ in range(start, key.stop)]
+        else:
+            raise TypeError("Only indexing by int or slice[int] is supported.")
+
+    # TODO: Again, same implementation as in ComputedParams.
+    @property
+    def size(self):
+        """Return the number of ParameterSets in the combined ParameterSpace."""
+        return sum(1 for _ in self)
+
+    @property
+    def param_space(self):
+        raise NotImplementedError
+
+    @property
+    def param_set(self):
+        raise NotImplementedError
+
 
 
 ###################
