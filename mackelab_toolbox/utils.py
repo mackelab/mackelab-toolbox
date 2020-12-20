@@ -65,7 +65,9 @@ def isinstance(obj, class_or_tuple):
 
 ########################
 # Iteration utilities
+import itertools
 from collections.abc import Iterable
+from typing import Tuple
 
 terminating_types = (str, bytes)
 
@@ -114,6 +116,23 @@ class FixedGenerator:
     def __len__(self):
         return self.length
 
+def index_iter(shape: Tuple[int]) -> itertools.product:
+    """
+    Return an iterator which produces each multi-index corresponding to the
+    given shape.
+
+    >>> from mackelab_toolbox import index_iter
+    >>> list(index_iter((2,2))
+        [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+    This is functionally equivalent, but roughly 10x faster, than using
+    `numpy.nditer` just to access the index::
+
+    >>> A = np.zeros(2,2)
+    >>> it = np.nditer(A, flags=['multi_index'])
+    >>> list(it.multi_index for _ in it)
+    """
+    return itertools.product(*(range(s) for s in shape))
 
 ############################
 # Specialized types
