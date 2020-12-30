@@ -713,13 +713,20 @@ class Singleton(type):
     def __new__(metacls, name, bases, dct):
         cls = super().__new__(metacls, name, bases, dct)
         cls.__instance = None
+        # Don't overwrite cls.__new__ if it exists
+        if cls.__new__ is object.__new__:
+            # cls does not define a __new__ method => use the parent's __new__
+            cls.__super_new = super(cls, cls).__new__
+        else:
+            # cls does define __new__ => use it
+            cls.__super_new = cls.__new__
         cls.__new__ = metacls.__clsnew__
         return cls
     @staticmethod
     def __clsnew__(cls, *args, **kwargs):
         # ensure that only one instance exists
         if not cls.__instance:
-            cls.__instance = super(cls, cls).__new__(cls, *args, **kwargs)
+            cls.__instance = cls.__super_new(cls, *args, **kwargs)
         return cls.__instance
 
 def sentinel(name, repr_str=None):
