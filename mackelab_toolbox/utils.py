@@ -15,6 +15,7 @@
 #   - Numerical types                                                        #
 #   - Dictionary utilities                                                   #
 #   - Unit conversion utilities                                              #
+#   - Profiling                                                              #
 #   - Stashing                                                               #
 #   - Sentinel values                                                        #
 #   - Introspection / Class-hacking / Metaprogramming                        #
@@ -606,6 +607,97 @@ def mm2in(size, *args):
         return size / 25.4
     else:
         return type(size)(s/25.4 for s in size)
+
+#####################
+# Profiling
+
+from time import perf_counter
+from typing import Optional, Callable
+
+class TimeThis:
+    """
+    Profiling helper for slow (> millisecond) code segments.
+    This decorator is not particularly careful with overhead, and hence isn't
+    appropriate for submillisecond measures.
+
+    Usage::
+    >>> with TimeThis("Big loop"):
+    >>>     sum(range(1000000))
+        Big loop: 14.73 ms
+
+    This is roughly equivalent to::
+    >>> t1 = time.perf_counter()
+    >>> sum(range(1000000))
+    >>> t2 = time.perf_counter()
+    >>> print("Big loop: {t2-t2:.2f} ms")
+        Big loop: 14.73 ms
+
+    Another thing it does is keep a global time counter, to measure the time
+    since the last call. So running the code again would now print two lines::
+    >>> with TimeThis("Big loop"):
+    >>>     sum(range(1000000))
+        Time since last timing context: 429.25 s
+        Big loop: 14.73 ms
+
+    Thus, if there are multiple TimeThis contexts within a function, one can
+    see if a time consuming process exists between them.
+
+    The default is to print the timing result with `print`. This can be changed
+    when instantiating the context::
+    >>> logger = logging.getLogger(__name__)
+    >>> def log_time(name, Δ):
+            logger.debug(f"{name} (exec time): {Δ} s")
+    >>> with TimeThis("Big loop", output=log_time):
+    >>>     sum(range(1000000))
+
+    To turn off timing for all contexts without removing them from code, do
+    >>> TimeThis.on = False
+
+    .. limitation:: `TimeThis` contexts can be nested, but the reported
+       between-context time is then ill-defined. The within-context time
+       should be fine.
+    """
+    on = True
+    last_t = None
+
+    def __init__(self, name=None,
+                 output: Optional[Callable[[str,float],None]]=None,
+                 output_last_Δ: Optional[Callable[[str,float],None]]=None):
+        if output is None:
+            output = self.default_output
+        if output_last_Δ is None:
+            output_last_Δ = self.default_output_last_Δ
+        self.name = name
+        self.output = output
+        self.output_last_Δ = output_last_Δ
+    def __enter__(self):
+        self.t1 = perf_counter()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        t2 = perf_counter()
+        if self.on:
+            if TimeThis.last_t:
+                self.output_last_Δ(self.name, self.t1 - TimeThis.last_t)
+            self.output(self.name, t2-self.t1)
+        TimeThis.last_t = t2
+
+    @staticmethod
+    def default_output(name, Δ):
+        if name:
+            name += ": "
+        else:
+            name = ""
+        if Δ < 1:
+            print(f"{name}{Δ*1000:.2f} ms")
+        else:
+            print(f"{name}{Δ:.2f} s")
+    @staticmethod
+    def default_output_last_Δ(name, Δ):
+        prefix = "Time since last TimeThis context: "
+        if Δ < 1:
+            print(f"{prefix}{Δ*1000:.2f} ms")
+        else:
+            print(f"{prefix}{Δ:.2f} s")
+
 
 #####################
 # Stashing
