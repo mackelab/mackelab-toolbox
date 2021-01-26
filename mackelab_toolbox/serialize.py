@@ -146,10 +146,10 @@ def deserialize_function(s: str,
     msg = ("Cannot decode serialized function. It should be a string as "
            f"returned by inspect.getsource().\nReceived value:\n{s}")
     if not config.trust_all_inputs:
-        raise RuntimeError("Deserialization of functions saved as source code "
-                           "requires executing them with `exec`, and is only "
-                           "attempted if `config.trust_all_inputs` is "
-                           "set to `True`.")
+        raise RuntimeError(
+        "Deserialization of functions saved as source code requires executing "
+        "them with `exec`, and is only attempted if "
+        "`mackelab_toolbox.serialize.config.trust_all_inputs` is set to `True`.")
     if globals is None and locals is not None:
         # `exec` only takes positional arguments, and this combination is not possible
         raise ValueError("[deserialize]: Passing `locals` argument requires "
