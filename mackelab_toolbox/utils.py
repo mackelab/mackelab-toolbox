@@ -7,7 +7,7 @@
 # when/if it gets big enough.                                                #
 #                                                                            #
 # Sections:                                                                  #
-#   - Functions imported by __init__.py into top level                       #
+#   - Safeguards                                                             #
 #   - Iteration utilities                                                    #
 #   - Specialized types                                                      #
 #   - String utilities                                                       #
@@ -18,7 +18,7 @@
 #   - Profiling                                                              #
 #   - Stashing                                                               #
 #   - Sentinel values                                                        #
-#   - Introspection / Class-hacking / Metaprogramming                        #
+#   - Introspection / Class-hacking / Metaprogramming  -> meta.py            #
 #   - IPython / Jupyter Notebook utilities                                   #
 #   - Misc. utilities                                                        #
 #                                                                            #
@@ -37,7 +37,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 ########################
-# Functions imported by __init__.py into top level
+# Safeguards – Attempt to detect certain hard to debug errors
 from collections.abc import Iterable
 import builtins
 
@@ -58,8 +58,8 @@ def isinstance(obj, class_or_tuple):
             logger.warning(
                 "Object type does not match any of those given, but shares its "
                 "name '{}' with at least one of them. You may have imported "
-                " different classes with the same name, or imported the same "
-                " one more than once. "
+                "different classes with the same name, or imported the same "
+                "one more than once. "
                 "This can happen when you use `importlib.reload()`."
                 .format(type(obj).__name__))
     return r
@@ -137,6 +137,7 @@ def index_iter(shape: Tuple[int]) -> itertools.product:
 
 ############################
 # Specialized types
+import abc
 from enum import Enum
 from collections import OrderedDict
 from collections.abc import Iterable, Callable
@@ -261,6 +262,22 @@ class SanitizedOrderedDict(SanitizedDict, OrderedDict):
         Return an empty OrderedDict with the same sanitization.
         """
         return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
+
+@staticmethod
+@abc.abstractmethod
+def abstractattribute():
+    """
+    A placeholder for an abstract attribute; use as
+
+    >>> import abc
+    >>> from mackelab_toolbox.utils import abstractattribute
+    >>> class Foo(abc.ABC):
+    >>>   bar = abstractattribute
+
+    A caveat is that the printed message reports an abstract method rather
+    than abstract attribute.
+    """
+    pass
 
 ###
 # Recursive setattr and getattr.
@@ -856,127 +873,8 @@ sentinel.__instances = {}
 
 ###################
 # Introspection / Class-hacking / Metaprogramming
-import builtins
-import inspect
-import textwrap
 
-def fully_qualified_name(o):
-    """
-    Return fully qualified name for a class or function (i.e. including
-    the module)
-
-    Parameters
-    ----------
-    o: Type (class) or function
-
-    Returns
-    -------
-    str
-
-    Example
-    -------
-    >>> from mackelab_toolbox.utils import fully_qualified_name
-    >>> from mackelab_toolbox.iotools import load
-    >>> fully_qualified_name(load)
-    'mackelab_toolbox.iotools.load'
-    """
-    # Based on https://stackoverflow.com/a/13653312
-    name = getattr(o, '__qualname__', getattr(o, '__name__', None))
-    if name is None:
-        raise TypeError("Argument has no `__qualname__` or `__name__` "
-                        "attribute. Are you certain it is a class or function?")
-    module = o.__module__
-    if module is None or module == builtins.__name__:
-        return name
-    else:
-        return module + '.' + name
-
-def argstr(args: tuple, kwargs: dict):
-    """Reconstruct the string of arguments as it would have been passed to a
-    function.
-
-    Example
-    -------
-    >>> argstr((2, 4), {'a': 33})
-    "2, 4, a=33"
-    """
-    s = ', '.join(f'{a} [{type(a)}]' for a in args)
-    if len(s) > 0 and len(kwargs) > 0:
-        s += ', '
-    s += ', '.join(f'{k}:{v} [{type(v)}]' for k,v in kwargs.items())
-    return s
-
-class class_or_instance_method:
-    """
-    Method decorator which sets `self` to be either the class (when method
-    is called on the class) or the instance (when method is called on an
-    instance). Adapted from https://stackoverflow.com/a/48809254.
-
-    .. Note:: This is clever, but it may hinder maintainability of your code.
-    """
-    def __init__(self, method, instance=None, owner=None):
-        self.method = method
-        self.instance = instance
-        self.owner = owner
-
-    def __get__(self, instance, owner=None):
-        return type(self)(self.method, instance, owner)
-
-    def __call__(self, *args, **kwargs):
-        clsself = self.instance if self.instance is not None else self.owner
-        return self.method(clsself, *args, **kwargs)
-
-def print_api(obj_or_type,
-              docstring_indent: int=4,
-              show_class_docstring: bool=True,
-              show_attributes: bool=False):
-    """
-    A quick method for printing the public API of an object.
-    Attributes and methods beginning with an underscore are excluded.
-    (I.e. neither private nor dunder methods are printed.)
-    In IPython, a similar output can be achieved by calling `?` on each of the
-    object's methods, although the output of this function is more compact
-    and doesn't require knowing and typing each method name.
-
-    The output begins with the object's own docstring, unless `show_class_docstring`
-    is `False.
-    By default only public methods are printed, along with their signature and
-    docstring. Public attributes (i.e. those not starting with an underscore)
-    will also be listed if `show_attributes` is `True`.
-
-    Ordering of printed methods and attributes reflects that in which they
-    appear in the class' definition.
-    """
-    indent_prefix = " "*docstring_indent
-    if inspect.isfunction(obj_or_type) or inspect.ismethod(obj_or_type):
-        print_function_api(obj_or_type)
-        return   # EARLY EXIT
-    elif not isinstance(obj_or_type, type):
-        type_ = type(obj_or_type)
-    else:
-        type_ = obj_or_type
-    if show_class_docstring:
-        print(type_.__doc__)
-    for attr, val in type_.__dict__.items():
-        if not attr.startswith('_'):
-            if inspect.isfunction(val) or inspect.ismethod(val):
-                print_function_api(val, name=attr)
-            elif show_attributes:
-                print(attr)
-
-def print_function_api(fn, name=None, docstring_indent: int=4):
-    indent_prefix = " "*docstring_indent
-    if name is None:
-        name = fn.__name__
-    docstring = fn.__doc__
-    if docstring is None:
-        docstring = ""
-    else:
-        docstring = textwrap.dedent(docstring).strip("\n")
-    print(f"{name}{inspect.signature(fn)}")
-    print(textwrap.indent(docstring+"\n", indent_prefix))
-
-
+from .meta import *
 
 #########################
 # IPython / Jupyter Notebook utilities
