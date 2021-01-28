@@ -127,6 +127,30 @@ def print_function_api(fn, name=None, docstring_indent: int=4):
     print(f"{name}{inspect.signature(fn)}")
     print(textwrap.indent(docstring+"\n", indent_prefix))
 
+# DEVNOTE: If you want to avoid the dependency on mackelab_toolbox by copying
+#    this into your project, note that it is very easy to accidentally introduce
+#    import cycles. For examples, the following won't work:
+#
+#        MyProject/__init__.py::
+#          from analyses import analysis1, analysis2
+#
+#        MyProject/analyses.py::
+#          from .utils import HideCWDFromImport
+#          with HideCWDFromImport(__file__):
+#            import typing
+#          ...
+#        MyProject/typing.py::
+#          class MyType:
+#            ...
+#
+#        MyProject/utils.py::
+#          class HideCWDFromImport:
+#            ...
+#
+#    The problem here is that `import .utils` is a package import, which
+#    implicitely executes `import MyProject.__init__.py`.
+#    The simplest way is to have a module containing only `HideCWDFromImport`,
+#    place it in the same directory, and import without any dot in the path.
 class HideCWDFromImport:
     """
     Context manager with prevents the current directory from being searched in
@@ -162,7 +186,7 @@ class HideCWDFromImport:
     unreasonable thing to do, we change *analysis.py* as follows::
 
         # MyProject.analysis.py – v2
-        from mackelab_toolbox.utils import HideCWDFromImport
+        from mackelab_toolbox.meta import HideCWDFromImport
         with HideCWDFromImport(__file__):
             from typing import List
         from MyProject.typing Range
