@@ -11,6 +11,9 @@ from mackelab_toolbox.cgshim import shim
 from typing import List, Tuple
 import numpy as np
 
+# TODO: Systematically test casting of NPValue and Array, especially with
+#       generic types
+
 def test_IndexableNamespace():
 
     class Foo(BaseModel):
@@ -73,6 +76,8 @@ def test_pydantic(caplog):
     assert mb.l2 == [3, 3]
     assert mb.t1 == (1, 2, 3, 4, 5)
 
+    shim.load('theano')
+    mtbT.freeze_types()
     # TODO: Use dataclass below once kwargs in dataclasses are fixed
     # NOTE: Some of the tests below do not work presently with with
     #       dataclasses, due to the way keyword vs non-keyword parameters
@@ -170,23 +175,22 @@ def test_pydantic(caplog):
     # Types are fixed when class is defined
     class Model2symb(Model2):
         dt: cgshim.typing.Tensor[float]
-        b : cgshim.typing.Shared[cgshim.typing.FloatX]
+        b : cgshim.typing.Shared[shim.config.floatX]
         w : cgshim.typing.Symbolic[np.float32]
 
     with pytest.raises(ValidationError):
         Model2(a=-0.5, b=-0.1, w=shim.shared(w32), dt=0.01)
-    with pytest.raises(ValidationError):
-        # Fails b/c w:shared
-        Model2symb(a=-0.5, b=shim.shared(-0.1), w=shim.shared(w32), dt=shim.shared(0.01))
     with pytest.raises(ValidationError):
         # Fails b/c w:float
         Model2symb(a=-0.5, b=shim.shared(-0.1), w=w32, dt=shim.shared(0.01))
     with pytest.raises(ValidationError):
         # Fails b/c b:tensor
         Model2symb(a=-0.5, b=shim.tensor(-0.1), w=shim.tensor(w32), dt=shim.shared(0.01))
-    with pytest.raises(ValidationError):
-        # Fails b/c b:float
-        Model2symb(a=-0.5, b=-0.1, w=shim.tensor(w32), dt=shim.shared(0.01))
+
+    # Does not fail b/c w: shared <= Symbolic
+    Model2symb(a=-0.5, b=shim.shared(-0.1), w=shim.shared(w32), dt=shim.shared(0.01))
+    # Does not fail b/c b: casted as shared
+    Model2symb(a=-0.5, b=-0.11111, w=shim.tensor(w32), dt=shim.shared(0.01))
 
     # Clear captured logs messages from failure tests
     caplog.clear()
@@ -198,12 +202,12 @@ def test_pydantic(caplog):
 
     # Check that the calls with shared(w) and tensor(w) triggered precision warnings
     assert len(caplog.records) == 2
-    caprec1 = caplog.records[0]
+    caprec1 = caplog.records[0]   # m2_stt64
     assert caprec1.levelname == "ERROR"
-    assert caprec1.msg.startswith("w expects a variable of type <class 'theano.gof.utils.Symbolic'>.")
-    caprec2 = caplog.records[1]
+    assert caprec1.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. Provided value has dtype float64")
+    caprec2 = caplog.records[1]   # m2_sts16
     assert caprec2.levelname == "WARNING"  # Warning because upcast less critical than downcast
-    assert caprec2.msg.startswith("w expects a variable of type <class 'theano.gof.utils.Symbolic'>.")
+    assert caprec2.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. Provided value has dtype float16")
 
     # Check method for recovering a ParameterSet
     from mackelab_toolbox.parameters import ParameterSet
@@ -233,7 +237,7 @@ def test_pydantic(caplog):
     with pytest.raises(ValidationError):
         Foo(a=1, b=np.arange(2), c=2)
     Foo(a=1, b=2, c=2)
-    Foo(a=np.arange(4), b=2, c=2)
+    Foo(a=np.arange(4), b=2, c=np.int_(2))  # Underscore important, because np.int === int, which is not a numpy type
     Foo(a=1, b=np.array(2), c=np.array(2))
     # DType tests
     with pytest.raises(ValidationError):
@@ -315,6 +319,46 @@ def test_pydantic_legacy_rng():
     # Drawing _again_ produces different numbers => these really are random numbers
     assert np.all(leg_draws != rm_leg2.rng.random(size=5))
 
+def test_pydantic_theano_rngs():
+    # TODO: We currently aren't testing every code path through .validate()
+    shim.load('theano')
+    mtbT.freeze_types()
+    class RandomModel_Numpy(BaseModel):
+        rng: mtbT.RandomStateStream
+        class Config:
+            json_encoders = mtbT.json_encoders
+    class RandomModel_MRG(BaseModel):
+        rng: mtbT.RNGStream
+        class Config:
+            json_encoders = mtbT.json_encoders
+
+    rm_np = RandomModel_Numpy(rng=1)
+    rm_mrg = RandomModel_MRG(rng=1)
+
+    # Save models in their current initialized state
+    rm_np_json = rm_np.json()
+    rm_mrg_json = rm_mrg.json()
+
+    # Draw from models, advancing the bit generator
+    u1_np = rm_np.rng.uniform(size=(1,))
+    draws_np = u1_np.eval()
+    u1_mrg = rm_mrg.rng.uniform(size=(1,))
+    draws_mrg = u1_mrg.eval()
+
+    # Create new model copies, in their original initialized states
+    rm2_np = RandomModel_Numpy.parse_raw(rm_np_json)
+    rm2_mrg = RandomModel_MRG.parse_raw(rm_mrg_json)
+
+    # Draw again => same numbers as before
+    u2_np = rm2_np.rng.uniform(size=(1,))
+    u2_mrg = rm2_mrg.rng.uniform(size=(1,))
+    assert np.all(draws_np == u2_np.eval())
+    assert np.all(draws_mrg == u2_mrg.eval())
+
+    # Drawing _again_ produces different numbers => these really are random numbers
+    assert np.all(draws_np  != u2_np.eval())
+    assert np.all(draws_mrg != u2_mrg.eval())
+
 def _test_pydantic_shim_rng(cgshim):
     # TODO: test that random state is saved and restored
     shim.load(cgshim)
@@ -324,9 +368,33 @@ def _test_pydantic_shim_rng(cgshim):
         class Config:
             json_encoders = mtbT.json_encoders
 
-    m = RandomModel(rng=shim.config.RandomStreams())
+    rm_shim = RandomModel(rng=shim.config.RandomStream())
 
-    RandomModel.parse_raw(m.json())
+    # Save models in their current initialized state
+    rm_shim_json = rm_shim.json()
+
+    # TODO: At present the UI is different between NumPy and Theano, because
+    #       in the first case, rng.uniform() draws from a uniform, while in
+    #       the second case, it returns a new RNG producing uniform values.
+    #       We should have ShimmedRandomStream reproduce the latter, and then
+    #       the rest of the test will work. (Have to check how this will work
+    #       with models though first)
+    #
+    # # Draw from models, advancing the bit generator
+    # u1 = rm_shim.rng.uniform(size=(1,))
+    # rm_shim_draws = shim.eval(u1)
+
+    # Create new model copies, in their original initialized states
+    rm_shim2 = RandomModel.parse_raw(rm_shim_json)
+
+    # # Draw again => same numbers as before
+    # u2 = rm_shim2.rng.uniform(size=(1,))
+    # # u2_draws = u2.eval()
+    # # assert np.all(rm_shim_draws == u2_draws)
+    # assert np.all(rm_shim_draws == shim.eval(u2))
+    #
+    # # Drawing _again_ produces different numbers => these really are random numbers
+    # assert np.all(rm_shim_draws != shim.eval(u2))
 
 def test_pydantic_shimtheano_rng():
     return _test_pydantic_shim_rng('theano')

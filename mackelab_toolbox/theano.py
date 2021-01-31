@@ -256,7 +256,7 @@ class GraphCache:
         other_inputs: list of symbolic variables
             List of other symbolic expressions which may appear in the graph
             loaded from cache.
-        rng: random stream object (shim.RandomStreams or symbolic equivalent)
+        rng: random stream object (shim.RandomStream or symbolic equivalent)
             If graphs depend on random numbers, the source RNG must be provided.
 
         Returns
