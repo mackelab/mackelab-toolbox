@@ -12,6 +12,7 @@ import numbers
 import numpy as np
 import abc
 from types import SimpleNamespace
+from functools import lru_cache
 import typing
 from typing import Iterable, Callable, Sequence
 import mackelab_toolbox.utils as utils
@@ -41,7 +42,7 @@ class PostponedModule:
     """
     Both `source_module` and `target_module` must be python modules.
     When `freeze_types` is called, the list of attributes `attrs` is
-    retrieved from `source_module` and injected into `targete_module`.
+    retrieved from `source_module` and injected into `target_module`.
     """
     source_module: str
     target_module: str
@@ -138,21 +139,27 @@ def freeze_types():
     Call this function once definitions of dynamic types are finalized
     (in particular, after having called `theano_shim.load`), and before
     the actual code.
+    Postponed modules are imported in the following order:
+        - First all postponed modules, in the order they were added.
+        - Then all postponed modules, in the order they were added.
     """
     global types_frozen
     if types_frozen:
         logger.error("`mackelab_toolbox.typing.freeze_types()` was called "
                      "more than once.")
-    cls_postponed_modules = set(C.source_module for C in postponed_classes.values())
-    mod_postponed_modules = set(m.source_module for m in postponed_modules)
-    all_postponed_modules = mod_postponed_modules | cls_postponed_modules
+    # The order can matter (e.g. transform_postponed depends on being loaded
+    # after AnyNumericalType is frozen), so we use dictionaries to emulate
+    # ordered sets.
+    cls_postponed_modules = {C.source_module:None for C in postponed_classes.values()}
+    mod_postponed_modules = {m.source_module:None for m in postponed_modules}
+    all_postponed_modules = {**mod_postponed_modules, **cls_postponed_modules}
     loaded_postponed_modules = [m for m in all_postponed_modules if m in sys.modules]
     if len(loaded_postponed_modules) > 0:
         raise RuntimeError("The following modules contain dynamic types and "
                            "must not be loaded before those have been frozen: "
                            f"\n{loaded_postponed_modules}\n There is no need "
                            "to import these modules: it is done automatically "
-                           "witin `mtb.typing.freeze_types()`.")
+                           "within `mtb.typing.freeze_types()`.")
     for m in all_postponed_modules:
         importlib.import_module(m)
     for C in postponed_classes.values():
@@ -230,6 +237,36 @@ class TypeSet(dict):
 
     def __iter__(self):
         return iter(list(self.keys())[::-1])
+
+# @lru_cache
+# def any_type(type_list):
+#     # https://github.com/samuelcolvin/pydantic/issues/1423#issuecomment-618962827
+#     """
+#     Return a type that behaves like ``Union[*type_list]`` but for which
+#     Pydantic won't perform any coercion if the input matches one one of the types.
+#     If none of the types match, than coercion is performed as usual, in the
+#     order of elements in `type_list`.
+#     """
+#     # FIXME: Symbolics inspect the field name to assign the variable name;
+#     #        this breaks that
+#     @dataclass
+#     class ModelValidator:
+#         v: Union[tuple(type_list)]
+#     class AnyType:
+#         @classmethod
+#         def __get_validators__(cls):
+#             yield cls.validate
+#         @classmethod
+#         def validate(cls, value):
+#             if any(isinstance(value, T) for T in cls.type_list):
+#                 return value
+#             else:
+#                 return cls.ModelValidator(v=value).v
+#     AnyType.type_list = type_list
+#     AnyType.ModelValidator = ModelValidator
+#     return AnyType
+def any_type(type_list):
+    return Union[tuple(type_list)]
 
 JsonEncoder = namedtuple("JsonEncoder", ["encoder", "priority"])
 
@@ -331,6 +368,9 @@ class TypeContainer(metaclass=utils.Singleton):
         if 'quantities' in sys.modules:
             typing.load_quantities()
         return freeze_types()
+    @property
+    def types_frozen(self):
+        return types_frozen
 
     def __init__(self):
         self._AllNumericalTypes = TypeSet([int, float])
@@ -341,16 +381,16 @@ class TypeContainer(metaclass=utils.Singleton):
         self._json_encoders = {}
     @property
     def AnyNumericalType(self):
-        return Union[tuple(T if isinstance(T, type) else T()
-                           for T in self._AllNumericalTypes)]
+        return any_type(tuple(T if isinstance(T, type) else T()
+                        for T in self._AllNumericalTypes))
     @property
     def AnyScalarType(self):
-        return Union[tuple(T if isinstance(T, type) else T()
-                           for T in self._AllScalarTypes)]
+        return any_type(tuple(T if isinstance(T, type) else T()
+                        for T in self._AllScalarTypes))
     @property
     def AnyUnitType(self):
-        return Union[tuple(T if isinstance(T, type) else T()
-                           for T in self._AllUnitTypes)]
+        return any_type(tuple(T if isinstance(T, type) else T()
+                        for T in self._AllUnitTypes))
     @property
     def NotCastableToArray(self):
         return tuple(T if isinstance(T, type) else T()
@@ -378,10 +418,27 @@ class TypeContainer(metaclass=utils.Singleton):
                                     key = lambda item: -item[1].priority)}
         # Use -je.priority: higher number is higher priority
 
+    @staticmethod
+    def json_like(value: typing.Any, type_str: str, case_sensitive: bool=False):
+        """
+        Convenience fonction for checking whether a serialized value might be a
+        custom serialized JSON object. All our custom serialized formats start with
+        a unique type string.
+        :param:value: The value for which we want to determine if it is a
+            JSON-serialized object.
+        :param:type_str: The type string of the type we are attempting to
+            deserialize into.
+        :param:case_sensitive: Whether the comparison to `type_str` should be
+            case-sensitive.
+        """
+        casefold = (lambda v: v) if case_sensitive else str.casefold
+        return (not isinstance(value, str) and isinstance(value, Sequence) and value
+                and isinstance(value[0], str) and casefold(value[0]) == casefold(type_str))
+
     ####################
     # Type normalization
 
-    def convert_dtype(self, annotation_type):
+    def convert_nptype(self, annotation_type):
         # TODO: Combine common code with smttask.types.cast
         """
         Look up the type in type_map and see if it should be replaced.
@@ -411,9 +468,15 @@ class TypeContainer(metaclass=utils.Singleton):
         T = self.type_map.get(annotation_type, annotation_type)
         if not isinstance(T, type) and isinstance(T, Callable):
             T = T()
-        if isinstance(T, type) and issubclass(T, _NPValueType):
-            T = T.dtype
-        return np.dtype(T)
+        if isinstance(T, type) and issubclass(T, np.generic):
+            # It's important not to call `np.dtype(T)` if T is already a NumPy
+            # type, since it prevents generics (e.g. `np.dtype(np.number) is np.float64`)
+            # It also triggers a deprecation warning for this reason.
+            # T = T.dtype
+            pass
+        else:
+            T = np.dtype(T).type
+        return T
 
     ####################
     # Conditionally loaded modules
@@ -963,7 +1026,75 @@ typing.add_json_encoder(np.dtype, DType.json_encoder)
 ################
 # NPValue type
 
+def infer_numpy_type_to_cast(nptype, value):
+    """
+    This function tries to determine which concrete numpy type to use to cast
+    `value`, given the desired type `nptype`.
+    The challenge is that `nptype` may be an abstract type, so we
+    have to work through the possible hierarchy until we find the
+    most appropriate concrete type. We only do the most common cases;
+    we can extend later to the complete tree.
+    """
+    assert issubclass(nptype, np.generic)
+    if nptype is np.generic:
+        raise NotImplementedError("Unclear how we should cast np.generic.")
+    if issubclass(nptype, np.flexible):  # void, str, unicode
+        # Assume concrete type
+        return nptype
+    elif not issubclass(nptype, np.number):  # bool, object
+        assert (nptype is np.bool_ or nptype is np.object_)
+        return nptype
+    else:  # Number
+        if issubclass(nptype, np.integer):
+            if nptype is np.integer:
+                return np.int_
+            else:
+                # Assume concrete type
+                return nptype
+        elif issubclass(nptype, np.inexact):
+            if issubclass(nptype, np.complexfloating):
+                if nptype is np.complexfloating:
+                    return np.complex_
+                else:
+                    # Assume concrete type
+                    return nptype
+            elif issubclass(nptype, np.floating):
+                if nptype is np.floating:
+                    return np.float_
+                else:
+                    # Assume concrete type
+                    return nptype
+            else:
+                assert nptype is np.inexact
+                # We try to guess which type to use between float and complex.
+                # We make a rudimentary check for complex, and fall back to float.
+                if isinstance(value, complex):
+                    return np.complex_
+                if isinstance(value, str) and ('j' in value or 'i' in value):
+                    return np.complex_
+                else:
+                    return np.float_
+        else:
+            assert nptype is np.number
+            # We try to guess which type to use between int, float and complex.
+            # We make a rudimentary check for int, complex, and fall back to float.
+            if isinstance(value, int):
+                return np.int_
+            elif isinstance(value, complex):
+                return np.complex_
+            elif isinstance(value, str):
+                if 'j' in value or 'i' in value:
+                    return np.complex_
+                elif '.' in value:
+                    return np.float_
+                else:
+                    return np.int_
+            else:
+                return np.float_
+
 class _NPValueType(np.generic):
+    nptype = None
+
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
@@ -987,18 +1118,19 @@ class _NPValueType(np.generic):
         # np.generic ensures isubdtype doesn't let through non-numpy types
         # (like 'float'), or objects which wrap numpy types (like 'ndarray').
         if (isinstance(value, np.generic)
-            and np.issubdtype(type(value), cls.dtype.type)):
+            and np.issubdtype(type(value), cls.nptype)):
             return value
-        elif (np.can_cast(value, cls.dtype)
-              or np.issubdtype(np.dtype(value), np.dtype(str))):
+        elif (np.can_cast(value, cls.nptype)
+              or np.issubdtype(getattr(value, 'dtype', np.dtype('O')), np.dtype(str))):
             # Exception for strings, as stated above
-            return cls.dtype.type(value)
+            nptype = infer_numpy_type_to_cast(cls.nptype, value)
+            return nptype(value)
         else:
             raise TypeError(f"Cannot safely cast '{field.name}' type  "
-                            f"({type(value)}) to type {cls.dtype}.")
+                            f"({type(value)}) to type {cls.nptype}.")
     @classmethod
     def __modify_schema__(cls, field_schema):
-        if np.issubdtype(cls.dtype, np.integer):
+        if np.issubdtype(cls.nptype, np.integer):
             field_schema.update(type="integer")
         else:
             field_schema.update(type="number")
@@ -1009,10 +1141,11 @@ class _NPValueType(np.generic):
         return v.item()  #  Convert Numpy to native Python type
 
 class _NPValueMeta(type):
-    def __getitem__(self, dtype):
-        dtype=typing.convert_dtype(dtype)
-        return type(f'NPValue[{dtype}]', (_NPValueType,),
-                    {'dtype': typing.convert_dtype(dtype)})
+    def __getitem__(self, nptype):
+        nptype=typing.convert_nptype(nptype)
+        nptype_str = nptype.__name__
+        return type(f'NPValue[{nptype_str}]', (_NPValueType,),
+                    {'nptype': nptype})
 
 class NPValue(np.generic, metaclass=_NPValueMeta):
     """
@@ -1059,6 +1192,9 @@ typing.add_json_encoder(np.generic, _NPValueType.json_encoder)
 #       - external file
 
 class _ArrayType(np.ndarray):
+    nptype = None   # This must be a type (np.int32, not np.dtype('int32'))
+    _ndim = None
+
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
@@ -1094,33 +1230,44 @@ class _ArrayType(np.ndarray):
                 raise TypeError(f"{field.name} expects a variable with "
                                 f"{cls._ndim} dimensions.")
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
-            if np.issubdtype(value.dtype, cls.dtype):
+            if cls.nptype is None or np.issubdtype(value.dtype, cls.nptype):
                 result = value
-            elif (np.can_cast(value, cls.dtype)
-                  or np.issubdtype(np.dtype(value), np.dtype(str))):
+            elif (np.can_cast(value, cls.nptype)
+                  or np.issubdtype(value.dtype, np.dtype(str))):
                 # We make a exception to always allow casting strings
-                result = value.astype(cls.dtype)
+                nptype = infer_numpy_type_to_cast(cls.nptype, value)
+                result = value.astype(nptype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' (type  "
-                                f"{value.dtype}) to type {cls.dtype}.")
+                                f"{value.dtype}) to type {cls.nptype}.")
         else:
             result = np.array(value)
+            # HACK: Since np.array(…) will accept almost anything, we use
+            #       heuristics to try to detect when array construction has
+            #       probably failed
+            if any(isinstance(x, Iterable) and not isinstance(x, (np.ndarray, str, bytes))
+                   for x in result):
+               # Nested iterables should be unwrapped into an n-d array
+               # When this fails (if types or depths are inconsistent), then
+               # only the outer level is unwrapped.
+               raise TypeError(f"Unable to cast {value} to an array.")
+            # Check that array matches expected shape and dtype
+            if cls._ndim is not None and result.ndim != cls._ndim:
+                raise TypeError(
+                    f"The dimensionality of the data (dim: {result.ndim}, "
+                    f"shape: {result.shape}) does not correspond to the "
+                    f"expected of dimensions ({cls._ndim} for '{field.name}').")
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
-            if np.issubdtype(result.dtype, cls.dtype):
+            if cls.nptype is None or np.issubdtype(result.dtype, cls.nptype):
                 pass
-            elif (np.can_cast(result, cls.dtype)
+            elif (np.can_cast(result, cls.nptype)
                   or np.issubdtype(result.dtype, np.dtype(str))):
                 # We make a exception to always allow casting strings
-                if cls._ndim is not None and result.ndim != cls._ndim:
-                    raise TypeError(
-                        f"The shape of the data ({result.shape}) does not "
-                        "correspond to the expected of dimensions "
-                        f"({cls._ndim} for '{field.name}').")
-                elif result.dtype != cls.dtype:
-                    result = result.astype(cls.dtype)
+                nptype = infer_numpy_type_to_cast(cls.nptype, value)
+                result = value.astype(nptype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' (type  "
-                                f"{result.dtype}) to an array of type {cls.dtype}.")
+                                f"{result.dtype}) to an array of type {cls.nptype}.")
         return result
 
     @classmethod
@@ -1184,12 +1331,13 @@ class _ArrayMeta(type):
                 "`Array` must be specified as either `Array[T]`"
                 "or `Array[T, n], where `T` is a type and `n` is an int. "
                 f"(received: {args}]).")
-        dtype=typing.convert_dtype(T)
-        specifier = str(dtype)
+        nptype=typing.convert_nptype(T)
+        # specifier = str(nptype)
+        specifier = nptype.__name__
         if ndim is not None:
             specifier += f",{ndim}"
         return type(f'Array[{specifier}]', (_ArrayType,),
-                    {'dtype': dtype, '_ndim': ndim})
+                    {'nptype': nptype, '_ndim': ndim})
 
 # TODO: Make the json_encoder & validate methods available in Array,
 #       so we don't have to do things like `Array[float].validate(x)`,
@@ -1221,10 +1369,16 @@ class Array(np.ndarray, metaclass=_ArrayMeta):
     """
     @classmethod
     def __get_validators__(cls):
-        raise NotImplementedError("You must specify a data type with Array, "
-                                  "e.g. Array[np.float64].")
+        yield cls.validate
+        # raise NotImplementedError("You must specify a data type with Array, "
+        #                           "e.g. Array[np.float64].")
+    @classmethod
+    def validate(cls, v, field=None):
+        return _ArrayType.validate(v, field=None)
 
 typing.Array = Array
+# >>>> FIXME: The lines below don't work because generic type np.number -> np.float64
+# >>>>        Especially bad because it prevents specifying 0-dim for scalar
 typing.add_numerical_type(Array[np.number])
 typing.add_scalar_type(Array[np.number, 0])
 typing.add_json_encoder(np.ndarray, _ArrayType.json_encoder)
@@ -1246,7 +1400,10 @@ class RNGenerator(np.random.Generator):
               and 'bit_generator' in value and 'state' in value):
             # Looks like a json-serialized state dictionary
             BG = getattr(np.random, value['bit_generator'])()
-            BG.state = value
+            # If the state dictionary contains arrays, they may need to be deserialized
+            state = {k: Array.validate(v) if typing.json_like(v, 'Array') else v
+                     for k,v in value['state'].items()}
+            BG.state = {**value, 'state':state}
             return np.random.Generator(BG)
         else:
             raise TypeError(f"Field {field.name} expects an instance of "
@@ -1278,6 +1435,8 @@ class RandomState(np.random.RandomState):
             field = SimpleNamespace(name='')
         if isinstance(value, np.random.RandomState):
             return value
+        elif isinstance(value, int):
+            return np.random.RandomState(value)
         elif (isinstance(value, Sequence) and 'MT19937' in value):
             # Looks like a json-serialized state tuple
             rs = np.random.RandomState()

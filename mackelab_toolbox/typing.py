@@ -8,7 +8,7 @@ the loaded sys.modules.
 # This is the same trick used in the official typing module:
 #     https://github.com/python/typing/blob/d79eddef37cb09ca9a3d763364c4feb7b8473402/src/typing.py#L2435
 # with the added hackiness that we are replacing the current module in
-# sys.modules. I think this is OK ?
+# sys.modules.
 import sys
 from mackelab_toolbox.typing_module import typing
 sys.modules[__name__] = typing
