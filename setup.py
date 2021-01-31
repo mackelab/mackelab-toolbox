@@ -2,9 +2,17 @@ from setuptools import setup
 
 setup(
     name='mackelab-toolbox',
-    version='0.1.0dev2',
+    version='0.1.0dev3',
     description='Common utils for Mackelab',
     url='https://github.com/mackelab/mackelab_toolbox',
+
+    classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Intended Audience :: Science/Research',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3 :: Only',
+    ],
+
     install_requires=[
         'matplotlib',
         'seaborn',
@@ -26,21 +34,17 @@ setup(
             'Click',
             'sumatra[git]',
             'docutils', 'PyYAML', 'httplib2',  # Required by Sumatra
-	        'psycopg2'    # Required for using PostgreSQL Sumatra record stores
+	        # 'psycopg2'    # Required for using PostgreSQL Sumatra record stores
         ],
         'pymc3': [
             'pymc3'
-        ],
-        'luigi': [
-            'psutil'
         ],
         'theano': [
             'theano_shim>=0.2'
         ],
         'all': [
-            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2', 'psycopg2',
-            'psutil',
-            'theano_shim>=0.2',
+            'Click', 'sumatra[git]', 'pymc3', 'docutils', 'PyYAML', 'httplib2',# 'psycopg2',
+            'theano_shim>=0.3.0dev0',
             'pygments',
             'IPython'
         ]
