@@ -588,13 +588,13 @@ def prune_dict(data: dict, keys: set):
     """
     data = data.copy()
     if not isinstance(keys, set):
-        raise TypeError("`recursive_dict_prune` expects a 'set' as `keys` "
+        raise TypeError("`prune_dict` expects a 'set' as `keys` "
                         f"argument; received {keys} (type: {type(keys)}).")
     for k in keys:
         data.pop(k, None)
     for k, v in data.items():
         if isinstance(v, dict):
-            data[k] = recursive_dict_prune(v, keys)
+            data[k] = prune_dict(v, keys)
     return data
 
 ############################
