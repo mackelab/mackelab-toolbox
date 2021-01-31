@@ -58,7 +58,7 @@ __ALL__ = []
 # # 8x increase with simple_eval
 # %timeit simpleeval.simple_eval("np.log(x)", names={'x': arr, 'np': np})
 # 25.3 µs ± 223 ns per loop (mean ± std. dev. of 7 runs, 10000 loops each)
-# # Reduced to 6x if we use preconstruct object. Assigning x value at each
+# # Reduced to 6x if we use preconstructed object. Assigning x value at each
 # # evaluation makes little difference
 # %timeit seval.eval("np.log(x)")
 # 17.2 µs ± 1.09 µs per loop (mean ± std. dev. of 7 runs, 10000 loops each)

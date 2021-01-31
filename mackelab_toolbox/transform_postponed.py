@@ -27,7 +27,7 @@ class TransformedVar(pydantic.BaseModel):
         If these variables have a `name` attribute, it is set correspondingly.
         This parameter may be used to override the names defined by `bijection`.
     orig, new: (symbolic) scalar or array
-        Exactly one of `orig`, `new` must be provided. It may be symbolic.
+        Exactly one of (`orig`, `new`) must be provided. It may be symbolic.
     """
 
     bijection : Bijection
@@ -234,6 +234,14 @@ class NonTransformedVar(pydantic.BaseModel):
             orig = new
         else:
             new = orig
+        # HACK? Special exception: if the variables have names 'orig' and 'new',
+        # they were most probably specified as objects without names and
+        # cgshim's symbolic validator assigned them the field name.
+        # In that case, we should replace by the provided name without error.
+        if getattr(orig, 'name', "") == "orig":
+            orig.name = names.orig
+        if getattr(new, 'name', "") == "new":
+            new.name = names.new
         if hasattr(orig, 'name'):
             if names is not None:
                 if orig.name is None:
