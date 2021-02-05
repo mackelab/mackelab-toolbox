@@ -342,7 +342,7 @@ def make_paramrecs(params, labels=None):
         labels = []
     i = 0
     recs = []
-    for p in tqdm(params):
+    for p in tqdm(params, leave=False):
         if not isinstance(p, dict) and hasattr(p, 'parameters'):
             if isinstance(p.parameters, str):
                 # Parameters were simply stored as a string
