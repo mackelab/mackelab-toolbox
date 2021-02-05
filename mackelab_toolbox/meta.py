@@ -264,14 +264,6 @@ class HideCWDFromImport:
             self.hidden_dir = directory.rsplit('/', 1)[0]
         else:
             self.hidden_dir = __file__.rsplit('/', 1)[0]
-        # if hidden_dir:
-        #     self.hidden_dir = hidden_dir
-        # else:
-        #     import os
-        #     self.hidden_dir = os.getcwd()
-
-        with open("typing-import.log", 'a') as f:
-            f.write(f"HideCWD.file_path: {self.hidden_dir}\n")
 
     def __enter__(self):
         # Python will search both in the script directory and the current directory
