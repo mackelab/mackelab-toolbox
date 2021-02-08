@@ -626,7 +626,7 @@ class CompiledGraphCache(GraphCache):
         all_graphs = graphs + list(updates.keys()) + list(updates.values())
         shared_inputs = [si for si in shim.graph.shared_inputs(all_graphs)
                             if not isinstance(si, shim.cf.RandomStateType)]
-            # Random state is pickled separately and doesn't need varable names
+            # Random state is pickled separately and doesn't need variable names
         # Check that all non-constant inputs have unique names
         # (we need the names to sub variables back when we reload the graph)
         # We just log the error but don't stop execution, because the code

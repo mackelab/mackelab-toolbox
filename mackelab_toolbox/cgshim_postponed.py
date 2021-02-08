@@ -74,17 +74,20 @@ def get_type(baseT, Tname, namedesc, validators=()):
                         name = name[:-len(Tname)-1]
                     value.name = name
                 if cls.nptype is not None:
-                    if not np.can_cast(value.dtype, cls.nptype):
+                    target_nptype = cls.nptype
+                    # If nptype is an NPValue, we want _its_ nptype
+                    target_nptype = getattr(target_nptype, 'nptype', target_nptype)
+                    if not np.can_cast(value.dtype, target_nptype):
                         logger.error(
                             f"{field.name} expects a {namedesc} variable with "
-                            f"data type {cls.nptype}. Provided value has dtype "
+                            f"data type {target_nptype}. Provided value has dtype "
                             f"{value.dtype}, which is not a permitted cast. "
                             "Note that for symbolic variables, we perform no "
                             "casting, so types must match exactly.")
-                    elif not np.dtype(value.dtype) is np.dtype(cls.nptype):
+                    elif not np.dtype(value.dtype) is np.dtype(target_nptype):
                         logger.warning(
                             f"{field.name} expects a {namedesc} variable with "
-                            f"data type {cls.nptype}. Provided value has dtype "
+                            f"data type {target_nptype}. Provided value has dtype "
                             f"{value.dtype}, which is not a permitted cast. "
                             "Note that for symbolic variables, we perform no "
                             "casting, so types must match exactly.")
@@ -255,7 +258,7 @@ else:
                 elif isinstance(value, int):
                     mrg_state = value
                 elif isinstance(value, np.ndarray):
-                    mrg_state = mtb.typing.Array[np.integere,1].validate(value[1], field).astype(np.int32)
+                    mrg_state = mtb.typing.Array[np.integer,1].validate(value[1], field).astype(np.int32)
                 else:
                     raise ValueError("Unable to deserialize RandomStateStream; "
                                      f"received: {value}.")
