@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 ###################
 # Introspection / Class-hacking / Metaprogramming
 
@@ -127,6 +129,123 @@ def print_function_api(fn, name=None, docstring_indent: int=4):
     print(f"{name}{inspect.signature(fn)}")
     print(textwrap.indent(docstring+"\n", indent_prefix))
 
+def print_subpackage_listing(__file__: str, namespace: Dict[str,object]):
+    """
+    Print the list of available objects, organized by the module where
+    they are defined.
+
+    This is intended to make collections of functions more discoverable in
+    interactive sessions. For example, a set of analysis tools may use this to
+    implement a `help()` function listing all functions.
+    This doesn't replace well-written documentation, but it has the advantage
+    of being immediately available during a session, and always being up to date.
+
+    Typical usage in a __init__ file would look like:
+
+        # mytools/__init__.py
+
+        from .analysis import *
+        from .post_analysis import *
+
+        def help():
+            from mackelab_toolbox.meta import print_subpackage_listing
+            print_subpackage_listing(__file__, globals())
+
+    Parameters
+    ----------
+    __file__: The file from which this function is called. In most cases
+        ``__file__`` should be appropriate.
+
+    namespace: The dictionary of identifiers available from within the module
+        pointed to by `__file__`. Normally this would be ``globals()``; a
+        subset of the contents of the ``globals()`` would also be appropriate.
+        In any case, only entries which derive from the same parent as
+        `__file__` will be shown, since those are generally the ones that
+        are relevant.
+    """
+    from textwrap import dedent
+    import inspect
+    import sys
+    prefix = "  "     # Indent prefix indicating sections
+    outputwidth = 80  # Minimum expected width of the console window
+
+    # Parse __file__. Deal with __init__.py specially, since in that case the parent is both name and root
+    assert __file__ is not None
+    for nm, mod in sys.modules.items():
+        if getattr(mod, '__file__', None) == __file__:
+            break
+    assert mod.__file__ == __file__  # Loop actually found a match
+    __name__ = mod.__name__
+    directory, filename = __file__.rsplit('/', 1)
+    if filename == "__init__.py":
+        root = __name__
+    else:
+        root = __name__.rsplit('.', 1)[0]  # The subpackage containing this file
+    # At this point, `__name__` and `__file__` are as if we were executing from
+    # within the file pointed to by `__file__`.
+    # `root` is the parent from which objects in `namespace` can be imported.
+
+    objs = {}
+    root = __name__.rsplit('.', 1)[0]  # The subpackage containing this file
+    for nm, obj in namespace.items():
+        if (nm.startswith('_')
+              or not hasattr(obj, '__module__')  # Required for last test, but forces exclusion of variables
+              or root not in obj.__module__      # Only show nephew submodules
+              or obj is help):  # Don't show this help function
+            continue
+        if obj.__module__ not in objs:
+            objs[obj.__module__] = {}
+        objs[obj.__module__][nm] = obj
+
+    print(dedent(f"""
+        The following classes can be imported as
+
+          from {__name__} import <C1>, <C2>, …
+
+        where <C1>, <C2>, etc. are replaced by their names.
+
+        Classes are grouped by the module in which they are defined.
+
+        Additional information is displayed to the right of each class,
+        currently its concrete (non-virtual) parents.
+        The content of this information is field may change in the future.
+        """))
+
+    for module in sorted(objs):
+        if module.startswith(f"{root}."):
+            mod_nm = module[len(root)+1:]
+        else:
+            mod_nm = module
+        print(f"From <…>.{mod_nm}:")
+        max_len = max(len(nm) for nm in objs[module])
+        info_indent = " "*(len(prefix) + max_len + 2)
+        info_width = outputwidth - len(info_indent)
+
+        for obj_nm in sorted(objs[module]):
+            obj = objs[module][obj_nm]
+            # Info is composed of all parent types in MRO which are
+            # defined below `root`
+            # We break lines so that in most cases they won't wrap
+            # (which breaks the alignment used to denote sections)
+            if isinstance(obj, type):
+                parents = [T.__qualname__ for T in obj.mro()[1:]
+                           if root in T.__module__]
+                if parents:
+                    infolines = [parents[0]]
+                    for parent in parents[1:]:
+                        if len(infolines[-1]) + len(parent) > info_width:
+                            infolines[-1] += ","
+                            infolines.append(info_indent + parent)
+                        else:
+                            infolines[-1] += ", " + parent
+                else:
+                    infolines = [""]
+                info = '\n'.join(infolines)
+            else:
+                info = f"function, {inspect.signature(obj)}"
+            print(f"{prefix}{obj_nm:<{max_len}}: {info}")
+        print()  # Empty line between module sections
+
 # DEVNOTE: If you want to avoid the dependency on mackelab_toolbox by copying
 #    this into your project, note that it is very easy to accidentally introduce
 #    import cycles. For examples, the following won't work:
@@ -151,6 +270,7 @@ def print_function_api(fn, name=None, docstring_indent: int=4):
 #    implicitely executes `import MyProject.__init__.py`.
 #    The simplest way is to have a module containing only `HideCWDFromImport`,
 #    place it in the same directory, and import without any dot in the path.
+#    Or to package HideCWDFromImport in an external package, as we've done here.
 class HideCWDFromImport:
     """
     Context manager with prevents the current directory from being searched in
