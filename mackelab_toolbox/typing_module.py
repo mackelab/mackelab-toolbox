@@ -406,6 +406,31 @@ class TypeContainer(metaclass=utils.Singleton):
         self._AllUnitTypes.add(type)
 
     ####################
+    # Less unsafe importing of arbitrary modules
+
+    # Without `safe_modules`, a malicious actor could modify a data file
+    # containing a serialized model, pointing 'module' to some any file in
+    # PYTHONPATH, and it would be executed during deserialization. Now, that
+    # file would have to be within one of the standard packages (or the user's
+    # own package), which are ostensibly already being trusted and executed.
+    safe_packages = {
+        'mackelab_toolbox'
+    }
+        # A user can add a module or package to this whitelist with
+        #   mtbtyping.safe_packages.add('module_name')
+        # or
+        #   mtbtyping.safe_packages.update(['module1_name', 'module2_name'])
+        # Only the top level package name needs to be added.
+
+    def import_module(self, module):
+        import importlib
+        if not any(module.startswith(sm) for sm in self.safe_packages):
+            raise ValueError(f"Module {module} is not a submodule of one of the "
+                             "listed safe packages.\n"
+                             f"Safe packages: {self.safe_packages}")
+        return importlib.import_module(module)
+
+    ####################
     # Managing JSON encoders
 
     def add_json_encoder(self, type, encoder, priority=0):
@@ -1035,14 +1060,16 @@ def infer_numpy_type_to_cast(nptype, value):
     most appropriate concrete type. We only do the most common cases;
     we can extend later to the complete tree.
     """
-    assert issubclass(nptype, np.generic)
+    # If `nptype` is an NPValue subclass, get the true numpy type
+    nptype = getattr(nptype, 'nptype', nptype)
+    assert issubclass(nptype, np.generic), f"{nptype} is not a subclass of `np.generic`"
     if nptype is np.generic:
         raise NotImplementedError("Unclear how we should cast np.generic.")
     if issubclass(nptype, np.flexible):  # void, str, unicode
         # Assume concrete type
         return nptype
     elif not issubclass(nptype, np.number):  # bool, object
-        assert (nptype is np.bool_ or nptype is np.object_)
+        assert (nptype is np.bool_ or nptype is np.object_), f"Expected NumPy type 'bool' or 'object'; received '{nptype}'"
         return nptype
     else:  # Number
         if issubclass(nptype, np.integer):
@@ -1065,7 +1092,7 @@ def infer_numpy_type_to_cast(nptype, value):
                     # Assume concrete type
                     return nptype
             else:
-                assert nptype is np.inexact
+                assert nptype is np.inexact, f"Expected NumPy type 'inexact'; received '{nptype}'"
                 # We try to guess which type to use between float and complex.
                 # We make a rudimentary check for complex, and fall back to float.
                 if isinstance(value, complex):
@@ -1075,7 +1102,7 @@ def infer_numpy_type_to_cast(nptype, value):
                 else:
                     return np.float_
         else:
-            assert nptype is np.number
+            assert nptype is np.number, f"Expected NumPy type 'number'; received '{nptype}'"
             # We try to guess which type to use between int, float and complex.
             # We make a rudimentary check for int, complex, and fall back to float.
             if isinstance(value, int):
@@ -1211,18 +1238,21 @@ class _ArrayType(np.ndarray):
             raise TypeError(f"Values of type {type(value)} cannot be casted "
                              "to a numpy array.")
 
-        if isinstance(value, Sequence) and value[0] == 'Array':
-            encoding = value[1]['encoding']
-            compression = value[1]['compression']
-            assert encoding == 'b85'
-            assert compression in ['blosc', 'none']
-            encoded_array = value[1]['data']
-            v_bytes = base64.b85decode(encoded_array)
-            if compression == 'blosc':
-                v_bytes = blosc.decompress(v_bytes)
-            with io.BytesIO(v_bytes) as f:
-                decoded_array = np.load(f)
-            return decoded_array
+        if typing.json_like(value, "Array"):
+            if 'compression' in value[1]:
+                encoding = value[1]['encoding']
+                compression = value[1]['compression']
+                assert encoding == 'b85', f"Array reports encoding '{encoding}'; should be 'b85'"
+                assert compression in ['blosc', 'none'], f"Array records compression '{compression}'; should be 'blosc' or 'none'"
+                encoded_array = value[1]['data']
+                v_bytes = base64.b85decode(encoded_array)
+                if compression == 'blosc':
+                    v_bytes = blosc.decompress(v_bytes)
+                with io.BytesIO(v_bytes) as f:
+                    decoded_array = np.load(f)
+                return decoded_array
+            else:
+                return np.array(value[1]['data'], dtype=value[1]['dtype'])
 
         elif isinstance(value, np.ndarray):
             # Don't create a new array unless necessary
@@ -1245,8 +1275,10 @@ class _ArrayType(np.ndarray):
             # HACK: Since np.array(…) will accept almost anything, we use
             #       heuristics to try to detect when array construction has
             #       probably failed
-            if any(isinstance(x, Iterable) and not isinstance(x, (np.ndarray, str, bytes))
-                   for x in result):
+            if (isinstance(result, Sequence)
+                and any(isinstance(x, Iterable)
+                        and not isinstance(x, (np.ndarray, str, bytes))
+                        for x in result)):
                # Nested iterables should be unwrapped into an n-d array
                # When this fails (if types or depths are inconsistent), then
                # only the outer level is unwrapped.
@@ -1281,7 +1313,9 @@ class _ArrayType(np.ndarray):
         threshold = 100  # ~ break-even point for 64-bit floats, blosc, base85
         if v.size <= threshold:
             # For short array, just save it as a string
-            return v.tolist()
+            # Since the string loses type information, save the dtype as well.
+            return ('Array', {'data': v.tolist(),
+                              'dtype': v.dtype})
         else:
             # Save longer arrays in base85 encoding, with short summary
             if encoding != 'b85':
@@ -1339,9 +1373,6 @@ class _ArrayMeta(type):
         return type(f'Array[{specifier}]', (_ArrayType,),
                     {'nptype': nptype, '_ndim': ndim})
 
-# TODO: Make the json_encoder & validate methods available in Array,
-#       so we don't have to do things like `Array[float].validate(x)`,
-#       where `float` is ignored and without consequence.
 class Array(np.ndarray, metaclass=_ArrayMeta):
     """
     Use this to specify a NumPy array type annotation; `pydantic` will
