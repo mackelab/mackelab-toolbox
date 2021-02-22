@@ -1,10 +1,24 @@
+from __future__ import annotations
+
 from theano import function, config, shared, tensor
 import numpy
 from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
 
+##############################################
+# Manifest                                   #
+# --------                                   #
+# - Utility functions                        #
+# - Pydantic-aware types                     #
+# - Caching graphs and compiled graphs       #
+##############################################
+
 # TODO: Add shim terminating types to utils.terminating_types
+
+# =====================================
+# Utility functions
+# =====================================
 
 def using_gpu():
     """
@@ -22,8 +36,285 @@ def using_gpu():
         return True
 
 # =====================================
+# Pydantic-aware types
+# =====================================
+
+"""
+If a libraries defines a specialized Theano types, it should do two things
+to ensure it can be deserialized:
+
+- Call `add_variable_subtype` within the module where the type is defined.
+- Call `freeze_theano_types` ONCE, after all types have been added.
+"""
+
+# NOTE: These addition of these types is use-case driven, so they are unlikely
+#   to cover every possible Theano graph
+
+# PROBLEM: Other libraries (in particular PyMC) define specialized theano
+#   variable subtypes. To deserialize graphs using these properly, these need to
+#   be included in the list of types accepted by TheanoApplyData. But since we
+#   don't know which types will be loaded, we can't add them to the
+#   TheanoApplyData definition.
+# SOLUTION: This is a similar problem to that of forward referencing types,
+#   and we abuse `typing.ForwardRef` to solve it. We declare the theano
+#   variable types as a ForwardRef (i.e. a string): ``'Union[TheanoVariable]'``.
+#   We can then add types by manipulating the string. Once all types are added,
+#   a call to `update_forward_refs` converts them to the desired Union of types.
+# REMARK: The specialized subtypes are likely to also depend on types defined
+#   here. Thus when we freeze the types, we need to call `update_forward_refs`
+#   both on the types defined here and all those added to `theano_variable_subtypes`.
+
+# TODO: Add tests; see IndEEG/tests/test_pymc_typing.py
+
+# TODO: We should probably store test_values as well.
+
+# FIXME!!: Variables that appear in multiple locations in a graph are serialized
+#   separately, meaning
+#   a) The serialized data contains duplicate information
+#   b) Each duplicated variable deserializes as a SEPARATE variable.
+#   The PyMC deserializers hacks around this by inspecting the model context
+#   for variables with the same name.
+
+from pydantic import BaseModel
+from typing import ForwardRef
+from typing import Optional, Union, Any, List, Tuple
+import mackelab_toolbox.typing as mtbtyping
+from mackelab_toolbox.typing import json_like, import_module
+from types import SimpleNamespace
+
+import theano.tensor          # Variable
+import theano.scalar.basic    # ScalarOp
+import theano.graph.basic     # Apply
+import theano.tensor.elemwise # Elemwise
+
+mtbtyping.safe_packages.add('theano')
+
+# These variables should only be modified by module functions
+theano_types_frozen = False
+subtype_namespace = {}
+
+def add_variable_subtype(T: type):
+    """
+    Libraries can add types (e.g. PyMC random vars)
+    which should also be recognized as Theano variables.
+    Subtypes added later have higher precedence, and all sutypes have precedence
+    over the default TheanoVariable.
+
+    All subtypes must be added is forward refs (i.e. strings).
+    Once they are defined, call `update_forward_refs` with the types themselves.
+    """
+    # global theano_variable_subtypes
+    global subtype_namespace
+    global TheanoApplyData
+    assert isinstance(T, type)
+    Tname = T.__name__
+    # Update the forward ref in TheanoApplydata
+    oldt = TheanoApplyData.__fields__['inputs'].type_
+    if not isinstance(oldt, ForwardRef):
+        raise RuntimeError("Theano types have already been frozen: cannot "
+                           "add new subtypes.")
+    oldt_str = oldt.__forward_arg__
+    assert oldt_str.startswith('Union[') and oldt_str.endswith(']')
+    newt = ForwardRef(f"{oldt_str[:6]}{Tname},{oldt_str[6:]}")
+    TheanoApplyData.__fields__['inputs'].type_ = newt
+    # Add type to the namespace, so it can be found when forward refs are replaced by types
+    subtype_namespace[Tname] = T
+
+def freeze_theano_types():
+    # TODO: Prevent further additions to `theano_variable_subtypes`
+    global theano_types_frozen
+    if theano_types_frozen:
+        raise RuntimeError("Theano types can only be frozen once.")
+    theano_types_frozen = True
+
+    # Update forward refs for types defined in this module
+    global subtype_namespace
+    global TheanoTensorType
+    global TheanoVariable
+    global TheanoConstant
+    global TheanoTensorVariable
+    global TheanoTensorConstant
+    global TheanoApplyData
+    global TheanoElemwiseOp
+    TheanoTensorType.Data.update_forward_refs(**subtype_namespace)
+    TheanoVariable.Data.update_forward_refs(**subtype_namespace)
+    TheanoConstant.Data.update_forward_refs(**subtype_namespace)
+    TheanoTensorVariable.Data.update_forward_refs(**subtype_namespace)
+    TheanoTensorConstant.Data.update_forward_refs(**subtype_namespace)
+    TheanoApplyData.update_forward_refs(**subtype_namespace)
+    TheanoElemwiseOp.Data.update_forward_refs(**subtype_namespace)
+    # Update forward refs for added subtypes
+    # NOTE: This is a heuristic, and may not be the best way to go about it.
+    #       (OTOH, it may not even be necessary in most cases)
+    for T in subtype_namespace.values():
+        if hasattr(T, 'update_forward_refs'):
+            T.update_forward_refs()
+        if hasattr(T, 'Data') and hasattr(T.Data, 'update_forward_refs'):
+            T.Data.update_forward_refs()
+
+class TheanoTensorType(theano.tensor.TensorType):
+    class Data(BaseModel):
+        dtype: str
+        broadcastable: Tuple[bool,...]
+        name: Union[str,None]
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, theano.tensor.TensorType):
+            return v
+        elif json_like(v, cls.__qualname__):
+            data = cls.Data.validate(v[1])
+            return theano.tensor.TensorType(**data.dict())
+        else:
+            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
+                            f"{cls} and doesn't match its serialization format")
+    @classmethod
+    def json_encoder(cls, t):
+        return (cls.__qualname__,
+                cls.Data(name=t.name, dtype=t.dtype,
+                         broadcastable=t.broadcastable))
+mtbtyping.add_json_encoder(theano.tensor.TensorType, TheanoTensorType.json_encoder)
+
+class TheanoVariable(theano.tensor.Variable):
+    class Data(BaseModel):
+        type: TheanoTensorType
+        owner: Union[TheanoApplyData,None]
+        name: Union[str,None]
+        test_value: Optional[mtbtyping.Array]
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, cls.mro()[1]):
+            return v
+        elif json_like(v, cls.__qualname__):
+            data = cls.Data.validate(v[1])
+            if isinstance(data.owner, TheanoApplyData):
+                v = data.owner.op(*data.owner.inputs)
+                v.name = data.name
+                if v.type != data.type:
+                    logger.error("Serialized data indicated a variable of type "
+                                 f"{data.type}, but deserialization produced a "
+                                 f"variable of type {v.type}.")
+            else:
+                v = cls(**data.dict(exclude={'test_value'}))
+            if data.test_value is not None:
+                if getattr(v.tag, 'test_value', None) is None:
+                    v.tag.test_value = data.test_value
+                elif v.tag.test_value != data.test_value:
+                    logger.error("Serialized data indicated a test value "
+                                 f"{data.test_value}, but deserialization "
+                                 f"produced the value {v.tag.test_value}.")
+            return v
+        else:
+            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
+                            f"{cls} and doesn't match its serialization format")
+    @classmethod
+    def json_encoder(cls, v):
+        return (cls.__qualname__, cls.Data(**v.__getstate__(),
+                                           test_value=getattr(v.tag, 'test_value', None)))
+mtbtyping.add_json_encoder(theano.tensor.Variable, TheanoVariable.json_encoder, priority=-5)
+    # Lower priority because this is a fallback type
+
+class TheanoTensorVariable(theano.tensor.TensorVariable, TheanoVariable):
+    pass
+mtbtyping.add_json_encoder(theano.tensor.TensorVariable, TheanoTensorVariable.json_encoder)
+
+class TheanoConstant(theano.tensor.Constant, TheanoVariable):
+    class Data(BaseModel):
+        type: TheanoTensorType
+        data: mtbtyping.Array
+        name: Union[str,None]
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, cls.mro()[1]):
+            return v
+        elif json_like(v, cls.__qualname__):
+            data = cls.Data.validate(v[1])
+            return cls(**data.dict())
+        else:
+            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
+                            f"{cls} and doesn't match its serialization format")
+mtbtyping.add_json_encoder(theano.tensor.Constant, TheanoConstant.json_encoder, priority=-4)
+
+class TheanoTensorConstant(theano.tensor.TensorConstant, TheanoConstant):
+    pass
+mtbtyping.add_json_encoder(theano.tensor.TensorConstant, TheanoTensorConstant.json_encoder)
+
+class TheanoApplyData(BaseModel):
+    # We don't inherit from theano.graph.basic.Apply, because this doesn't
+    # become a true Apply node – just a placeholder, so that TheanoVariable can
+    # call its op on its arguments
+    op: TheanoElemwiseOp
+    # For `update_forward_refs` to work, we can't have a Union of ForwardRefs,
+    # but we can have List['Union[T1,T2]']
+    inputs: List[ForwardRef('Union[TheanoTensorConstant,TheanoTensorVariable,TheanoConstant,TheanoVariable]')]
+        # TODO: Any other possible plain Theano types ?
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, theano.graph.basic.Apply):
+            return cls.json_encoder(v)
+        else:
+            return super().validate(v)
+    @classmethod
+    def json_encoder(cls, apply_node):
+        return cls(**apply_node.__getstate__())
+mtbtyping.add_json_encoder(theano.graph.basic.Apply, TheanoApplyData.json_encoder)
+
+# NOTE: Attribute types are based on inspection; there could be other possible types.
+class TheanoElemwiseOp(theano.tensor.elemwise.Elemwise):
+    class Data(BaseModel):
+        name     : Union[str,None]
+        scalar_op: TheanoScalarOp
+        inplace_pattern: dict
+        nfunc_spec : Any   # FIXME: Find proper type
+        openmp     : bool
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, theano.tensor.elemwise.Elemwise):
+            return v
+        elif json_like(v, 'TheanoElemwiseOp'):
+            data = cls.Data.validate(v[1])
+            return theano.tensor.elemwise.Elemwise(**data.dict())
+        else:
+            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
+                            f"{cls} and doesn't match its serialization format")
+    @classmethod
+    def json_encoder(cls, op):
+        return (cls.__qualname__, cls.Data(**op.__getstate__()))
+mtbtyping.add_json_encoder(theano.tensor.elemwise.Elemwise, TheanoElemwiseOp.json_encoder)
+
+class TheanoScalarOp(theano.scalar.basic.ScalarOp):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, theano.scalar.basic.ScalarOp):
+            return v
+        elif json_like(v, 'TheanoScalarOp'):
+            module = import_module(v[1])
+            op = getattr(module, v[2])
+            return op
+        else:
+            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
+                            f"{cls} and doesn't match its serialization format")
+    @classmethod
+    def json_encoder(cls, op):
+        return (cls.__qualname__, op.__module__, op.name)
+mtbtyping.add_json_encoder(theano.scalar.basic.ScalarOp, TheanoScalarOp.json_encoder)
+
+
+# =====================================
 # Caching graphs and compiled graphs
 # =====================================
+# TODO?: Use the new pydantic-aware types above to serialize graphs ?
 # TODO: Don't repeat code between GraphCache and CompiledGraphCache
 # TODO: Key CompiledGraphCache on all function args (input, output, flags…)
 
