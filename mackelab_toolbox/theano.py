@@ -60,13 +60,14 @@ to ensure it can be deserialized:
 #   variable types as a ForwardRef (i.e. a string): ``'Union[TheanoVariable]'``.
 #   We can then add types by manipulating the string. Once all types are added,
 #   a call to `update_forward_refs` converts them to the desired Union of types.
-# REMARK: The specialized subtypes are likely to also depend on types defined
+# REMARK: The specialized subtypes may also depend on types defined
 #   here. Thus when we freeze the types, we need to call `update_forward_refs`
 #   both on the types defined here and all those added to `theano_variable_subtypes`.
 
-# TODO: Add tests; see IndEEG/tests/test_pymc_typing.py
+# NOTE: Currently this has only been tested (and is only likely to work)
+#   alongside the PyMC types (see pymc_typing.py).
 
-# TODO: We should probably store test_values as well.
+# TODO: Add non-pymc tests.
 
 # FIXME!!: Variables that appear in multiple locations in a graph are serialized
 #   separately, meaning
