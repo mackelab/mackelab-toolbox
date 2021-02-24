@@ -83,7 +83,7 @@ import mackelab_toolbox.typing as mtbtyping
 from mackelab_toolbox.typing import json_like, import_module
 from types import SimpleNamespace
 
-import theano.tensor          # Variable
+import theano.tensor as tt    # Variable
 import theano.scalar.basic    # ScalarOp
 import theano.graph.basic     # Apply
 import theano.tensor.elemwise # Elemwise
@@ -137,6 +137,7 @@ def freeze_theano_types():
     global TheanoTensorConstant
     global TheanoApplyData
     global TheanoElemwiseOp
+    global TheanoCAReduceOp
     TheanoTensorType.Data.update_forward_refs(**subtype_namespace)
     TheanoVariable.Data.update_forward_refs(**subtype_namespace)
     TheanoConstant.Data.update_forward_refs(**subtype_namespace)
@@ -144,6 +145,7 @@ def freeze_theano_types():
     TheanoTensorConstant.Data.update_forward_refs(**subtype_namespace)
     TheanoApplyData.update_forward_refs(**subtype_namespace)
     TheanoElemwiseOp.Data.update_forward_refs(**subtype_namespace)
+    TheanoCAReduceOp.Data.update_forward_refs(**subtype_namespace)
     # Update forward refs for added subtypes
     # NOTE: This is a heuristic, and may not be the best way to go about it.
     #       (OTOH, it may not even be necessary in most cases)
@@ -153,103 +155,146 @@ def freeze_theano_types():
         if hasattr(T, 'Data') and hasattr(T.Data, 'update_forward_refs'):
             T.Data.update_forward_refs()
 
-class TheanoTensorType(theano.tensor.TensorType):
-    class Data(BaseModel):
-        dtype: str
-        broadcastable: Tuple[bool,...]
-        name: Union[str,None]
+class TheanoSerializer:
+    """
+    Mixin class adding standard Pydantic-aware methods.
+    Requires subclasses to define two paired methods:
+
+    - `encode()`
+    - `decode()`
+
+    which should satisfy ``decode(encode(x)) == x``.
+    """
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
     def validate(cls, v):
-        if isinstance(v, theano.tensor.TensorType):
+        # Allow a class to set its target type, otherwise use the first
+        # parent in the MRO
+        targetT = getattr(cls, 'targetT', cls.mro()[1])
+        if targetT is not None and isinstance(v, targetT):
             return v
         elif json_like(v, cls.__qualname__):
-            data = cls.Data.validate(v[1])
-            return theano.tensor.TensorType(**data.dict())
+            return cls.decode(v[1])
         else:
             raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
-                            f"{cls} and doesn't match its serialization format")
+                            f"{targetT} and doesn't match its serialization format")
     @classmethod
-    def json_encoder(cls, t):
-        return (cls.__qualname__,
-                cls.Data(name=t.name, dtype=t.dtype,
-                         broadcastable=t.broadcastable))
-mtbtyping.add_json_encoder(theano.tensor.TensorType, TheanoTensorType.json_encoder)
+    def json_encoder(cls, v):
+        return (cls.__qualname__, cls.encode(v))
 
-class TheanoVariable(theano.tensor.Variable):
+class TheanoTypeSerializer(TheanoSerializer):
+    """
+    For serializing types instead of instances.
+    Typically used for Ops, which serialize their data and their type,
+    and then reconstruct them.
+
+    Abstract type: subclasses must define ``base_type``, from which serialized
+    must inherit.
+    """
+    @classmethod
+    def validate(cls, v):
+        # Allow a class to set its target type, otherwise use the first
+        # parent in the MRO
+        if isinstance(v, type) and issubclass(v, cls.base_type):
+            return v
+        elif json_like(v, cls.__qualname__):
+            return cls.decode(v[1])
+        else:
+            raise TypeError(f"Value {v} is not a subclass of {cls.base_type} "
+                            "and doesn't match the serialization format of "
+                            f"{cls.__qualname__}.")
+    @classmethod
+    def decode(cls, v):
+        module = import_module(v[1])
+        T = getattr(module, v[2])
+        if not isinstance(T, type):
+            raise ValueError(f"Deserialized {T} is not a type.")
+        elif not issubclass(T, cls.base_type):
+            raise TypeError(f"Deserialized {T} is not a subclass of {cls.base_type}.")
+        return T
+    @classmethod
+    def encode(cls, T):
+        assert isinstance(T, type)
+        # assert issubclass(T, cls.base_type)  # Can't do b/c encoding uses the base class
+        return (T.__module__, T.__name__)
+mtbtyping.add_json_encoder(
+    theano.graph.utils.MetaType, TheanoTypeSerializer.json_encoder)
+
+
+class TheanoTensorType(tt.TensorType, TheanoSerializer):
+    class Data(BaseModel):
+        dtype: str
+        broadcastable: Tuple[bool,...]
+        name: Union[str,None]
+    @classmethod
+    def decode(cls, v):
+        data = cls.Data.validate(v[1])
+        return tt.TensorType(**data.dict())
+    @classmethod
+    def encode(cls, t):
+        return cls.Data(name=t.name, dtype=t.dtype,
+                        broadcastable=t.broadcastable)
+mtbtyping.add_json_encoder(tt.TensorType, TheanoTensorType.json_encoder)
+
+class TheanoVariable(tt.Variable, TheanoSerializer):
     class Data(BaseModel):
         type: TheanoTensorType
         owner: Union[TheanoApplyData,None]
         name: Union[str,None]
         test_value: Optional[mtbtyping.Array]
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    @classmethod
-    def validate(cls, v):
-        if isinstance(v, cls.mro()[1]):
-            return v
-        elif json_like(v, cls.__qualname__):
-            data = cls.Data.validate(v[1])
-            if isinstance(data.owner, TheanoApplyData):
-                v = data.owner.op(*data.owner.inputs)
-                v.name = data.name
-                if v.type != data.type:
-                    logger.error("Serialized data indicated a variable of type "
-                                 f"{data.type}, but deserialization produced a "
-                                 f"variable of type {v.type}.")
-            else:
-                v = cls(**data.dict(exclude={'test_value'}))
-            if data.test_value is not None:
-                if getattr(v.tag, 'test_value', None) is None:
-                    v.tag.test_value = data.test_value
-                elif v.tag.test_value != data.test_value:
-                    logger.error("Serialized data indicated a test value "
-                                 f"{data.test_value}, but deserialization "
-                                 f"produced the value {v.tag.test_value}.")
-            return v
+    def decode(cls, v):
+        data = cls.Data.validate(v)
+        if isinstance(data.owner, TheanoApplyData):
+            v = data.owner.op(*data.owner.inputs)
+            v.name = data.name
+            if v.type != data.type:
+                logger.error("Serialized data indicated a variable of type "
+                             f"{data.type}, but deserialization produced a "
+                             f"variable of type {v.type}.")
         else:
-            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
-                            f"{cls} and doesn't match its serialization format")
+            v = cls(**data.dict(exclude={'test_value'}))
+        if data.test_value is not None:
+            if getattr(v.tag, 'test_value', None) is None:
+                v.tag.test_value = data.test_value
+            elif v.tag.test_value != data.test_value:
+                logger.error("Serialized data indicated a test value "
+                             f"{data.test_value}, but deserialization "
+                             f"produced the value {v.tag.test_value}.")
+        return v
     @classmethod
-    def json_encoder(cls, v):
-        return (cls.__qualname__, cls.Data(**v.__getstate__(),
-                                           test_value=getattr(v.tag, 'test_value', None)))
-mtbtyping.add_json_encoder(theano.tensor.Variable, TheanoVariable.json_encoder, priority=-5)
+    def encode(cls, v):
+        return cls.Data(**v.__getstate__(),
+                       test_value=getattr(v.tag, 'test_value', None))
+mtbtyping.add_json_encoder(tt.Variable, TheanoVariable.json_encoder, priority=-5)
     # Lower priority because this is a fallback type
 
-class TheanoTensorVariable(theano.tensor.TensorVariable, TheanoVariable):
+class TheanoTensorVariable(tt.TensorVariable, TheanoVariable):
     pass
-mtbtyping.add_json_encoder(theano.tensor.TensorVariable, TheanoTensorVariable.json_encoder)
+mtbtyping.add_json_encoder(tt.TensorVariable, TheanoTensorVariable.json_encoder)
 
-class TheanoConstant(theano.tensor.Constant, TheanoVariable):
+class TheanoConstant(tt.Constant, TheanoVariable):
     class Data(BaseModel):
         type: TheanoTensorType
         data: mtbtyping.Array
         name: Union[str,None]
     @classmethod
-    def validate(cls, v):
-        if isinstance(v, cls.mro()[1]):
-            return v
-        elif json_like(v, cls.__qualname__):
-            data = cls.Data.validate(v[1])
-            return cls(**data.dict())
-        else:
-            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
-                            f"{cls} and doesn't match its serialization format")
-mtbtyping.add_json_encoder(theano.tensor.Constant, TheanoConstant.json_encoder, priority=-4)
+    def decode(cls, v):
+        data = cls.Data.validate(v)
+        return cls(**data.dict())
+mtbtyping.add_json_encoder(tt.Constant, TheanoConstant.json_encoder, priority=-4)
 
-class TheanoTensorConstant(theano.tensor.TensorConstant, TheanoConstant):
+class TheanoTensorConstant(tt.TensorConstant, TheanoConstant):
     pass
-mtbtyping.add_json_encoder(theano.tensor.TensorConstant, TheanoTensorConstant.json_encoder)
+mtbtyping.add_json_encoder(tt.TensorConstant, TheanoTensorConstant.json_encoder)
 
 class TheanoApplyData(BaseModel):
     # We don't inherit from theano.graph.basic.Apply, because this doesn't
     # become a true Apply node – just a placeholder, so that TheanoVariable can
     # call its op on its arguments
-    op: TheanoElemwiseOp
+    op: Union[TheanoElemwiseOp,TheanoCAReduceOp]
     # For `update_forward_refs` to work, we can't have a Union of ForwardRefs,
     # but we can have List['Union[T1,T2]']
     inputs: List[ForwardRef('Union[TheanoTensorConstant,TheanoTensorVariable,TheanoConstant,TheanoVariable]')]
@@ -266,7 +311,7 @@ class TheanoApplyData(BaseModel):
 mtbtyping.add_json_encoder(theano.graph.basic.Apply, TheanoApplyData.json_encoder)
 
 # NOTE: Attribute types are based on inspection; there could be other possible types.
-class TheanoElemwiseOp(theano.tensor.elemwise.Elemwise):
+class TheanoElemwiseOp(tt.elemwise.Elemwise, TheanoSerializer):
     class Data(BaseModel):
         name     : Union[str,None]
         scalar_op: TheanoScalarOp
@@ -274,42 +319,40 @@ class TheanoElemwiseOp(theano.tensor.elemwise.Elemwise):
         nfunc_spec : Any   # FIXME: Find proper type
         openmp     : bool
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def decode(cls, v):
+        data = cls.Data.validate(v)
+        return tt.elemwise.Elemwise(**data.dict())
     @classmethod
-    def validate(cls, v):
-        if isinstance(v, theano.tensor.elemwise.Elemwise):
-            return v
-        elif json_like(v, 'TheanoElemwiseOp'):
-            data = cls.Data.validate(v[1])
-            return theano.tensor.elemwise.Elemwise(**data.dict())
-        else:
-            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
-                            f"{cls} and doesn't match its serialization format")
-    @classmethod
-    def json_encoder(cls, op):
-        return (cls.__qualname__, cls.Data(**op.__getstate__()))
-mtbtyping.add_json_encoder(theano.tensor.elemwise.Elemwise, TheanoElemwiseOp.json_encoder)
+    def encode(cls, op):
+        return cls.Data(**{**op.__getstate__(),
+                           'scalar_op': type(op.scalar_op)})
+mtbtyping.add_json_encoder(tt.elemwise.Elemwise, TheanoElemwiseOp.json_encoder)
 
-class TheanoScalarOp(theano.scalar.basic.ScalarOp):
+class TheanoCAReduceOp(tt.elemwise.CAReduceDtype, TheanoSerializer):
+    class Data(BaseModel):
+        reduce_op: TheanoReduceOp
+        scalar_op: TheanoScalarOp
+        axis     : Tuple[int,...]
+        dtype    : str
+        acc_dtype: str
+
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def decode(cls, v):
+        data = cls.Data.validate(v)
+        ReduceOp = data.reduce_op
+        return ReduceOp(**data.dict(exclude={'reduce_op'}))
     @classmethod
-    def validate(cls, v):
-        if isinstance(v, theano.scalar.basic.ScalarOp):
-            return v
-        elif json_like(v, 'TheanoScalarOp'):
-            module = import_module(v[1])
-            op = getattr(module, v[2])
-            return op
-        else:
-            raise TypeError(f"Value {v} (type: {type(v)}) is not an instance of "
-                            f"{cls} and doesn't match its serialization format")
-    @classmethod
-    def json_encoder(cls, op):
-        return (cls.__qualname__, op.__module__, op.name)
-mtbtyping.add_json_encoder(theano.scalar.basic.ScalarOp, TheanoScalarOp.json_encoder)
+    def encode(cls, reduce_op):
+        return cls.Data(**{**reduce_op.__getstate__(),
+                           'scalar_op': type(reduce_op.scalar_op),
+                           'reduce_op': type(reduce_op)})
+mtbtyping.add_json_encoder(tt.elemwise.CAReduceDtype, TheanoCAReduceOp.json_encoder)
+
+class TheanoScalarOp(TheanoTypeSerializer):#(theano.scalar.basic.ScalarOp):
+    base_type = theano.scalar.ScalarOp
+class TheanoReduceOp(TheanoTypeSerializer):
+    base_type = tt.elemwise.CAReduceDtype
+# mtbtyping.add_json_encoder(theano.scalar.basic.ScalarOp, TheanoScalarOp.json_encoder)
 
 
 # =====================================
