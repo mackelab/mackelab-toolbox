@@ -92,9 +92,13 @@ class PyMC_Deterministic(pm.model.DeterministicWrapper, TheanoTensorVariable):
         if isinstance(v, pm.model.DeterministicWrapper):
             return v
         else:
-            # FIXME: Need to try every possible Variable type (e.g. Constant)
             x = super().validate(v)
-            return pm.Deterministic(x.name, x)
+            # HACK: Same thing as PyMC_RV.validate regarding duplicate vars
+            pymc_model = pm.Model.get_contexts()[-1]
+            if x.name in pymc_model.named_vars:
+                return pymc_model.named_vars[x.name]
+            else:
+                return pm.Deterministic(x.name, x)
 mtbtyping.add_json_encoder(pm.model.DeterministicWrapper, PyMC_Deterministic.json_encoder, priority=5)
 
 class PyMC_Model_data(BaseModel):
@@ -109,6 +113,13 @@ class PyMC_Model(pm.Model):
         yield cls.validate
     @classmethod
     def validate(cls, v):
+        if isinstance(v, str) and v.lstrip()[0] in '{[':  # TODO Another 'json_like' function for str input?
+            # Allow calling `validate` directly on serialized strings
+            import json
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError:
+                pass
         if isinstance(v, pm.Model):
             return v
         elif json_like(v, 'PyMC_Model'):
