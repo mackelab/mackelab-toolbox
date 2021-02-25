@@ -145,6 +145,8 @@ if shim.config.library == 'numpy':
     Shared = mtb.typing.Array
 else:
     def make_shared(cls, value, field):
+        if json_like(value, 'Array'):
+            value = mtb.typing.Array.validate(value)
         if not shim.isshared(value) and not shim.is_symbolic(value):
             value = shim.shared(value)
         return value
