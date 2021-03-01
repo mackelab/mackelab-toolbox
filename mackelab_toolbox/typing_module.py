@@ -14,10 +14,11 @@ import abc
 from types import SimpleNamespace
 from functools import lru_cache
 import typing
+from typing import Union, Type as BuiltinType
 from typing import Iterable, Callable, Sequence
 import mackelab_toolbox.utils as utils
-from typing import Union, Type
 from collections import namedtuple
+from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
 
 from .units import UnitlessT
@@ -647,6 +648,46 @@ typing.add_json_encoder(slice, Slice.json_encoder)
 #         field_schema.update(type="array")
 typing.Sequence = Union[Range, Sequence]
 
+####
+# Saving types themselves
+
+class Type(BuiltinType):
+    """
+    A specialization of Type which supports serialization & deserialization.
+    This is accomplished by storing the module and class name, and then
+    reimporting the module during deserialization.
+    Only modules within packages included in the `typing.safe_packages`
+    whitelist are allowed to be reimported.
+
+    .. warning:: If a type is defined in main module, it will be serialized
+       with module "__main__". This makes it impossible to deserialize.
+
+    """
+    class Data(BaseModel):
+        module: str
+        name  : str
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, type):
+            return v
+        else:
+            data = cls.Data(**v)
+            if data.module == "__main__":
+                raise ValueError(
+                    f"Class '{data.name}' was serialized with module '__main__'. "
+                    "To allow classes to be deserialized, ensure they are defined "
+                    "in a separate module and imported into the main exec script.")
+            module = typing.import_module(data.module)
+            C = getattr(module, data.name)
+            return C
+    @classmethod
+    def json_encoder(cls, v):
+        return cls.Data(module=v.__module__, name=v.__qualname__)
+typing.Type = Type
+typing.add_json_encoder(type, Type.json_encoder)
 
 ####
 # Light structs
