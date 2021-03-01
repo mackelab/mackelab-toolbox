@@ -1307,39 +1307,6 @@ class _ArrayType(np.ndarray):
         # FIXME: Figure out how to use schema of subfield
         field_schema.update(type ='array',
                             items={'type': 'number'})
-    @classmethod
-    def json_encoder(cls, v, compression='blosc', encoding='b85'):
-        """See typing.json_encoders."""
-        threshold = 100  # ~ break-even point for 64-bit floats, blosc, base85
-        if v.size <= threshold:
-            # For short array, just save it as a string
-            # Since the string loses type information, save the dtype as well.
-            return ('Array', {'data': v.tolist(),
-                              'dtype': v.dtype})
-        else:
-            # Save longer arrays in base85 encoding, with short summary
-            if encoding != 'b85':
-                raise NotImplementedError("The only supported encoding "
-                                          "currently is 'b85'.")
-            if compression not in ['none', 'blosc', None]:
-                raise NotImplementedError("The only supported compressions "
-                                          "currently are 'blosc' and 'none'.")
-            elif compression is None:
-                compression = 'none'
-            with io.BytesIO() as f:  # Use file object to keep bytes in memory
-                np.save(f, v)        # Convert array to plateform-independent bytes  (`tobytes` not meant for storage)
-                v_bytes = f.getvalue()
-            # Compress and encode the bytes to a compact string representation
-            if compression == 'blosc':
-                v_bytes = blosc.compress(v_bytes)
-            v_b85 = base64.b85encode(v_bytes)
-            # Set print threshold to ensure str returns a summary
-            with np.printoptions(threshold=threshold):
-                v_sum = str(v)
-            return ('Array', {'encoding': f'{encoding}',
-                              'compression': f'{compression}',
-                              'data': v_b85,
-                              'summary': v_sum})
 
 class _ArrayMeta(type):
     def __getitem__(self, args):
@@ -1407,12 +1374,46 @@ class Array(np.ndarray, metaclass=_ArrayMeta):
     def validate(cls, v, field=None):
         return _ArrayType.validate(v, field=None)
 
+    @staticmethod
+    def json_encoder(v, compression='blosc', encoding='b85'):
+        """See typing.json_encoders."""
+        threshold = 100  # ~ break-even point for 64-bit floats, blosc, base85
+        if v.size <= threshold:
+            # For short array, just save it as a string
+            # Since the string loses type information, save the dtype as well.
+            return ('Array', {'data': v.tolist(),
+                              'dtype': v.dtype})
+        else:
+            # Save longer arrays in base85 encoding, with short summary
+            if encoding != 'b85':
+                raise NotImplementedError("The only supported encoding "
+                                          "currently is 'b85'.")
+            if compression not in ['none', 'blosc', None]:
+                raise NotImplementedError("The only supported compressions "
+                                          "currently are 'blosc' and 'none'.")
+            elif compression is None:
+                compression = 'none'
+            with io.BytesIO() as f:  # Use file object to keep bytes in memory
+                np.save(f, v)        # Convert array to plateform-independent bytes  (`tobytes` not meant for storage)
+                v_bytes = f.getvalue()
+            # Compress and encode the bytes to a compact string representation
+            if compression == 'blosc':
+                v_bytes = blosc.compress(v_bytes)
+            v_b85 = base64.b85encode(v_bytes)
+            # Set print threshold to ensure str returns a summary
+            with np.printoptions(threshold=threshold):
+                v_sum = str(v)
+            return ('Array', {'encoding': f'{encoding}',
+                              'compression': f'{compression}',
+                              'data': v_b85,
+                              'summary': v_sum})
+
 typing.Array = Array
 # >>>> FIXME: The lines below don't work because generic type np.number -> np.float64
 # >>>>        Especially bad because it prevents specifying 0-dim for scalar
 typing.add_numerical_type(Array[np.number])
 typing.add_scalar_type(Array[np.number, 0])
-typing.add_json_encoder(np.ndarray, _ArrayType.json_encoder)
+typing.add_json_encoder(np.ndarray, Array.json_encoder)
 
 #####
 # Numpy random generators
