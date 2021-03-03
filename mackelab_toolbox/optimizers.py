@@ -2,7 +2,7 @@ from collections import OrderedDict
 import numpy as np
 import theano_shim as shim
 import theano
-import theano.tensor as T
+import theano.tensor as tt
     # TODO: Replace all theano and T calls with shim equivalents
 
 # DEBUG ?
@@ -149,7 +149,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
 
     if grad_fn is None:
         try:
-            grads = T.grad(cost, params)
+            grads = tt.grad(cost, params)
         except theano.gradient.DisconnectedInputError as e:
             disconnected_inputs = set(params).difference(
                 shim.graph.shared_inputs(cost))
@@ -162,7 +162,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     # Clip gradients
     if clip is not None:
         # Rescale is set by the component which most exceeds `clip`
-        rescale = T.max([1] + [T.max(abs(g / clip)) for g in grads])
+        rescale = tt.max([1] + [tt.max(abs(g / clip)) for g in grads])
         rescale.name = "rescale"
         # rescale = shim.print(rescale)
         for i in range(len(grads)):
@@ -203,7 +203,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
             # This is probably due to some internal constants
             # which are double precision.
             # Until this is fixed we need the explicit cast
-        lr_t = lr[p] * (T.sqrt(fix2) / fix1)
+        lr_t = lr[p] * (tt.sqrt(fix2) / fix1)
         initval = shim.cast_floatX(p.get_value() * 0.)
         if p.name is not None:
             namem = 'adam_' + p.name + '_m'
@@ -219,8 +219,8 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
             v = shim.shared(initval, name=namev)
         m_t = (b1 * g) + ((1. - b1) * m)
         # m_t = shim.print(m_t, 'm_t (' + p.name + ')')
-        v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
-        g_t = m_t / (T.sqrt(v_t) + e)
+        v_t = (b2 * tt.sqr(g)) + ((1. - b2) * v)
+        g_t = m_t / (tt.sqrt(v_t) + e)
         # ms[p] = [m, m_t]
         # vs[p] = [v, v_t]
         updates[m] = m_t
