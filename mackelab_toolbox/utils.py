@@ -25,7 +25,7 @@
 # ************************************************************************** #
 
 """
-  Mackelab utilities
+Mackelab utilities
 
 Collection of useful short snippets.
 

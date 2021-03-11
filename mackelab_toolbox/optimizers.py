@@ -23,7 +23,7 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     cost: theano variable
         We want to minimize this cost.
 
-    params: list
+    params: List[Shared] | List[Tuple[Shared, mask]] | Dict[Shared, mask]
         List of Theano shared variables. Any element may be specified instead
         as a tuple pair, whose first element is the shared variable, and the
         second is a boolean mask array. If given, the mask array should be of
