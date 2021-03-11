@@ -25,7 +25,7 @@ class PyMC_RV_data(BaseModel):
     name      : str
     module    : str
     distr_name: str
-    Θ         : Dict[str, Union[float,int,List[float]]]
+    Θ         : Dict[str, Union[float,int,mtbtyping.Array]]
     shape     : List[int]
     dtype     : str
 
@@ -69,9 +69,9 @@ class PyMC_RV(pm.model.PyMC3Variable):
         distr_name = distr._distr_name_for_repr()
         Θ = {θname: getattr(distr, θname).eval()
              for θname in distr._distr_parameters_for_repr()}
-        for θname, θ in Θ.items():
-            if isinstance(θ, np.ndarray):
-                Θ[θname] = θ.tolist()
+        # for θname, θ in Θ.items():
+        #     if isinstance(θ, np.ndarray):
+        #         Θ[θname] = θ.tolist()
 
         return ("PyMC_RV",
                 PyMC_RV_data(
