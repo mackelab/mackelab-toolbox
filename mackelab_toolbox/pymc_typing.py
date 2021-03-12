@@ -25,7 +25,8 @@ class PyMC_RV_data(BaseModel):
     name      : str
     module    : str
     distr_name: str
-    Θ         : Dict[str, Union[float,int,mtbtyping.Array]]
+    Θ         : Dict[str, Union[mtbtyping.Array]]
+        # Always store params as arrays to preserve dtype – some functions (like random) depend of the dtype of arguments
     shape     : List[int]
     dtype     : str
 
