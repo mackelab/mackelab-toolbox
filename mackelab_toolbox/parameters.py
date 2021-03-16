@@ -3,7 +3,7 @@
 Mackelab toolbox : Parameters
 Created on Wed Sep 20 13:19:53 2017
 
-Copyright 2017-2020 Alexandre René
+Copyright 2017-2021 Alexandre René
 
 A collection of functions for working with `ParameterSet` objects defined by
 the [parameters](https://parameters.readthedocs.io) package.
@@ -355,6 +355,8 @@ def make_paramrecs(params, labels=None):
             raise TypeError("Wrap ParameterSets in a list so they are passed "
                             "as a single argument.")
         else:
+            if isinstance(p, (str,dict)):
+                p = ParameterSet(p)
             if not isinstance(p, ParameterSetBase):
                 raise TypeError("Each element of `params` must be a "
                                 f"ParameterSet. Received '{type(p)}'.")
