@@ -1336,8 +1336,8 @@ class _ArrayType(np.ndarray):
             elif (np.can_cast(result, cls.nptype)
                   or np.issubdtype(result.dtype, np.dtype(str))):
                 # We make a exception to always allow casting strings
-                nptype = infer_numpy_type_to_cast(cls.nptype, value)
-                result = value.astype(nptype)
+                nptype = infer_numpy_type_to_cast(cls.nptype, result)
+                result = result.astype(nptype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' (type  "
                                 f"{result.dtype}) to an array of type {cls.nptype}.")
