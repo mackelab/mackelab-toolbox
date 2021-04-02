@@ -1,6 +1,7 @@
 import logging
 from warnings import warn
 import builtins
+import operator
 import inspect
 from itertools import chain
 from dataclasses import dataclass, field
@@ -91,7 +92,10 @@ def serialize_function(f):
     user is responsible for ensuring any names referred to within the function
     body are available in the decoder's scope.
     """
-    if hasattr(f, '__func_src__'):
+    if f in operator.__dict__.values():
+        "Special case serializing builtin functions"
+        return f"operator.{f.__name__}"
+    elif hasattr(f, '__func_src__'):
         return f.__func_src__
     elif isinstance(f, FunctionType):
         s = remove_comments(inspect.getsource(f))
@@ -145,6 +149,10 @@ def deserialize_function(s: str,
     """
     msg = ("Cannot decode serialized function. It should be a string as "
            f"returned by inspect.getsource().\nReceived value:\n{s}")
+    # First check if this is a builtin; if so, exit early
+    if isinstance(s, str) and s.startswith("operator."):
+        return getattr(operator, s[9:])
+    # Not a builtin: must deserialize string
     if not config.trust_all_inputs:
         raise RuntimeError(
         "Deserialization of functions saved as source code requires executing "
