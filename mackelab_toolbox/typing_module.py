@@ -704,7 +704,7 @@ class IndexableNamespace(SimpleNamespace):
     awkward when the attribute name is a variable. For simple structures, there
     seems no reason not to allow both.
 
-    .. note:: In contrast to a dictionary, the iterator returns both keys and
+    .. Note:: In contrast to a dictionary, the iterator returns both keys and
        values. This allows an `IndexableNamespace` to be used in place of a
        pydantic `~pydantic.BaseModel`.
 
@@ -742,6 +742,8 @@ class IndexableNamespace(SimpleNamespace):
         return self.__dict__.keys()
     def values(self):
         return self.__dict__.values()
+    def items(self):
+        return self.__dict__.items()
 
     # Encoder/decoder required for use within a Pydantic model
     @classmethod
