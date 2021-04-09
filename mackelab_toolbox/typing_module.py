@@ -732,6 +732,8 @@ class IndexableNamespace(SimpleNamespace):
     # Dict-like interface
     def __getitem__(self, key):
         return self.__dict__[key]
+    def __setitem__(self, key, value):
+        self.__dict__[key] = value
     def __contains__(self, key):
         return key in self.__dict__
 
