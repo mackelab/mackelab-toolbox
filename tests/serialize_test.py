@@ -142,6 +142,7 @@ def test_numpy_serialization():
     # Compare b85 encoding with and without compression
     # (Compression is only 8% because the data are random)
     T = Array[np.float64]
+    assert T.json_encoder is Array.json_encoder
     blosc_compressed = T.json_encoder(verylargeA)
     not_compressed = T.json_encoder(verylargeA, compression='none')
     len(blosc_compressed[1]['data'])

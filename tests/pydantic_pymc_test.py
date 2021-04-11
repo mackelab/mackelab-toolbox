@@ -54,7 +54,6 @@ def test_pymc_pydantic():
     foo2_b = Foo.parse_raw(foo_b.json())
 
     ## Test with bigger model; incl. sqrt, abs
-    import theano.tensor as tt
     with PyMC_Model() as prior:
         M = 2; Mtilde = 2
         pm.Constant('M', M)
@@ -67,4 +66,4 @@ def test_pymc_pydantic():
     foo_prior = Foo(model=prior)
     foo2_prior = Foo.parse_raw(foo_prior.json())
 
-    assert isinstance(foo2_prior.M, pm.Constant)
+    assert isinstance(foo2_prior.model.M.distribution, pm.Constant)

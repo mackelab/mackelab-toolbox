@@ -15,12 +15,13 @@ from types import SimpleNamespace
 from functools import lru_cache
 import typing
 from typing import Union, Type as BuiltinType
-from typing import Iterable, Callable, Sequence
-import mackelab_toolbox.utils as utils
+from typing import Iterable, Callable, Sequence, Collection, Mapping
 from collections import namedtuple
+
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
 
+from . import utils
 from .units import UnitlessT
 
 # For Array
@@ -410,10 +411,11 @@ class TypeContainer(metaclass=utils.Singleton):
     # Less unsafe importing of arbitrary modules
 
     # Without `safe_modules`, a malicious actor could modify a data file
-    # containing a serialized model, pointing 'module' to some any file in
-    # PYTHONPATH, and it would be executed during deserialization. Now, that
-    # file would have to be within one of the standard packages (or the user's
-    # own package), which are ostensibly already being trusted and executed.
+    # containing a serialized model, pointing 'module' to any file in
+    # PYTHONPATH, and it would be executed during deserialization.
+    # With the `safe_modules` variable, that file would have to be within one
+    # of the standard packages (or the user's own package), which are
+    # ostensibly already being trusted and executed.
     safe_packages = {
         'mackelab_toolbox'
     }
@@ -460,6 +462,39 @@ class TypeContainer(metaclass=utils.Singleton):
         casefold = (lambda v: v) if case_sensitive else str.casefold
         return (not isinstance(value, str) and isinstance(value, Sequence) and value
                 and isinstance(value[0], str) and casefold(value[0]) == casefold(type_str))
+
+    ####################
+    # Deserialization utilities
+
+    def recursive_validate(self, value: Collection, validate: Callable, json_name: str):
+        """
+        Recurse through a list or dictionary, checking for any entry `e` for
+        which `json_like(e, json_name)` is True.
+        On when a match is found, apply `validate`.
+
+        Returns a copy, of the same type as `value`.
+
+        Intended for cases where we need to deserialize objects within a
+        `validate` method (by writing our own validation, we take responsibility
+        of trigger further necessary recursions)
+        """
+        itertypes = (list,tuple,set,frozenset)
+        json_like = self.json_like
+        if json_like(value, json_name):
+            return validate(value)
+        elif isinstance(value, Mapping):
+            assert isinstance(value, dict)
+            return {k: validate(v) if json_like(v, json_name)
+                       else self.recursive_validate(v, validate, json_name) if isinstance(v, Collection)
+                       else v
+                    for k,v in value.items()}
+        elif isinstance(value, itertypes):
+            return type(value)(validate(v) if json_like(v, json_name)
+                               else self.recursive_validate(v, validate, json_name) if isinstance(v, Collection)
+                               else v
+                               for v in value)
+        else:
+            return value
 
     ####################
     # Type normalization
@@ -1453,6 +1488,8 @@ class Array(np.ndarray, metaclass=_ArrayMeta):
                               'data': v_b85,
                               'summary': v_sum})
 
+_ArrayType.json_encoder = Array.json_encoder
+
 typing.Array = Array
 # >>>> FIXME: The lines below don't work because generic type np.number -> np.float64
 # >>>>        Especially bad because it prevents specifying 0-dim for scalar
@@ -1478,9 +1515,11 @@ class RNGenerator(np.random.Generator):
             # Looks like a json-serialized state dictionary
             BG = getattr(np.random, value['bit_generator'])()
             # If the state dictionary contains arrays, they may need to be deserialized
-            state = {k: Array.validate(v) if typing.json_like(v, 'Array') else v
-                     for k,v in value['state'].items()}
-            BG.state = {**value, 'state':state}
+            # state = {k: Array.validate(v) if typing.json_like(v, 'Array') else v
+            #          for k,v in value['state'].items()}
+            # BG.state = {**value, 'state':state}
+            value = typing.recursive_validate(value, Array.validate, 'Array')
+            BG.state = value
             return np.random.Generator(BG)
         else:
             raise TypeError(f"Field {field.name} expects an instance of "
