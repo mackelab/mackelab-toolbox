@@ -1010,7 +1010,7 @@ def sciformat(num, sigdigits=1, minpower=None):
 #####################
 # Misc. utilities
 
-# TODO: Pre-evaluate strings to some more efficient expresison, so
+# TODO: Pre-evaluate strings to some more efficient expression, so
 #       we don't need to parse the string every time.
 #       > This is now done in `mackelab_toolbox.transform`
 # TODO: Update and use with `mackelab_toolbox.transform` ?

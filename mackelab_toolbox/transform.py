@@ -18,7 +18,7 @@ Usage:
         )
 Note that starred imports are not supported, since importing them before
 calling `freeze_types` will lead to TransformedVar being undefined.
-Recommendation is to import `transform` as a module; alternatively the names
+The recommendation is to import `transform` as a module; alternatively the names
 can be imported directly, but only after `freeze_types()` has been called.
 """
 from __future__ import annotations  # Cleaner self-referencing models

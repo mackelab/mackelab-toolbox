@@ -22,6 +22,14 @@ from inspect import isclass
 from parameters import ParameterSet
 logger = logging.getLogger('mackelab.iotools')
 
+# TODO: Make dill an optional dependency, use pickle otherwise (with '.dill', '.pkl' extensions).
+#       Do this by pulling out all the format-specific export code from `save`
+#       into separate functions – then we can just define the fallback type as
+#       either 'dill' or 'pkl' depending on whether `dill` could be loaded.
+#       (c.f. comment in `save` starting with "Define the save functions below at top level of module […]")
+# TODO: (Partly supersedes the one below) Remove any serialization code that
+#       duplicates Pydantic functionality.
+
 if sys.version_info.major >= 3 and sys.version_info.minor >= 6:
     PathTypes = (str, os.PathLike)
 else:
