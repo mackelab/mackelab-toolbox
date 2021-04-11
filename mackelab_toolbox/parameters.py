@@ -90,12 +90,9 @@ logger = logging.getLogger(__name__)
 
 from . import iotools
 try:
-    from . import smttk
-    smttk_loaded = True
     from sumatra.parameters import NTParameterSet as ParameterSet
     from parameters import ParameterSet as ParameterSetBase
 except (NameError, ImportError):
-    smttk_loaded = False
     from parameters import ParameterSet
     ParameterSetBase = ParameterSet
 from .utils import isinstance, flatten, strip_comments
@@ -223,7 +220,7 @@ def dfdiff(pset1: ParameterSet, pset2: ParameterSet,
     if not hasattr(ParameterSet, 'diff'):
         raise RuntimeError(
             "`dfdiff` requires Sumatra's NTParameterSet. Make sure "
-            "you can load `import mackelab_toolbox.smttk`.")
+            "you can execute `import sumatra.parameters`.")
 
     pset1 = params_to_lists(pset1)  # params_to_lists returns same type as pset
     pset2 = params_to_lists(pset2)
@@ -276,7 +273,7 @@ class ParameterComparison:
     Example
     -------
     >>>  testparams = ParameterSet("path/to/file")
-    >>>  records = mackelab_toolbox.smttk.get_records('project').list
+    >>>  records = smttask.view.RecordStoreView(project='project').list
     >>>  cmp = ParameterComparison([testparams] + records, ['test params'])
     >>>  cmp.dataframe(depth=3)
     """
