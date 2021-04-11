@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='mackelab-toolbox',
-    version='0.1.0dev3',
+    version='0.2.0a1',
     description='A set of common Python utilities for computational science',
     url='https://github.com/mackelab/mackelab_toolbox',
 
