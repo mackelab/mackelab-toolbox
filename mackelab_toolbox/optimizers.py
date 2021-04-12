@@ -18,6 +18,9 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
     debugging / setting fitting parameters: if it's always the same parameter
     triggering clipping, its learning rate should probably be reduced.
 
+    .. Caution:: The values of `b1` and `b2` are equivalent to 1-β1, 1-β2,
+       where β1 and β2 are their corresponding values in Kingma et al. (2014).
+
     Parameters
     ----------
     cost: theano variable
@@ -31,7 +34,27 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
         we are not fitting for this parameter component, and so its gradient
         is to be set to zero.
 
-    […]
+    lr: float, > 0
+        Learning rate.
+
+    b1, b2: float, between 0 (exclusive) and 1 (inclusive)
+        Decay rates for the mean (`b1`) and variance (`b2`) of the gradient.
+        Specifically, if we think of the optimization step i as continuous,
+        then the gradient mean `m` decays roughly as
+
+        dm/di = -b m    &   m(i) = m(0) exp(-bi)
+
+        A plain SGD optimizer with no momentum can be obtained by setting both
+        `b1` and `b2` to zero.
+
+    e: float, >0. Default: 1e-8
+        Epsilon. This value is used in the following calculation to ensure
+        numerical stability::
+
+           g_t = m_t / (tt.sqrt(v_t) + e)
+
+        where `g_t` is the ultimately returned gradient, `m_t` its inertial mean
+        and `v_t` its inertial variance.
 
     clip: positive float
         Clip gradients such that no components are greater than this value.
@@ -203,6 +226,10 @@ def Adam(cost, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8, clip=None, grad_fn=N
             # This is probably due to some internal constants
             # which are double precision.
             # Until this is fixed we need the explicit cast
+        if not shim.all((0 < shim.eval(b1) <= 1)) and shim.all((0 < shim.eval(b2) <= 1)):
+            raise ValueError("Arguments `b1` and `b2` to the Adam optimizer "
+                             "must be within (0, 1]. Received:\n"
+                             f"b1: {b1}\nb2: {b2}")
         lr_t = lr[p] * (tt.sqrt(fix2) / fix1)
         initval = shim.cast_floatX(p.get_value() * 0.)
         if p.name is not None:
