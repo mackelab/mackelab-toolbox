@@ -59,15 +59,13 @@ As usual, it is recommended to install within a virtual environment.
 
 ### Specifying as a dependency
 
-Due to its nature, required features in this package will often be developed as they are needed in some other project. Thus it is not always possible to simply install the version from _PyPI_. If you want your project to install _mackelab_toolbox_  from GitHub, you can add the following to its [requirements](https://pip.pypa.io/en/stable/user_guide/#requirements-files) file:
+Due to its nature, required features in this package will often be developed as they are needed in some other project. Thus it is not always possible to simply install the version from _PyPI_. If you want your project to install _mackelab_toolbox_  from GitHub, you can add the following to its [requirements](https://pip.pypa.io/en/stable/user_guide/#requirements-files) files:
 
 ```
--e "git+https://github.com/mackelab/mackelab-toolbox@master#egg=mackelab-toolbox"
--e "mackelab-toolbox[typing,utils]"
+-e git+https://github.com/mackelab/mackelab-toolbox@master#egg=mackelab-toolbox[typing,utils]
 ```
 
-This allows you to specify the branch (here `master`) and the desired context (here `typing` and `utils`).
-
+This allows you to specify the branch (here `master`) and the required contexts (here `typing` and `utils`).
 
 ### Usage
 

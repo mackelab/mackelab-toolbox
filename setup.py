@@ -82,7 +82,7 @@ setup(
         'typing': [  # typing & serialization
             'pydantic>=1.5',
             'blosc',    # Serialization typing_module.Array.
-            'astunparse'  # Serialization of functions.
+            'astunparse',  # Serialization of functions.
             'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
         ],
         'utils': [
