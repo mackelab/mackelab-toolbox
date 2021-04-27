@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='mackelab-toolbox',
@@ -26,7 +26,7 @@ setup(
     install_requires=[
     ],
 
-    packages=['mackelab_toolbox'],
+    packages=find_packages(),
 
     extras_require = {
         'iotools': [
