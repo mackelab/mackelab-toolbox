@@ -16,12 +16,13 @@ Each context is associated to one or more modules. To be able to import a partic
 
 These are the currently defined contexts, and their associated modules:
   - `'iotools'`: [*iotools.py*](mackelab_toolbox/iotools.py)
-  - `'pymc3'`: [*pymc3.py*](mackelab_toolbox/pymc3.py), [*pymc_typing.py*](mackelab_toolbox/pymc_typing.py), + everything from `'theano'`, `'typing'`
+  - `'pymc3'`: [*pymc3.py*](mackelab_toolbox/pymc3.py), [*pymc_typing.py*](mackelab_toolbox/pymc_typing.py), + everything from `'theano'`, `'typing'`, `'parameters'`
   - `'theano'`: [*theano.py*](mackelab_toolbox/theano.py), [*cgshim.py*](mackelab_toolbox.py), [*optimizers.py*](mackelab_toolbox/optimizers.py), + everything from `'typing'`
   - `'torch'`: [*torch.py*](mackelab_toolbox/torch.py), + everything from `'iotools'`, `'typing'`
   - `'tqdm'`: [*tqdm.py*](mackelab_toolbox/tqdm.py)
   - `'typing'`: [*typing.py*](mackelab_toolbox/typing_module.py), [*units.py*](mackelab_toolbox/units.py), [*pydantic.py*](mackelab_toolbox/pydantic.py), [*serialize.py*](mackelab_toolbox/serialize.py), [*transform.py*](mackelab_toolbox/transform.py)
   - `'utils'`: [*utils.py*](mackelab_toolbox/utils.py), [*meta.py*](mackelab_toolbox/meta.py)
+  - `'parameters'`: [*parameters*](mackelab_toolbox/parameters.py)
   - `'all'`: *everything*
 
 ### User installation
