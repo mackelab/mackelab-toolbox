@@ -127,11 +127,12 @@ def index_iter(shape: Tuple[int]) -> itertools.product:
         [(0, 0), (0, 1), (1, 0), (1, 1)]
 
     This is functionally equivalent, but roughly 10x faster, than using
-    `numpy.nditer` just to access the index::
+    `numpy.ndindex` ::
 
-    >>> A = np.zeros(2,2)
-    >>> it = np.nditer(A, flags=['multi_index'])
-    >>> list(it.multi_index for _ in it)
+    >>> list(np.ndindex((2,2)))
+    
+    (The timing with `ndindex` is the comparable to using `np.nditer` to extract
+    only the shape, which suggests that may be the source of the overhead.)
     """
     return itertools.product(*(range(s) for s in shape))
 
