@@ -781,6 +781,11 @@ class IndexableNamespace(SimpleNamespace):
         return self.__dict__.values()
     def items(self):
         return self.__dict__.items()
+        
+    # Convert to plain dict
+    def as_dict(self):
+        return {k: v.as_dict() if isinstance(v, IndexableNamespace) else v
+                for k, v in self}
 
     # Encoder/decoder required for use within a Pydantic model
     @classmethod
