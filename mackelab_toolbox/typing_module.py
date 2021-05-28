@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from functools import lru_cache
 import typing
 from typing import Union, Type as BuiltinType
-from typing import Iterable, Callable, Sequence, Collection, Mapping
+from typing import Iterable, Callable, Sequence, Collection, Mapping, List
 from collections import namedtuple
 
 from pydantic import BaseModel
@@ -447,7 +447,8 @@ class TypeContainer(metaclass=utils.Singleton):
         # Use -je.priority: higher number is higher priority
 
     @staticmethod
-    def json_like(value: typing.Any, type_str: str, case_sensitive: bool=False):
+    def json_like(value: typing.Any, type_str: Union[str,List[str]],
+                  case_sensitive: bool=False):
         """
         Convenience fonction for checking whether a serialized value might be a
         custom serialized JSON object. All our custom serialized formats start with
@@ -459,9 +460,13 @@ class TypeContainer(metaclass=utils.Singleton):
         :param:case_sensitive: Whether the comparison to `type_str` should be
             case-sensitive.
         """
+        if isinstance(type_str, str):
+            type_str = [type_str]
         casefold = (lambda v: v) if case_sensitive else str.casefold
-        return (not isinstance(value, str) and isinstance(value, Sequence) and value
-                and isinstance(value[0], str) and casefold(value[0]) == casefold(type_str))
+        return any(
+            (not isinstance(value, str) and isinstance(value, Sequence) and value
+             and isinstance(value[0], str) and casefold(value[0]) == casefold(type_str_))
+            for type_str_ in type_str)
 
     ####################
     # Deserialization utilities
