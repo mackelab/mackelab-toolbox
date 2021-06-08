@@ -310,6 +310,82 @@ def rgetattr(obj, attr, *args):
 ################
 # String utilities
 
+from collections.abc import Iterable
+import numpy as np
+
+def array_to_str(arr: np.ndarray, precision: int=3) -> str:
+    """
+    Convert an array into a string with the given precision.
+    
+    TODO: Change precision to sig digits.
+    """
+    if not getattr(arr, 'ndim', True) or not isinstance(arr, Iterable):
+        return f"{arr:.{precision}}"
+    else:
+        return "[" + ", ".join(array_to_str(x) for x in arr) + "]"
+        
+def array_to_latex_string(arr: np.ndarray, precision: int=3) -> str:
+    raise NotImplementedError
+
+def sciformat(num, sigdigits=1, minpower=None) -> str:
+    """
+    Return a string representation of `num` with a given number of significant
+    digits.
+    Use scientific notation if it is larger than `10^minpower`.
+
+    The output is intended mostly for figure production and uses TeX
+    notation ('10^' for the power, '\\cdot' for multiplication).
+
+    .. Note:: Core Python formatting has a `'g'` option, along with variants,
+    which does something similar. The main difference is that `sciformat`
+    will always print the specified number of significant digits, and its
+    output is suited for TeX formatting.
+
+    Parameters
+    ----------
+    num: number
+        number to convert to string
+    sigdigits: int >= 1
+        number of significant digits to keep
+    minpower: int | None
+        Minimum power to use scientific notation. Default value of None
+        forces scientific notation.
+
+    Returns
+    -------
+    str
+    """
+    import math
+    if sigdigits < 1:
+        logger.warning("`sciformat`: Number of significant digits should be "
+                       "greater or eqal to 1.")
+    p = int(math.floor(math.log10(num)))
+        # Note if we use 'np' instead of 'math':
+        # don't use `astype(int)` here, as otherwise 10**p fails with p<0
+    if minpower is not None and p < minpower:
+        decimal_positions = sigdigits - p - 1
+        numstr = round(num, decimal_positions)
+        if decimal_positions >= 0:
+            return str(int(num))
+        else:
+            return str(num)
+    m = round(num / 10**p, sigdigits)
+    if sigdigits == 1:
+        m = int(m)
+    if m == 1:
+        mstring = ""
+    else:
+        mstring = str(m)
+    if p != 0:
+        pstring = "10^{{{}}}".format(p)
+    else:
+        pstring = "10^{{{}}}".format(p)
+    if mstring != "" and pstring != "":
+        dotstr = " \\cdot "
+    else:
+        dotstr = ""
+    return mstring + dotstr + pstring
+
 def strip_comments(s, comment_mark='#'):
     """
     Remove single line comments from plain text.
@@ -949,64 +1025,61 @@ def Code(*obj, sep=''):
     src = sep.join([inspect.getsource(s) for s in obj])
     return CodeStr(src.strip())  # .strip() removes final newline
 
-def sciformat(num, sigdigits=1, minpower=None):
+from pathlib import Path
+try:
+    import git
+except ModuleNotFoundError:
+    git = None
+
+class GitSHA:
     """
-    Return a string representation of `num` with a given number of significant
-    digits.
-    Use scientific notation if it is larger than `10^minpower`.
-
-    The output is intended mostly for figure production and uses TeX
-    notation ('10^' for the power, '\\cdot' for multiplication).
-
-    .. Note:: Core Python formatting has a `'g'` option, along with variants,
-    which does something similar. The main difference is that `sciformat`
-    will always print the specified number of significant digits, and its
-    output is suited for TeX formatting.
-
-    Parameters
-    ----------
-    num: number
-        number to convert to string
-    sigdigits: int >= 1
-        number of significant digits to keep
-    minpower: int | None
-        Minimum power to use scientific notation. Default value of None
-        forces scientific notation.
-
-    Returns
-    -------
-    str
+    Return an object that nicely prints the SHA hash of the current git commit.
+    Displays as formatted HTML in a Jupyter Notebook, otherwise a simple string.
+    
+    .. Hint:: This is especially useful for including a git hash in a report
+       produced with Jupyter Book. Adding a cell `GitSHA() at the bottom of
+       notebook with the tag 'remove-input' will print the hash with no visible
+       code, as though it was part of the report footer.
+       
+    Usage:
+    >>> GitSHA()
+    myproject main #3b09572a
     """
-    import math
-    if sigdigits < 1:
-        logger.warning("`sciformat`: Number of significant digits should be "
-                       "greater or eqal to 1.")
-    p = int(math.floor(math.log10(num)))
-        # Note if we use 'np' instead of 'math':
-        # don't use `astype(int)` here, as otherwise 10**p fails with p<0
-    if minpower is not None and p < minpower:
-        decimal_positions = sigdigits - p - 1
-        numstr = round(num, decimal_positions)
-        if decimal_positions >= 0:
-            return str(int(num))
+    css = "color: grey; text-align: right"
+    def __init__(self, path=None, nchars=8, sha_prefix='#',
+                 show_path='stem', show_branch=True):
+        """
+        :param:path: Path to the git repository. Defaults to CWD.
+        :param:nchars: Numbers of SHA hash characters to display. Default: 8.
+        :param:sha_prefix: Character used to indicate the SHA hash. Default: '#'
+        :param:show_path: How much of the repository path to display.
+            'full': Display the full path.
+            'stem': (Default) Only display the directory name (which often
+                    corresponds to the implied repository name)
+            'none': Don't display the path at all.
+        """
+        repo = git.Repo(search_parent_directories=True)
+        self.repo = repo
+        self.sha = sha_prefix+repo.head.commit.hexsha[:nchars]
+        if show_path.lower() == 'full':
+            self.path = repo.working_dir
+        elif show_path.lower() == 'stem':
+            self.path = Path(repo.working_dir).stem
+        elif show_path.lower() == 'none':
+            self.path = ""
         else:
-            return str(num)
-    m = round(num / 10**p, sigdigits)
-    if sigdigits == 1:
-        m = int(m)
-    if m == 1:
-        mstring = ""
-    else:
-        mstring = str(m)
-    if p != 0:
-        pstring = "10^{{{}}}".format(p)
-    else:
-        pstring = "10^{{{}}}".format(p)
-    if mstring != "" and pstring != "":
-        dotstr = " \\cdot "
-    else:
-        dotstr = ""
-    return mstring + dotstr + pstring
+            raise ValueError("Argument `show_path` should be one of "
+                             "'full', 'stem', or 'none'")
+        if show_branch:
+            self.branch = repo.active_branch.name
+        else:
+            self.branch = ""
+    def __str__(self):
+        return " ".join((self.path, self.branch, self.sha))
+    def __repr__(self):
+        return self.__str__()
+    def _repr_html_(self):
+        return f"<p style=\"{self.css}\">git: {self.path} {self.branch} {self.sha}</p>"
 
 #####################
 # Misc. utilities
