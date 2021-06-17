@@ -900,12 +900,12 @@ class Singleton(type):
         cls = super().__new__(metacls, name, bases, dct)
         cls.__instance = None
         # Don't overwrite cls.__new__ if it exists
-        if cls.__new__ is object.__new__:
-            # cls does not define a __new__ method => use the parent's __new__
-            cls.__super_new = super(cls, cls).__new__
-        else:
-            # cls does define __new__ => use it
-            cls.__super_new = cls.__new__
+        for supercls in cls.mro():
+            # Ensure we don't assign __clsnew__ to __super_new, other we get
+            # infinite recursion
+            if supercls.__new__ != metacls.__clsnew__:
+                cls.__super_new = supercls.__new__
+                break
         cls.__new__ = metacls.__clsnew__
         return cls
     @staticmethod

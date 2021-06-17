@@ -28,11 +28,17 @@ def test_singleton():
         pass
     class BarType(metaclass=Singleton):
         pass
+    class BazType(FooType, metaclass=Singleton):
+        pass
     a = FooType()
     b = FooType()
     c = BarType()
+    d = BazType()
+    e = BazType()
     assert a is b
     assert a is not c
+    assert a is not d
+    assert e is d
 
 from mackelab_toolbox.utils import sentinel
 def test_sentinel():
