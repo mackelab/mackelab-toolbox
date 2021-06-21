@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from theano import function, config, shared, tensor
-import numpy
-from pathlib import Path
+from warnings import warn
 import logging
+import numpy
+from theano import function, config, shared, tensor
+from pathlib import Path
 logger = logging.getLogger(__name__)
 
 ##############################################
