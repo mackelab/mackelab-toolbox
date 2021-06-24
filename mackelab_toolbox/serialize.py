@@ -114,18 +114,28 @@ def deserialize_function(s: str,
                 globals: Optional[dict]=None, locals: Optional[dict]=None):
     """
     WIP. Decode a function from a string.
-    Accepts only strings of the form::
+    Accepts strings of the following forms::
 
-        def func_name():
+        def func_name(x, y):
             do_something
 
     or::
 
         @decorator
-        def func_name():
+        def func_name(x, y):
             do_something
+            
+    or::
+    
+        lambda x,y: do_something
+        
+    or::
+    
+        x,y -> do_something
 
-    This excludes e.g. lambdas and dynamic definitions like ``decorator(func_name)``.
+    (The last form is equivalent to a lambda function, and is provided as a
+    convenience shorthand.)
+    Not accepted are dynamic definitions like ``decorator(func_name)``.
     However there can be multiple decorators using the '@' syntax.
 
     The string is executed in place with :func:`exec`, and the arguments
@@ -146,6 +156,12 @@ def deserialize_function(s: str,
        particular, the namespaces mentioned above are added to `globals` if not
        already present). If this is not desired, consider making a shallow copy
        of the dicts before passing to `deserialize`.
+       
+    .. note:: While _de_serialization of lambda functions is possible,
+       serializing them is not currently supported in general. (This is because
+       the output of `inspect.getsource` depends on the context, and we want to
+       avoid fragile heuristics.)
+       _Re_serialization of a lambda function is possible however.
     """
     msg = ("Cannot decode serialized function. It should be a string as "
            f"returned by inspect.getsource().\nReceived value:\n{s}")
@@ -164,27 +180,47 @@ def deserialize_function(s: str,
                          "also passing `globals`.")
     if isinstance(s, str):
         s_orig = s
-        decorator_lines, s = split_decorators(s)
-        if not s[:4] == "def ":
-            raise ValueError(msg)
-        fname = s[4:s.index('(')].strip() # Remove 'def', anything after the first '(', and then any extra whitespace
-        s = "\n".join(chain(decorator_lines, [s]))
-        if globals is None:
-            globals = config.default_namespace.copy()
-            exec(s, globals)
-            f = globals[fname]
-        elif locals is None:
-            globals = {**config.default_namespace, **globals}
-            exec(s, globals)
-            f = globals[fname]
+        if "def " in s:
+            f = _deserialize_def(s, globals, locals)
+        elif "lambda " in s or s.count("->") == 1:
+            f = _deserialize_lambda(s, globals, locals)
         else:
-            globals = {**config.default_namespace, **globals}
-            exec(s, globals, locals)  # Adds the function to `locals` dict
-            f = locals[fname]
+            raise ValueError(msg)
         # Store the source with the function, so it can be serialized again
         f.__func_src__ = s_orig
         return f
     else:
         raise ValueError(msg)
+
+def _deserialize_def(s, globals, locals):
+    decorator_lines, s = split_decorators(s)
+    if not s[:4] == "def ":
+        raise ValueError(msg)
+    fname = s[4:s.index('(')].strip() # Remove 'def', anything after the first '(', and then any extra whitespace
+    s = "\n".join(chain(decorator_lines, [s]))
+    if globals is None:
+        globals = config.default_namespace.copy()
+        exec(s, globals)
+        f = globals[fname]
+    elif locals is None:
+        globals = {**config.default_namespace, **globals}
+        exec(s, globals)
+        f = globals[fname]
+    else:
+        globals = {**config.default_namespace, **globals}
+        exec(s, globals, locals)  # Adds the function to `locals` dict
+        f = locals[fname]
+    return f
+    
+def _deserialize_lambda(s, globals, locals):
+    # `s` is either of the form `lambda x,…: <expr>` or `x,… -> <expr>`
+    s = s.strip()
+    if not s.startswith("lambda"):
+        assert s.count("->") == 1
+        inp, out = s.split("->")
+        s = f"lambda {inp}: {out}"
+    else:
+        assert "->" not in s
+    return eval(s, globals, locals)
 
 json_encoders = {FunctionType: serialize_function}

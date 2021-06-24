@@ -44,7 +44,8 @@ import mackelab_toolbox.utils as utils
 # break if we allow `from mackelab_toolbox.transform import *`
 # We _could_ allow Transform, and Bijection, but that would just be confusing,
 # since TransformedVar is also part of the public API.
-__ALL__ = []
+# __all__ = []  # NB: transform_postponed actually relies on import *
+                #     Better to fix typing to not require postponed modules
 
 # # ---------------------------
 # # Some timings for simpleeval

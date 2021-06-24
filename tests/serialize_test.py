@@ -43,12 +43,16 @@ def test_function_serialization():
     foo1 = Foo(a=1, f=mypow)
     foo2 = Foo(a=1, f=mypow2)
     fooλ = Foo(a=1, f=lambda a,n: a**n)
+    fooλs = Foo(a=1, f="lambda a,n: a**n")
+    fooλt = Foo(a=1, f="a,n -> a**n")
 
     foo1.json()
     boo1 = Foo.parse_raw(foo1.json())
     boo2 = Foo.parse_raw(foo2.json())
     with pytest.raises(ValueError):
         fooλ.json()
+    booλs = Foo.parse_raw(fooλs.json())
+    booλt = Foo.parse_raw(fooλt.json())
 
 def test_numpy_serialization():
     # TODO: Validators should allow DOWNcasting instead of upcasting
