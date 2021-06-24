@@ -221,6 +221,10 @@ def _deserialize_lambda(s, globals, locals):
         s = f"lambda {inp}: {out}"
     else:
         assert "->" not in s
+    if globals is None:
+        globals = config.default_namespace.copy()
+    else:
+        globals = {**config.default_namespace, **globals}
     return eval(s, globals, locals)
 
 json_encoders = {FunctionType: serialize_function}
