@@ -814,11 +814,16 @@ class Stash:
     Usage
     -----
     Instantiate:
-        stash = Stash({vars to stash: default values})
+        stash = Stash(obj, (attr1 to stash, default val1),
+                           (attr2 to stash, default val2), ...)
+        # => stash associated to `obj`
     Stash:
         stash()
+        # Stash attributes of `obj` and replace with their default vals.
     Pop:
         stash.pop()
+        # Set attributes back to their most recently stash values, and
+        # remove those values from the stash.
     """
     def __init__(self, obj, *stash_attrs):
         """
@@ -827,8 +832,10 @@ class Stash:
         obj: class instance
             The object to which we want to attach the stash.
         stash_attrs: iterable of tuples
-            Each `(attrname, default, [string])` tuple is expanded and passed to
+            Each `(attrname, default, [bool])` tuple is expanded and passed to
             `add_stash_attr`.
+            If `default` is a string, it is interpreted as an attribute name
+            by default; see `add_stash_attr`.
         """
         self._obj = obj
         self._stash_attrs = OrderedDict()
