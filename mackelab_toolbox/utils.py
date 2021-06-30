@@ -869,6 +869,10 @@ class Stash:
             if isinstance(default, str) and not default_is_string:
                 setattr(self._obj, attr, getattr(self._obj, default))
             else:
+                # If we don't copy a mutable default when we use it, it can
+                # get modified and become incorrect for future stashes
+                if isinstance(default, (MutableSequence, MutableSet, MutableMapping)):
+                    default = deepcopy(default)
                 setattr(self._obj, attr, default)
 
     def pop(self):
