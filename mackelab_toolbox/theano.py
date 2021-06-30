@@ -853,11 +853,15 @@ class GraphCache:
         if key_updates is None:
             key_updates = OrderedDict()
         elif not isinstance(key_updates, OrderedDict):
-            raise TypeError("`key_updates` must be an OrderedDict.")
+            if not isinstance(key_updates, dict):
+                raise TypeError("`key_updates` must be an dictionary.")
+            key_updates = OrderedDict(key_updates)  # Safe now since dicts are ordered
         if val_updates is None:
             val_updates = OrderedDict()
         elif not isinstance(val_updates, OrderedDict):
-            raise TypeError("`val_updates` must be an OrderedDict.")
+            if not isinstance(val_updates, dict):
+                raise TypeError("`val_updates` must be an dictionary.")
+            val_updates = OrderedDict(val_updates)
         # Build the list of all inputs
         if isinstance(val_graph, shim.cf.TerminatingTypes):
             val_graphs = [val_graph]
@@ -1030,7 +1034,9 @@ class CompiledGraphCache(GraphCache):
 
         # Check that argument types are correct
         if not isinstance(updates, OrderedDict):
-            raise TypeError("`updates` must be an OrderedDict.")
+            if not isinstance(updates, dict):
+                raise TypeError("`updates` must be an dictionary.")
+            updates = OrderedDict(updates)    
         # Build the list of all inputs
         if isinstance(graph, shim.cf.TerminatingTypes):
             graphs = [graph]
