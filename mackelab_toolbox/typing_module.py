@@ -852,8 +852,8 @@ class PintValue:
     is set as a *class* variable of `PintValue`.
     >>> import pint
     >>> ureg = pint.UnitRegistry()
-    >>> from mackelab_toolbox.typing import PintValue
-    >>> PintValue.ureg = ureg
+    >>> from mackelab_toolbox.typing import PintUnit
+    >>> PintUnit.ureg = ureg
     """
     @classmethod
     def __get_validators__(cls):
@@ -931,7 +931,7 @@ class PintUnit:
         if PintUnit.ureg is None:
             raise RuntimeError(
                 "The Pint unit registry is not set. Do this by assigning to "
-                "`PintValue.ureg` before attempting to parse a Pint value.")
+                "`PintUnit.ureg` before attempting to parse a Pint value.")
         if isinstance(v, (tuple, list)) and len(v) > 0 and v[0] == "PintUnit":
             return PintUnit.ureg.Unit(v[1][0])
         elif noerror:

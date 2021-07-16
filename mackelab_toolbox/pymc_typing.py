@@ -70,6 +70,8 @@ class PyMC_RV(pm.model.PyMC3Variable):
         distr_name = distr._distr_name_for_repr()
         Θ = {θname: getattr(distr, θname).eval()
              for θname in distr._distr_parameters_for_repr()}
+        if getattr(distr, 'testval', None) is not None:
+            Θ['testval'] = distr.testval
         # for θname, θ in Θ.items():
         #     if isinstance(θ, np.ndarray):
         #         Θ[θname] = θ.tolist()
