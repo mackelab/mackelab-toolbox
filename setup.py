@@ -56,6 +56,15 @@ setup(
             'astunparse',
             'simpleeval',
         ],
+        'stats': [
+            'scipy',
+            'numpy',
+            # Everything from typing
+            'pydantic>=1.5',
+            'blosc',    # Serialization typing_module.Array.
+            'astunparse',  # Serialization of functions.
+            'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
+        ],
         'theano': [
             'theano_shim>=0.2',
             # Everything from typing

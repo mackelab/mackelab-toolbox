@@ -21,8 +21,8 @@ from collections import namedtuple
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
 
-from . import utils
-from .units import UnitlessT
+from mackelab_toolbox import utils
+from mackelab_toolbox.units import UnitlessT
 
 # For Array
 import io
@@ -31,6 +31,35 @@ import base64
 
 import logging
 logger = logging.getLogger(__name__)
+
+############
+# JSON encoder with optional keywords
+# (copied from RenormalizedFlows)
+
+from pydantic.json import custom_pydantic_encoder
+from functools import partial
+from inspect import signature
+
+def json_kwd_encoder(obj, **kwds):
+    """
+    Extension of the Pydantic encoders which allows kwargs.
+    This is used to optionally skip encoding the large random state of
+    distributions.
+    """
+    if kwds:
+        # Loop through the encoders and bind arguments to each encoder
+        # Alternative 1: Only keep encoders with keyword args matching `kwds`
+        # Alternative 2: Re-implement `custom_pydantic_encoder` here and simply
+        #    pass on `kwds`. This would avoid all unnecessary creation of partials
+        _json_encoders = {}
+        for T, encoder in typing.json_encoders.items():
+            sig = signature(encoder)
+            # Only bind arguments valid for that encoder
+            _kwds = {k:v for k,v in kwds.items() if k in sig.parameters}
+            _json_encoders[T] = partial(encoder, **_kwds)
+    else:
+        _json_encoders = typing.json_encoders
+    return custom_pydantic_encoder(_json_encoders, obj)
 
 ############
 # Postponed class and module
@@ -143,7 +172,7 @@ def freeze_types():
     the actual code.
     Postponed modules are imported in the following order:
         - First all postponed modules, in the order they were added.
-        - Then all postponed modules, in the order they were added.
+        - Then all modules for postponed classes, in the order they were added.
     """
     global types_frozen
     if types_frozen:
@@ -283,28 +312,28 @@ class TypeContainer(metaclass=utils.Singleton):
 
     Pydantic-compatible types
     -------------------------
-    - Range
-    - Slice
-    - Sequence
-        Defined as `Union[Range, typing.Sequence]`. This prevents Pydantic
-        from coercing a range into a list.
-    - Types deriving from `numbers` module
-        + Number
-        + Integral
-        + Real
-    - PintValue
-        Incomplete
-    - QuantitiesValue
-        Incomplete
-    - Number
-    - Integral
-    - Real
-    - DType
-        Numpy data type object.
-    - NPValue
-        Numpy numerical types. Use as `NPValue[np.float64]`.
-    - Array
-        Numpy ndarray. Use as `Array[np.float64]`, or `Array[np.float64,2]`.
+    + Builtins:
+      - Range
+      - Slice
+      - Sequence (Union of [Range, typing.Sequence]; prevents Pydantic coercing range into list)
+    + Numbers:
+      - Number (validation only)
+      - Integral (validation only)
+      - Real (validation only, except int -> float)
+    + Quantities with units
+      - PintValue
+      - PintUnit
+      - QuantitiesValue
+      - QuantitiesUnit
+      - QuantitiesDimension
+    + NumPy types:
+      - DType
+      - NPValue   (any numpy scalar != 'object'; use as `NPValue[np.float64]`)
+      - Array     (Use as `Array[np.float64]`, or `Array[np.float64,2]`)
+      - RNGenerator  (new style numpy RNG)
+      - RandomState  (old style numpy RNG)
+    + Scipy types:
+      - Distribution (objects from scipy.stats)
 
     Interaction with modules for physical quantities (Pint and Quantities)
     ------------------------
@@ -373,6 +402,12 @@ class TypeContainer(metaclass=utils.Singleton):
     @property
     def types_frozen(self):
         return types_frozen
+    @property
+    def json_kwd_encoder(self):
+        return json_kwd_encoder
+    @property
+    def stat_modules(self):
+        return stat_modules
 
     def __init__(self):
         self._AllNumericalTypes = TypeSet([int, float])
@@ -663,29 +698,9 @@ typing.add_json_encoder(slice, Slice.json_encoder)
 ################
 # Port / overrides of typing types for pydantic
 
-# class Sequence(typing.Sequence):
-#     NOTE: If this is uncommented, take care name clash from typing.Sequence
-#     """
-#     Pydantic recognizes typing.Sequence, but treats it as a shorthand for
-#     Union[List, Tuple] (but with equal precedence). This means that other
-#     sequence types like `range` are not recognized. Even if they were
-#     recognized, the documented behaviour is to return a list – which would
-#     defeat the point of `range`.
-#
-#     This type does not support coercion, only validation.
-#     """
-#     @classmethod
-#     def __get_validators__(cls):
-#         yield cls.validate
-#     @classmethod
-#     def validate(cls, value, field):
-#         if not isinstance(value, collection.abc.Sequence):
-#             raise TypeError(f"Field {field.name} expects a sequence. "
-#                             f"It received {value} [type: {type(value)}].")
-#         return value
-#     @classmethod
-#     def __modify_schema__(cls, field_schema):
-#         field_schema.update(type="array")
+#  Pydantic recognizes typing.Sequence, but treats it as a shorthand for
+#  Union[List, Tuple] (but with equal precedence). This means that other
+#  sequence types like `range` are not recognized.
 typing.Sequence = Union[Range, Sequence]
 
 ####
@@ -1520,33 +1535,32 @@ class RNGenerator(np.random.Generator):
             field = SimpleNamespace(name='')
         if isinstance(value, np.random.Generator):
             return value
-        elif (isinstance(value, dict)
-              and 'bit_generator' in value and 'state' in value):
+        elif typing.json_like(value, "RNGenerator"):
+        #elif (isinstance(value, dict)
+        #      and 'bit_generator' in value and 'state' in value):
             # Looks like a json-serialized state dictionary
-            BG = getattr(np.random, value['bit_generator'])()
-            # If the state dictionary contains arrays, they may need to be deserialized
-            # state = {k: Array.validate(v) if typing.json_like(v, 'Array') else v
-            #          for k,v in value['state'].items()}
-            # BG.state = {**value, 'state':state}
-            value = typing.recursive_validate(value, Array.validate, 'Array')
-            BG.state = value
+            state = value[1]
+            BG = getattr(np.random, state['bit_generator'])()
+            BG.state = state
             return np.random.Generator(BG)
         else:
             raise TypeError(f"Field {field.name} expects an instance of "
-                            f"np.random.Generator.\nProvided value: {value}")
+                            f"np.random.Generator.\nProvided value: {value} "
+                            f"(type: {type(value)}).")
     @classmethod
     def __modify_schema__(cls, field_schema):
-        field_schema.update(type=object)
+        field_schema.update(type='array',
+                            items=[{'type': 'string',
+                                    'type': 'object'}])
     @classmethod
     def json_encoder(cls, v):
-        """See typing.json_encoders."""
         # Generators are containers around a BitGenerator; it's the state of
         # BitGenerator that we need to save. Default BitGenerator is 'PCG64'.
         # State is a dict with two required fields: 'bit_generator' and 'state',
         # plus 1-3 extra fields depending on the generator.
         # 'state' field is itself a dictionary, which may contain arrays of
         # type uint32 or uint64
-        return v.bit_generator.state
+        return ("RNGenerator", v.bit_generator.state)
             # Pydantic will recursively encode state entries, and use Array's
             # json_encoder when needed
 
@@ -1561,34 +1575,201 @@ class RandomState(np.random.RandomState):
             field = SimpleNamespace(name='')
         if isinstance(value, np.random.RandomState):
             return value
-        elif isinstance(value, int):
-            return np.random.RandomState(value)
-        elif (isinstance(value, Sequence) and 'MT19937' in value):
+        elif typing.json_like(value, "RandomState"):
             # Looks like a json-serialized state tuple
             rs = np.random.RandomState()
+            rng_state = value[1]
             # Deserialize arrays that were serialized in the Array format
-            for i, v in enumerate(value):
-                if isinstance(v, Sequence) and v[0] == "Array":
-                    value[i] = _ArrayType.validate(v)
+            for i, v in enumerate(rng_state):
+                if typing.json_like(v, 'Array'):
+                    rng_state[i] = _ArrayType.validate(v)
             # Set the RNG to the state saved in the file
-            rs.set_state(value)
+            rs.set_state(rng_state)
             return rs
         else:
-            raise TypeError(f"Field {field.name} expects an instance of "
+            field_name = getattr(field, 'name', "")
+            raise TypeError(f"Field {field_name} expects an instance of "
                             f"np.random.RandomState.\nProvided value: {value}")
     @classmethod
     def __modify_schema__(cls, field_schema):
-        field_schema.update(type='array',
-                            items=[{'type': 'string'},
-                                   {'type': 'array', 'items': {'type': 'integer'}},
-                                   {'type': 'integer'}, {'type': 'integer'},
-                                   {'type': 'number'}])
+        field_schema.update(
+        type='array',
+        items=[{'type': 'string'},
+               {'type': 'array',
+                'items': [{'type': 'array', 'items': {'type': 'integer'}},
+                          {'type': 'integer'},
+                          {'type': 'integer'},
+                          {'type': 'number'}]}
+              ])
     @classmethod
     def json_encoder(cls, v):
-        """See typing.json_encoders."""
-        return v.get_state()
+        return ("RandomState", v.get_state())
 
 typing.RNGenerator = RNGenerator
 typing.RandomState = RandomState
 typing.add_json_encoder(np.random.Generator, RNGenerator.json_encoder)
 typing.add_json_encoder(np.random.RandomState, RandomState.json_encoder)
+
+# ####
+# SciPy statistical distributions
+
+import scipy as sp
+import scipy.stats
+
+# FIXME: Is there a public name for frozen data types ?
+RVFrozen = sp.stats._distn_infrastructure.rv_frozen
+MvRVFrozen = sp.stats._multivariate.multi_rv_frozen
+MvNormalFrozen = sp.stats._multivariate.multivariate_normal_frozen
+# List of modules searched for distribution names; precedence is given to
+# modules earlier in the list
+stat_modules = [sp.stats]
+
+# Making an ABC allows to declare subclasses with @Distribution.register
+class Distribution(abc.ABC):
+    """
+    Pydantic-aware type for SciPy _frozen_ distributions. A frozen distribution
+    is one for which the parameters (like `loc` and `scale`) are fixed.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate_dispatch
+
+    @classmethod
+    def validate_dispatch(cls, v):
+        """
+        Find the correct distribution class by inspecting the modules in
+        `stat_modules`, and call its `validate` method on `v`.
+        If the distribution class does not define `validate`, use
+        `Distribution.default_validate`.
+
+        .. Note:: Since  `default_validate` works with all standard scipy.stats
+           distributions, it is rarely needed to define custom `validate`
+           methods.
+        """
+        if isinstance(v, (RVFrozen, MvRVFrozen)):
+            # Already a frozen dist; nothing to do
+            return v
+        elif isinstance(v, (sp.stats._distn_infrastructure.rv_generic,
+                            sp.stats._multivariate.multi_rv_generic)):
+            raise TypeError("`Distribution` expects a frozen random variable; "
+                            f"received '{v}' with unspecified parameters.")
+        elif typing.json_like(v, "Distribution"):
+            dist = None
+            for module in stat_modules:
+                dist = getattr(module, v[1], None)
+                if dist:
+                    break
+            if dist is None:
+                raise ValueError(f"Unable to deserialize distribution '{v[1]}': "
+                                 "unrecognized distribution name.")
+            if hasattr(dist, 'validate'):
+                return dist.validate(v)
+            else:
+                return cls.default_validate(v)
+        else:
+            v_s = str(v)
+            if len(v_s) > 50:
+                v_s = v_s[:49] + '…'
+            raise TypeError(f"Value `{v_s}` is neither a distribution object "
+                            "nor a recognized serialization of a distribution object.")
+
+    @classmethod
+    def default_validate(cls, v):
+        dist = None
+        for module in stat_modules:
+            dist = getattr(module, v[1], None)
+            if dist:
+                break
+        assert dist is not None
+        if len(v) > 5 or len(v) < 4:
+            logger.warning("Malformed serialization: Serialized Distribution "
+                           f"expects 4 or 5 fields; received {len(v)}.")
+        if len(v) == 5:
+            rng_state = v[4]
+            if typing.json_like(rng_state, "RandomState"):
+                rng_state = RandomState.validate(rng_state)
+            elif typing.json_like(rng_state, "RNGenerator"):
+                rng_state = RNGenerator.validate(rng_state)
+        else:
+            rng_state = None
+        kwds = v[3]
+        if not isinstance(kwds, dict):
+            raise TypeError("The fourth field of a serialized Distribution "
+                            f"should be a dictionary; received {type(kwds)}.")
+        kwds = {k: Array.validate(v) if typing.json_like(v, "Array") else v
+                for k, v in kwds.items()}
+        args = v[2]
+        if not isinstance(args, Sequence):
+            raise TypeError("The third field of a serialized Distribution "
+                            f"should be a tuple or list; received {type(kwds)}.")
+        args = [Array.validate(v) if typing.json_like(v, "Array") else v
+                for v in args]
+        # Special case for mixture distribution: all recursive deserialization
+        for key, val in kwds.items():
+            if key == 'dists':
+                if isinstance(val, Iterable):
+                    kwds[key] = [Distribution.validate_dispatch(dist)
+                                 if typing.json_like(dist, "Distribution")
+                                 else dist
+                                 for dist in val]
+                else:
+                    # There should not be a code path which leads here,
+                    # but if one _did_ exist, this seems the most reasonable
+                    kwds[key] = (Distribution.validate_dispatch(val)
+                                 if typing.json_like(dist, "Distribution")
+                                 else dist)
+        # Special case for distributions as arguments (e.g. transformed)
+        # (Could this be combined with the special case for mixtures ?)
+        for i, arg in enumerate(args[:]):
+            if typing.json_like(arg, "Distribution"):
+                args[i] = Distribution.validate_dispatch(arg)
+        for key, val in kwds.items():
+            if typing.json_like(val, "Distribution"):
+                kwds[key] = Distribution.validate_dispatch(val)
+        # Finally, reconstruct the serialized distribution
+        frozen_dist = dist(*args, **kwds)
+        frozen_dist.random_state = rng_state
+            # The random state is actually tied to the internal, non-frozen dist object, but we can ignore that for our purposes
+        return frozen_dist
+
+
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type='array',
+                            items=[{'type': 'string'},
+                                   {'type': 'string'},  # dist name
+                                   {'type': 'array'},   # dist args
+                                   {'type': 'array'},   # dist kwds
+                                   {'type': 'array'}    # random state (optional) Accepted: int, old RandomState, new RNGenerator
+                                   ])
+
+    @staticmethod
+    def json_encoder_RVFrozen(v, include_rng_state=True):
+        if v.args:
+            logger.warning(
+                "For the most consistent and reliable serialization of "
+                "distributions, consider specifying them using only keyword "
+                f"parameters. Received for distribution {v.dist.name}:\n"
+                f"Positional args: {v.args}\nKeyword args: {v.kwds}")
+        random_state = v.dist._random_state if include_rng_state else None
+        return ("Distribution", v.dist.name, v.args, v.kwds, random_state)
+    @staticmethod
+    def json_encoder_MvRVFrozen(v, include_rng_state=True):
+        # We need to special case multivariate distributions, because they follow
+        # a different convention (and don't have a standard 'kwds' attribute)
+        dist = v._dist
+        if isinstance(v, MvNormalFrozen):
+            name = "multivariate_normal"
+            args = ()
+            kwds = dict(mean=v.mean, cov=v.cov)
+        else:
+            raise ValueError(
+                "The json_encoder for `Distribution` needs to be special "
+                "cased for each multivariate distribution, and this has "
+                f"not yet been done for '{dist}'.")
+        random_state = dist._random_state if include_rng_state else None
+        return ("Distribution", name, args, kwds, random_state)
+
+typing.Distribution = Distribution
+typing.add_json_encoder(RVFrozen, Distribution.json_encoder_RVFrozen)
+typing.add_json_encoder(MvRVFrozen, Distribution.json_encoder_MvRVFrozen)
