@@ -99,7 +99,7 @@ if __name__ == "__main__":
 # Y = transformed(X, np.exp, ...)
 # ```
 #
-# would not be serializable. I don't see any fundamental reason why ufuncs could not be serialized, and I think it would be a nice addition. But until this is added, wrap them in a pure function as above when you need serializability.  
+# would not be serializable. I don't see any fundamental reason why ufuncs could not be serialized, and I think it would be a nice addition. But until this is added, use string arguments or wrap them in a pure function as above when you need serializability.  
 # :::
 
 # %%
@@ -155,8 +155,11 @@ from mackelab_toolbox.typing import Distribution, json_kwd_encoder
 class transformed(rv_generic):
     xrv        : Union[rv_generic, rv_frozen]
     map        : PureFunction
+    monotone   : str='no'  # 'increasing' | 'decreasing' | 'no'
     inverse_map: Optional[PureFunction]=None
     inverse_jac: Optional[PureFunction]=None
+    inverse_jac_det: Optional[PureFunction]=None
+    inverse_jac_logdet: Optional[PureFunction]=None
 
     # Dispatch to an appropriate frozen or multivar type based on `xrv`
     def __new__(cls, xrv: Union[rv_generic, rv_frozen],
@@ -178,19 +181,34 @@ class transformed(rv_generic):
     def __init__(self,
                  xrv: rv_generic,
                  map: PureFunction,
+                 monotone   : str="no",
                  inverse_map: Optional[PureFunction]=None,
                  inverse_jac: Optional[PureFunction]=None,
+                 inverse_jac_det: Optional[PureFunction]=None,
+                 inverse_jac_logdet: Optional[PureFunction]=None,
                  name=None, seed=None):
         """
         Parameters
         ----------
+        monotone: One of "increasing", "decreasing" or "no".
+            Additional methods can be provided if the map is monotone, such as
+            cdf and ppf (methods to be implemented as they become needed).
+            If the function is monotone decreasing, than cdf and ppf respectively
+            flip their result or their argument.
+        inverse_jac: The Jacobian of `inverse_map`. Either this function
+            or `inverse_jac_det` is required for the `pdf` method.
+        inverse_jac_det: Must be equivalent to `abs(inverse_jac)`;
+            mostly provided for consistency with the `mvtransformed` interface.
+        inverse_jac_logdet: Must be equivalent to `log(abs(inverse_jac))`.
         name: Argument provided to match the API of other SciPy distributions.
             Leave unset unless you have a reason not to.
         """
         # Save the ctor parameters
         # c.f. rv_continuous.__init__ & _update_ctor_params
         self._ctor_param = dict(
-            xrv=xrv, map=map, inverse_map=inverse_map, inverse_jac=inverse_jac,
+            xrv=xrv, map=map, inverse_map=inverse_map, monotone=monotone,
+            inverse_jac=inverse_jac, inverse_jac_det=inverse_jac_det,
+            inverse_jac_logdet=inverse_jac_logdet,
             name=name, seed=seed)
         # Would be in _parse_args
         if isinstance(map, str):
@@ -199,10 +217,27 @@ class transformed(rv_generic):
             inverse_map = PureFunction.validate(inverse_map)
         if isinstance(inverse_jac, str):
             inverse_jac = PureFunction.validate(inverse_jac)
+        if isinstance(inverse_jac_det, str):
+            inverse_jac_det = PureFunction.validate(inverse_jac_det)
+        if isinstance(inverse_jac_logdet, str):
+            inverse_jac_logdet = PureFunction.validate(inverse_jac_logdet)
+        if not isinstance(monotone, str):
+            raise TypeError("'monotone' argument must be either 'increasing', 'decreasing' "
+                            f"or 'no'. Received '{monotone}' ({type(monotone)}).")
+        monotone = monotone.lower()
+        if monotone in ["both", "neither"]:
+            # Purposely undocumented synonyms for "no"
+            monotone = "no"
+        elif monotone not in ["increasing", "decreasing", "no"]:
+            raise ValueError("'monotone' argument must be either 'increasing', "
+                             f"'decreasing' or 'no'. Received '{monotone}'.")
         self.xrv = xrv
         self.map = map
         self._inverse_map = inverse_map
         self._inverse_jac = inverse_jac
+        self._inverse_jac_det = inverse_jac_det
+        self._inverse_jac_logdet = inverse_jac_logdet
+        self.monotone = monotone
         if name is None:
             name = "transformed"  # Must match the name of the RV class; see json_encoder
         self.name = name
@@ -253,6 +288,34 @@ class transformed(rv_generic):
                                  "inverse Jacobian, which is required for "
                                  "most statistical functions functions.")
         return ijac
+    @property
+    def inverse_jac_det(self):
+        ijac_det = self._inverse_jac_det
+        if ijac_det is None:
+            ijac = self.inverse_jac
+            ijac_det = lambda x: abs(ijac(x))
+        return ijac_det
+    @property
+    def inverse_jac_logdet(self):
+        ijac_logdet = self._inverse_jac_logdet
+        if ijac_logdet is None:
+            ijac_det = self.inverse_jac_det
+            ijac_logdet = lambda x: np.log(ijac_det(x))
+        return ijac_logdet
+    
+    @property
+    def is_monotone_increasing(self):
+        """
+        Returns True if 'increasing', False if 'decreasing', raises RuntimeError otherwise
+        """
+        if self.monotone == 'increasing':
+            return True
+        elif self.monotone == 'decreasing':
+            return False
+        else:
+            raise RuntimeError("To evaluate this method, the distribution's "
+                               "'monotone' attribute must be either "
+                               f"'increasing' or 'decreasing'. It is '{self.monotone}'.")
     
     ## Public statistical methods ##
     
@@ -261,14 +324,19 @@ class transformed(rv_generic):
 
     def pdf(self, y, *args, **kwds):
         return (self.xrv.pdf(self.inverse_map(y), *args, **kwds)
-                *abs(self.inverse_jac(y)))
+                *self.inverse_jac_det(y))
     def logpdf(self, y, *args, **kwds):
         return (self.xrv.logpdf(self.inverse_map(y), *args, **kwds)
-                + np.log(abs(self.inverse_jac(y))))
+                + self.inverse_jac_logdet(y))
     
     def support(self, *args, **kwds):
         a, b = self.xrv.support(*args, **kwds)
         return self.map(a), self.map(b)
+    
+    def ppf(self, x, *args, **kwds):
+        if not self.is_monotone_increasing:
+            x = 1 - x
+        return self.map(self.xrv.ppf(x, *args, **kwds))
     
     def _updated_ctor_param(self):
         """
@@ -283,6 +351,9 @@ class transformed(rv_generic):
         dct['map'] = self.map
         dct['inverse_map'] = self._inverse_map
         dct['inverse_jac'] = self._inverse_jac
+        dct['inverse_jac_det'] = self._inverse_jac_det
+        dct['inverse_jac_logdet'] = self._inverse_jac_logdet
+        dct['monotone'] = self.monotone
         dct['name'] = self.name
         return dct
 
@@ -308,8 +379,8 @@ class transformed(rv_generic):
     def logcdf(self, x, *args, **kwds):
         raise NotImplementedError
 
-    def ppf(self, q, *args, **kwds):
-        raise NotImplementedError
+    #def ppf(self, q, *args, **kwds):
+    #    raise NotImplementedError
 
     def isf(self, q, *args, **kwds):
         raise NotImplementedError
@@ -431,6 +502,17 @@ if __name__ == "__main__":
         φX.pdf(0.5)
 
 # %% [markdown]
+# The *monotone* argument accepts `'increasing'`, `'decreasing'` and `'no'`.
+
+    # %%
+    with pytest.raises(TypeError):
+        transformed(X, np.exp, monotone=None)
+    with pytest.raises(ValueError):
+        transformed(X, np.exp, monotone='revolving')
+    with pytest.raises(RuntimeError):
+        φX.ppf(0.3)   # φX was defined without 'monotone' argument
+
+# %% [markdown]
 # With an inverse and a Jacobian, we can evaluate the pdf.
 
     # %%
@@ -455,7 +537,7 @@ if __name__ == "__main__":
     # %%
     # Same as above, with generic instead of frozen RV
     φX = transformed(norm, np.exp,
-                        inverse_map=np.log, inverse_jac=lambda x: x**-1)
+                     inverse_map=np.log, inverse_jac=lambda x: x**-1)
     plt.plot(xarr, Y.pdf(xarr), label="Y – pdf",
              linewidth=3)
     plt.plot(xarr, φX.pdf(xarr, μ, σ), label="φ(X) – pdf",
@@ -473,16 +555,23 @@ if __name__ == "__main__":
 # Other supported methods
 
     # %%
+    parr = np.linspace(0, 1)
+
+    # %%
     # Frozen RV
     φX = transformed(norm(μ, σ), np.exp,
-                     inverse_map=np.log, inverse_jac=lambda x: x**-1)
+                     inverse_map=np.log, inverse_jac=lambda x: x**-1,
+                     monotone='increasing')
     assert φX.support() == Y.support()
+    assert np.all(φX.ppf(parr) == np.exp(X.ppf(parr)))
 
     # %%
     # Generic RV
     φX = transformed(norm, np.exp,
-                     inverse_map=np.log, inverse_jac=lambda x: x**-1)
+                     inverse_map=np.log, inverse_jac=lambda x: x**-1,
+                     monotone='increasing')
     assert φX.support(μ, σ) == Y.support()
+    assert np.all(φX.ppf(parr, loc=μ, scale=σ) == np.exp(X.ppf(parr)))
 
 # %% [markdown]
 # Test serialization
@@ -548,9 +637,12 @@ class mvtransformed(multi_rv_generic):
     def __init__(self,
                  xrv: multi_rv_generic,
                  map: PureFunction,
+                 monotone   : str='no',  # 'increasing' | 'decreasing' | 'no'
+                 dim_map    : Optional[PureFunction]=None,
                  inverse_map: Optional[PureFunction]=None,
                  inverse_jac: Optional[PureFunction]=None,
-                 dim_map: Optional[PureFunction]=None,
+                 inverse_jac_det: Optional[PureFunction]=None,
+                 inverse_jac_logdet: Optional[PureFunction]=None,
                  seed=None):
         """
         Define a distribution on Y by transforming a distribution on X.
@@ -561,7 +653,13 @@ class mvtransformed(multi_rv_generic):
         map: The transform from X to Y. Strictly speaking any `Callable` is
             valid, but only a `PureFunction` is serializable.
         inverse_map: The inverse of `map`. Required for the `pdf` method.
-        inverse_jac: The Jacobian of `inverse_map`. Required for the `pdf` method.
+        inverse_jac: The Jacobian of `inverse_map`. Either this function
+            or `inverse_jac_det` is required for the `pdf` method.
+        inverse_jac_det: The determinant of the Jacobian of `inverse_map`.
+            Providing this function can often lead to substantial gains in
+            performance and/or numerical stability compared to evaluating
+            ``abs(det(inverse_jac(x)))``.
+        inverse_jac_logdet: Must be equivalent to `log(abs(inverse_jac))`.
         dim_map: Mapping which takes the dimensionality of X as input and
             returns the dimensionality of Y. In most cases this can be
             specified as "n -> n", indicating the two random variabls have the
@@ -577,12 +675,29 @@ class mvtransformed(multi_rv_generic):
             inverse_map = PureFunction.validate(inverse_map)
         if isinstance(inverse_jac, str):
             inverse_jac = PureFunction.validate(inverse_jac)
+        if isinstance(inverse_jac_det, str):
+            inverse_jac_det = PureFunction.validate(inverse_jac_det)
+        if isinstance(inverse_jac_logdet, str):
+            inverse_jac_logdet = PureFunction.validate(inverse_jac_logdet)
         if isinstance(dim_map, str):
             dim_map = PureFunction.validate(dim_map)
+        if not isinstance(monotone, str):
+            raise TypeError("'monotone' argument must be either 'increasing', 'decreasing' "
+                            f"or 'no'. Received '{monotone}' ({type(monotone)}).")
+        monotone = monotone.lower()
+        if monotone in ["both", "neither"]:
+            # Purposely undocumented synonyms for "no"
+            monotone = "no"
+        elif monotone not in ["increasing", "decreasing", "no"]:
+            raise ValueError("'monotone' argument must be either 'increasing', "
+                             f"'decreasing' or 'no'. Received '{monotone}'.")
         self.xrv = xrv
         self.map = map
         self._inverse_map = inverse_map
         self._inverse_jac = inverse_jac
+        self._inverse_jac_det = inverse_jac_det
+        self._inverse_jac_logdet = inverse_jac_logdet
+        self.monotone = monotone
         self.dim_map = dim_map
         super().__init__(seed)
         
@@ -620,7 +735,34 @@ class mvtransformed(multi_rv_generic):
                                  "inverse Jacobian, which is required for "
                                  "most statistical functions functions.")
         return ijac
-    
+    @property
+    def inverse_jac_det(self):
+        ijac_det = self._inverse_jac_det
+        if ijac_det is None:
+            ijac = self.inverse_jac
+            ijac_det = lambda x: abs(np.linalg.det(ijac(x)))
+        return ijac_det
+    @property
+    def inverse_jac_logdet(self):
+        ijac_logdet = self._inverse_jac_logdet
+        if ijac_logdet is None:
+            ijac_det = self.inverse_jac_det
+            ijac_logdet = lambda x: np.log(ijac_det(x))
+        return ijac_logdet
+    @property
+    def is_monotone_increasing(self):
+        """
+        Returns True if 'increasing', False if 'decreasing', raises RuntimeError otherwise
+        """
+        if self.monotone == 'increasing':
+            return True
+        elif self.monotone == 'decreasing':
+            return False
+        else:
+            raise RuntimeError("To evaluate this method, the distribution's "
+                               "'monotone' attribute must be either "
+                               f"'increasing' or 'decreasing'. It is '{self.monotone}'.")
+
     ## Public statistical methods ##
    
     def rvs(self, *args, **kwds):
@@ -628,10 +770,17 @@ class mvtransformed(multi_rv_generic):
 
     def pdf(self, x, *args, **kwargs):
         return (self.xrv.pdf(self.inverse_map(x), *args, **kwargs)
-                * abs(np.linalg.det(self.inverse_jac(x))))
+                * self.inverse_jac_det(x))
     def logpdf(self, y, *args, **kwds):
         return (self.xrv.logpdf(self.inverse_map(y), *args, **kwds)
-                + np.log(abs(np.linalg.det(self.inverse_jac(y)))))
+                + self.inverse_jac_logdet(y))
+        
+    def ppf(self, x, *args, **kwds):
+        # If mv dist doesn't define ppf, don't hide that with a monotonicity error
+        xrv_ppf = getattr(self.xrv, 'ppf')            
+        if not self.is_monotone_increasing:
+            x = 1 - x
+        return self.map(xrv_ppf(x, *args, **kwds))
 
 
 # %%
@@ -640,8 +789,9 @@ class mvtransformed_frozen(multi_rv_frozen):
     #     because mv frozen distributions don't have standard args and kwds
     #     attributes. So instead we store the frozen untransformed distribution
     #     itself, and reimplement the statistical methods.
-    def __init__(self, xrv: multi_rv_frozen, map,
-                 inverse_map=None, inverse_jac=None, dim_map=None,
+    def __init__(self, xrv: multi_rv_frozen, map, monotone="no", dim_map=None,
+                 inverse_map=None, inverse_jac=None, inverse_jac_det=None,
+                 inverse_jac_logdet=None,
                  *args, seed=None, dim=None, dims=None, **kwds):
         ## Normalize xrv (it can be either generic or frozen)
         if isinstance(xrv, multi_rv_frozen):
@@ -660,8 +810,9 @@ class mvtransformed_frozen(multi_rv_frozen):
         self.xrv_frozen = xrv_frozen
         # We rarely use _dist, but it provides consistency with the API of the
         # standard mv distributions and is useful on occasion (e.g. chained transformations)
-        self._dist = mvtransformed(xrv._dist, map, inverse_map, inverse_jac,
-                                   dim_map, seed=seed)
+        self._dist = mvtransformed(xrv._dist, map, monotone, dim_map,
+                                   inverse_map, inverse_jac, inverse_jac_det,
+                                   inverse_jac_logdet, seed=seed)
         ## Normalize dims (can be either computed with dim_map or provided as keywords)
         # (Done after self._dist so we have access to deserialized _dist.dim_map)
         # (The two keyword args `dim` and `dims` are treated as synonyms, so
@@ -717,17 +868,30 @@ class mvtransformed_frozen(multi_rv_frozen):
     @property
     def inverse_jac(self):
         return self._dist.inverse_jac
+    @property
+    def inverse_jac_det(self):
+        return self._dist.inverse_jac_det
+    @property
+    def inverse_jac_logdet(self):
+        return self._dist.inverse_jac_logdet
     
     ## Supported statistical methods ##
     def rvs(self, size=None, random_state=None):
         return self.map(self.xrv_frozen.rvs(size, random_state=random_state))
     def pdf(self, x):
         return (self.xrv_frozen.pdf(self.inverse_map(x))
-                * abs(np.linalg.det(self.inverse_jac(x))))
+                * self.inverse_jac_det(x))
     def logpdf(self, x):
         return (self.xrv_frozen.logpdf(self.inverse_map(x))
-                + np.log(abs(np.linalg.det(self.inverse_jac(x)))))
+                + self.inverse_jac_logdet(x))
         
+    def ppf(self, x):
+        # If mv dist doesn't define ppf, don't hide that with a monotonicity error
+        xrv_ppf = getattr(self.xrv_frozen, 'ppf')            
+        if not self._dist.is_monotone_increasing:
+            x = 1 - x
+        return self.map(xrv_ppf(x))
+
     # Copied from transformed_rv.json_encoder
     @staticmethod
     def json_encoder(tdist, include_rng_state=True):
@@ -792,7 +956,7 @@ if __name__ == "__main__":
     # Generic distribution
     X = multivariate_normal
     x20 = 1.  # We will compute the marginal 
-    Y = transformed(X, np.exp, np.log,
+    Y = transformed(X, np.exp, "increasing", "n->n", np.log,
                     inverse_jac=lambda x:(1/x)[...,np.newaxis,:]*np.eye(x.shape[-1]))
     true_marginal = lognorm(scale=np.exp(μ[0]), s=np.sqrt(Σ[0][0]))
     yarr = np.linspace(0, true_marginal.ppf(0.95))[1:]
@@ -805,7 +969,7 @@ if __name__ == "__main__":
     # %%
     # Frozen distribution
     X = multivariate_normal(mean=μ, cov=Σ)
-    Y = transformed(X, np.exp, np.log,
+    Y = transformed(X, np.exp, "increasing", "n->n", np.log,
                    inverse_jac=lambda x:(1/x)[...,np.newaxis,:]*np.eye(x.shape[-1]))
     true_marginal = lognorm(scale=np.exp(μ[0]), s=np.sqrt(Σ[0][0]))
     yarr = np.linspace(0, true_marginal.ppf(0.95))[1:]
@@ -825,7 +989,7 @@ if __name__ == "__main__":
     # Generic distribution
     X = multivariate_normal
     x20 = 1.  # We will compute the marginal 
-    Y = transformed(X, np.exp, np.log,
+    Y = transformed(X, np.exp, "increasing", "n->n", np.log,
                     inverse_jac=lambda x:(1/x)[...,np.newaxis,:]*np.eye(x.shape[-1]))
     true_marginal = lognorm(scale=np.exp(μ[0]), s=np.sqrt(Σ[0][0]))
     yarr = np.linspace(0, true_marginal.ppf(0.95))[1:]
@@ -838,7 +1002,7 @@ if __name__ == "__main__":
     # %%
     # Frozen distribution
     X = multivariate_normal(mean=μ, cov=Σ)
-    Y = transformed(X, np.exp, np.log,
+    Y = transformed(X, np.exp, "increasing", "n->n", np.log,
                    inverse_jac=lambda x:(1/x)[...,np.newaxis,:]*np.eye(x.shape[-1]))
     true_marginal = lognorm(scale=np.exp(μ[0]), s=np.sqrt(Σ[0][0]))
     yarr = np.linspace(0, true_marginal.ppf(0.95))[1:]
@@ -867,8 +1031,8 @@ if __name__ == "__main__":
     φX1 = stats.transformed(
         multivariate_normal(mean=μ, cov=Σ), φ)
     φX2 = stats.transformed(
-        multivariate_normal(mean=μ, cov=Σ), 'x -> np.exp(x)', 'y -> np.log(y)',
-        inverse_jac=inverse_jac, dim_map='n -> n')
+        multivariate_normal(mean=μ, cov=Σ), 'x -> np.exp(x)', 'increasing',
+        dim_map='n -> n', inverse_map='y -> np.log(y)', inverse_jac=inverse_jac)
         # NB: Use the same `transformed` type as the one in json_encoders dict
 
     class Foo(BaseModel):
