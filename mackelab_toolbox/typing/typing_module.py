@@ -1325,7 +1325,7 @@ typing.add_json_encoder(np.generic, _NPValueType.json_encoder)
 
 class _ArrayType(np.ndarray):
     nptype = None   # This must be a type (np.int32, not np.dtype('int32'))
-    _ndim = None
+    ndim_ = None
 
     @classmethod
     def __get_validators__(cls):
@@ -1361,9 +1361,9 @@ class _ArrayType(np.ndarray):
 
         elif isinstance(value, np.ndarray):
             # Don't create a new array unless necessary
-            if cls._ndim  is not None and value.ndim != cls._ndim:
+            if cls.ndim_  is not None and value.ndim != cls.ndim_:
                 raise TypeError(f"{field.name} expects a variable with "
-                                f"{cls._ndim} dimensions.")
+                                f"{cls.ndim_} dimensions.")
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
             if cls.nptype is None or np.issubdtype(value.dtype, cls.nptype):
                 result = value
@@ -1389,11 +1389,11 @@ class _ArrayType(np.ndarray):
                # only the outer level is unwrapped.
                raise TypeError(f"Unable to cast {value} to an array.")
             # Check that array matches expected shape and dtype
-            if cls._ndim is not None and result.ndim != cls._ndim:
+            if cls.ndim_ is not None and result.ndim != cls.ndim_:
                 raise TypeError(
                     f"The dimensionality of the data (dim: {result.ndim}, "
                     f"shape: {result.shape}) does not correspond to the "
-                    f"expected of dimensions ({cls._ndim} for '{field.name}').")
+                    f"expected of dimensions ({cls.ndim_} for '{field.name}').")
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
             if cls.nptype is None or np.issubdtype(result.dtype, cls.nptype):
                 pass
@@ -1443,7 +1443,7 @@ class _ArrayMeta(type):
         if ndim is not None:
             specifier += f",{ndim}"
         return type(f'Array[{specifier}]', (_ArrayType,),
-                    {'nptype': nptype, '_ndim': ndim})
+                    {'nptype': nptype, 'ndim_': ndim})
 
 class Array(np.ndarray, metaclass=_ArrayMeta):
     """

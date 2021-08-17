@@ -14,7 +14,7 @@ from numbers import Number
 import numpy as np
 PlainArg = (Number, str, np.ndarray)
 
-__all__ = ["PureFunction", "PartialPureFunction", "CompositePureFunction"]
+__all__ = ["PlainArg", "PureFunction", "PartialPureFunction", "CompositePureFunction"]
 
 class PureFunctionMeta(type):
     _instantiated_types = {}
