@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from warnings import warn
 import logging
+from types import SimpleNamespace
+from typing import Optional, Union, Tuple, NamedTuple
 import numpy
 from theano import function, config, shared, tensor
 from pathlib import Path
@@ -35,6 +37,48 @@ def using_gpu():
         return False
     else:
         return True
+        
+try:
+    from pydantic import BaseModel
+except ImportError:
+    VarCollectionTypes = Union[dict, SimpleNamespace]
+else:
+    VarCollectionTypes = Union[dict, SimpleNamespace, BaseModel]
+        
+class VarTypeInfo(NamedTuple):
+    broadcast: Optional[Tuple[bool]]
+    ndim     : Optional[int]
+    shape    : Optional[Union[Tuple[int], str]]
+    dtype    : Optional[str]
+def varcollection_typeinfo(params: VarCollectionTypes) \
+-> Dict[Any, VarTypeInfo]:
+    """
+    Given a collection of parameters, return a (possibly nested) dictionary
+    of `VarTypeInfo` objects. These objects summarize the shape information which
+    is typically the most relevant for diagnosing Theano type and shape errors
+    which occur during execution.
+    """
+    Θ = params
+    Θ_info = {}
+    for k, v in getattr(Θ, 'items', lambda: Θ)():
+        if isinstance(v, VarCollectionTypes.__args__):  # Assumes VarCollectionTypes has at least two types (otherwise Union collapses)
+            Θ_info[k] = varcollection_typeinfo(v)
+        else:
+            broadcast = getattr(v, 'broadcastable', None)
+            ndim = getattr(v, 'ndim', None)
+            shape = getattr(v, 'shape', "<no shape>")
+            if hasattr(shape, 'eval'):
+                try:
+                    shape = shape.eval()
+                except Exception:
+                    pass
+            if shape is not None and not isinstance(shape, tuple):
+                shape = str(shape)
+            dtype = getattr(v, 'dtype', None)
+            if dtype is not None:
+                dtype = str(dtype)
+            Θ_info[k] = VarTypeInfo(broadcast, ndim, shape, dtype)
+    return Θ_info
 
 # =====================================
 # Pydantic-aware types
