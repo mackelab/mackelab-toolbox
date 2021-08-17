@@ -434,7 +434,7 @@ def format(s, *args, **kwargs):
 ###############
 # Hashing
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 def stablehash(o):
     """
@@ -461,23 +461,27 @@ def stablehash(o):
              '''
              logp = np.sum(np.log(N-np.arange(M))) - M*np.log(N)
              return 1-np.exp(logp)
+    
+    Returns
+    -------
+    HASH object
     """
     return hashlib.sha1(_tobytes(o))
-def stablehexdigest(o):
+def stablehexdigest(o) -> str:
     """
     Returns
     -------
     str
     """
     return stablehash(o).hexdigest()
-def stablebytesdigest(o):
+def stablebytesdigest(o) -> bytes:
     """
     Returns
     -------
     bytes
     """
     return stablehash(o).digest()
-def stableintdigest(o, byte_len=4):
+def stableintdigest(o, byte_len=4) -> int:
     """
     Suitable as the return value of a `__hash__` method.
 
@@ -505,7 +509,8 @@ def stableintdigest(o, byte_len=4):
     return int.from_bytes(stablebytesdigest(o)[:byte_len], 'little')
 stabledigest = stableintdigest
 
-def _tobytes(o):
+def _tobytes(o) -> bytes:
+    # byte converters for specific types
     if isinstance(o, bytes):
         return o
     elif isinstance(o, str):
@@ -513,6 +518,14 @@ def _tobytes(o):
     elif isinstance(o, int):
         l = ((o + (o<0)).bit_length() + 8) // 8  # Based on https://stackoverflow.com/a/54141411
         return o.to_bytes(length=l, byteorder='little', signed=True)
+    elif isinstance(o, float):
+        return o.hex().encode('utf8')
+    # Generic byte encoders. These methods may not be ideal for each type, or
+    # even work at all, so we first check if the type provides a __bytes__ method.
+    elif hasattr(o, '__bytes__'):
+        return bytes(o)
+    elif isinstance(o, Mapping):
+        return b''.join(_tobytes(k) + _tobytes(v) for k,v in o.items())
     elif isinstance(o, Iterable):
         return b''.join(_tobytes(oi) for oi in o)
     else:
