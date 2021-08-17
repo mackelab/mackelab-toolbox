@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Union, Dict, List
+from typing import Union, Any, Dict, List
+from functools import lru_cache
 from pydantic import BaseModel
 import numbers
 import numpy as np
@@ -25,23 +26,50 @@ class PyMC_RV_data(BaseModel):
     name      : str
     module    : str
     distr_name: str
-    Θ         : Dict[str, Union[mtbtyping.Array]]
+    Θ         : Dict[str, mtbtyping.Array]
         # Always store params as arrays to preserve dtype – some functions (like random) depend of the dtype of arguments
     shape     : List[int]
     dtype     : str
 
-class PyMC_RV(pm.model.PyMC3Variable):
+class PyMC_RV_Meta(type(pm.model.PyMC3Variable)):
+    @lru_cache(maxsize=None)
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            dtype, ndim = key
+        else:
+            dtype = key
+            ndim = None
+        dtype = str(np.dtype(dtype))
+        return type("PyMC_RV", (PyMC_RV,), {'dtype': dtype, 'ndim_': ndim})
+    
+class PyMC_RV(pm.model.PyMC3Variable, metaclass=PyMC_RV_Meta):
     # I'm not sure this works with all PyMC3Variables; it seems to work
     # with FreeRV and TransformedRV at least
+    dtype: Optional[str]=None  # dtype & ndim to match the type specifiers
+    ndim_: Optional[int]=None  # which can be given to mtbtyping.Array
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
     def validate(cls, v):
         if isinstance(v, (pm.model.FreeRV, pm.model.TransformedRV)):
+            if cls.dtype and cls.dtype != v.dtype:
+                raise TypeError(f"Expected a variable of dtype '{cls.dtype}', "
+                                f"but received {v}, which has dtype '{v.dtype}'.")
+            if cls.ndim_ is not None and cls.ndim_ != v.ndim:
+                raise TypeError(f"Expected a variable of {cls.ndim_} dimensions, "
+                                f"but received {v}, which has dtype {v.ndim}.")
             return v
         elif json_like(v, "PyMC_RV"):
             rv_data = PyMC_RV_data.validate(v[1])
+            if cls.dtype and cls.dtype != rv_data.dtype:
+                raise TypeError(f"Expected a variable of dtype '{cls.dtype}', "
+                                f"but serialized variable {rv_data.name} "
+                                f"has dtype '{rv_data.dtype}'.")
+            if cls.ndim_ is not None and cls.ndim_ != len(rv_data.shape):
+                raise TypeError(f"Expected a variable of {cls.ndim_} dimensions, "
+                                f"but serialized variable {rv_data.name} "
+                                f"has {len(rv_data.shape)} (shape: {rv_data.shape}).")
             m = import_module(rv_data.module)
             Distr = getattr(m, rv_data.distr_name)
             pymc_model = pm.Model.get_contexts()[-1]
