@@ -70,7 +70,9 @@ import itertools
 from collections.abc import Iterable
 from typing import Tuple
 
-terminating_types = (str, bytes)
+_terminating_types = {str, bytes}
+terminating_types = tuple(_terminating_types)  # NB: isinstance() only works with tuples
+    # TODO: Move to a config object with @property
 
 def flatten(*l, terminate=None):
     """
