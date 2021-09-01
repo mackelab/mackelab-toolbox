@@ -73,6 +73,7 @@ from typing import Tuple
 _terminating_types = {str, bytes}
 terminating_types = tuple(_terminating_types)  # NB: isinstance() only works with tuples
     # TODO: Move to a config object with @property
+    #       When we do this, remove the update from typing_module and include in @property
 
 def flatten(*l, terminate=None):
     """

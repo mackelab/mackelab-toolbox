@@ -33,6 +33,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 ############
+# Update terminating types
+# FIXME: A better solution would be for terminating_types to be dynamic:
+# it could inspect sys.modules, and add types for loaded modules
+utils._terminating_types |= {numbers.Number, np.ndarray, np.number}
+utils.terminating_types = tuple(utils._terminating_types)
+
+############
 # JSON encoder with optional keywords
 # (copied from RenormalizedFlows)
 
