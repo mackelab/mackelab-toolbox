@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # Update terminating types
 # FIXME: A better solution would be for terminating_types to be dynamic:
 # it could inspect sys.modules, and add types for loaded modules
+# NB: Pint and Quantities types added in load_pint(), load_quantities()
 utils._terminating_types |= {numbers.Number, np.ndarray, np.number}
 utils.terminating_types = tuple(utils._terminating_types)
 
@@ -595,6 +596,8 @@ class TypeContainer(metaclass=utils.Singleton):
         typing.add_json_encoder(pint.quantity.Quantity, PintValue.json_encoder)
         typing.add_json_encoder(pint.unit.Unit, PintUnit.json_encoder)
         typing.add_unit_type(PintUnit)
+        utils._terminating_types |= {pint.quantity.Quantity, pint.unit.Unit}
+        utils.terminating_types = tuple(utils._terminating_types)
 
     @staticmethod
     def load_quantities():
@@ -607,6 +610,8 @@ class TypeContainer(metaclass=utils.Singleton):
                                 QuantitiesUnit.json_encoder,
                                 priority=5)
         typing.add_unit_type(QuantitiesUnit)
+        utils._terminating_types |= {quantities.quantity.Quantity, quantities.dimensionality.Dimensionality}
+        utils.terminating_types = tuple(utils._terminating_types)
 
 typing = TypeContainer()
 
