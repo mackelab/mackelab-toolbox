@@ -1109,6 +1109,44 @@ class GitSHA:
         return f"<p style=\"{self.css}\">git: {self.path} {self.branch} {self.sha}</p>"
 
 #####################
+# Logging utilities
+
+class lesslog:
+    """
+    Context manager for temporarily changing the log level of loggers.
+    By default, all messages from the specified loggers are silenced except
+    those of level ERROR.
+    (If no logger is specified, all loggers are set to this level.)
+    The log level of each logger is restored when exiting the context.
+    
+    Example usage::
+    
+    >>> import logging
+    >>> import matplotlib.pyplot as plt
+    >>> from mackelab_toolbox.utils import lesslog, sciformat
+    >>> logging.basciConfig()
+    >>> with lesslog("matplotlib"):
+    >>>   # The line below would normally print a warning
+    >>>   plt.scatter(range(5), range(5), c=(.1, .3, .5))
+    """
+    
+    
+    def __init__(self, loggers="", level=logging.ERROR):
+        if isinstance(loggers, str):
+            loggers = [loggers]
+        self.loggers = [logging.getLogger(logger) for logger in loggers]
+        self.in_context_level = level
+        self.out_of_context_levels = None
+    def __enter__(self):
+        self.out_of_context_levels = [logger.level for logger in self.loggers]
+        for logger in self.loggers:
+            logger.level = self.in_context_level
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for logger, level in zip(self.loggers, self.out_of_context_levels):
+            logger.level = level
+        self.out_of_context_levels
+
+#####################
 # Misc. utilities
 
 # TODO: Pre-evaluate strings to some more efficient expression, so
