@@ -649,6 +649,25 @@ def broadcast_shapes(*shapes):
 
 #######################
 # Dictionary utilities
+from collections import OrderedDict
+
+def sort_dict(d: dict, key: bool=None, reverse: bool=False) -> dict:
+    """
+    Sort a dictionary in-place. The `key` and `reverse` arguments are
+    passed on to `sorted`.
+
+    .. Note:: This method is more efficient when `d` is an OrderedDict.
+    """
+    sorted_key = sorted(d, key=key, reverse=reverse)
+    if isinstance(d, OrderedDict):
+        for k in sorted_key:
+            d.move_to_end(k)
+    else:
+        sorted_dict = {k: d[k] for k in sorted_key}
+        d.clear()
+        for k, v in sorted_dict.items():
+            d[k] = v
+    return d
 
 def comparedicts(dict1, dict2):
     """
