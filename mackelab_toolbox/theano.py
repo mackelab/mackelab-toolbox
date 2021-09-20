@@ -5,9 +5,11 @@ import logging
 from types import SimpleNamespace
 from typing import Optional, Union, Tuple, NamedTuple
 import numpy
+import theano
 from theano import function, config, shared, tensor
 from pathlib import Path
 logger = logging.getLogger(__name__)
+from . import utils
 
 ##############################################
 # Manifest                                   #
@@ -17,7 +19,26 @@ logger = logging.getLogger(__name__)
 # - Caching graphs and compiled graphs       #
 ##############################################
 
-# TODO: Add shim terminating types to utils.terminating_types
+# TODO: Merge theano_shim.config.terminating types with utils.terminating_types
+utils._terminating_types |= {theano.graph.basic.Node}
+utils.terminating_types = tuple(utils._terminating_types)
+
+def _node_to_bytes(node):
+    state = node.__getstate__()
+    # NB: state includes 'tag' and 'auto_name' entries, which are
+    # runtime-specific and not necessary to compute a unique hash.
+    return utils._tobytes({k: v for k, v in state.items()
+                           if k not in {"tag", "auto_name"}})
+def _tensortype_to_bytes(ttype):
+    return utils._tobytes(str(ttype))
+def _container_to_bytes(container):
+    # CAUTION: I'm not sure if the str representation (which seems like just
+    # the value ?) is conserved across executions, so this may not be the
+    # best way to represent this
+    return utils._tobytes(str(container))
+utils._byte_converters[theano.graph.basic.Node] = _node_to_bytes
+utils._byte_converters[theano.tensor.TensorType] = _tensortype_to_bytes
+utils._byte_converters[theano.link.basic.Container] = _container_to_bytes
 
 # =====================================
 # Utility functions

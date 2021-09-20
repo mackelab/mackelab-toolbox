@@ -23,6 +23,8 @@ from pydantic.dataclasses import dataclass
 
 from mackelab_toolbox import utils
 from mackelab_toolbox.units import UnitlessT
+# Since we import NumPy already, might as well run the setup (one less thing for users to forget)
+from mackelab_toolbox import numpy
 
 # For Array
 import io
@@ -31,14 +33,6 @@ import base64
 
 import logging
 logger = logging.getLogger(__name__)
-
-############
-# Update terminating types
-# FIXME: A better solution would be for terminating_types to be dynamic:
-# it could inspect sys.modules, and add types for loaded modules
-# NB: Pint and Quantities types added in load_pint(), load_quantities()
-utils._terminating_types |= {numbers.Number, np.ndarray, np.number}
-utils.terminating_types = tuple(utils._terminating_types)
 
 ############
 # JSON encoder with optional keywords

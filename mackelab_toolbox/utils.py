@@ -70,10 +70,12 @@ import itertools
 from collections.abc import Iterable
 from typing import Tuple
 
+# TODO: Add merge theano_shim.config terminating types with utils.terminating_types
 _terminating_types = {str, bytes}
 terminating_types = tuple(_terminating_types)  # NB: isinstance() only works with tuples
     # TODO: Move to a config object with @property
     #       When we do this, remove the update from typing_module and include in @property
+    # TODO: Merge with theano_shim.config.terminating_types (see .theano)
 
 def flatten(*l, terminate=None):
     """
@@ -266,6 +268,31 @@ class SanitizedOrderedDict(SanitizedDict, OrderedDict):
         Return an empty OrderedDict with the same sanitization.
         """
         return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
+        
+class TypeDict(OrderedDict):
+    """
+    A dictionary using types as keys. A key will match any of its subclasses;
+    if there are multiple possible matches, the earliest in the dictionary
+    takes precedence.
+    """
+    def __getitem__(self, key):
+        if not isinstance(key, type):
+            raise TypeError(f"TypeDict keys must be types")
+        for k, v in self.items():
+            if issubclass(key, k):
+                return v
+        else:
+            raise KeyError(f"Type {key} is not a subclass of any of this "
+                           "TypeDict's type keys.")
+                           
+    def __setitem__(self, key, value):
+        if not isinstance(key, type):
+            raise TypeError(f"TypeDict keys must be types")
+        return super().__setitem__(key, value)
+        
+    def __contains__(self, key):
+        return (isinstance(key, type) and
+                any(issubclass(key, k) for k in self))
 
 @staticmethod
 @abc.abstractmethod
@@ -438,6 +465,8 @@ def format(s, *args, **kwargs):
 # Hashing
 import hashlib
 from collections.abc import Iterable, Mapping
+from enum import Enum
+# from .utils import terminating_types, TypeDict
 
 def stablehash(o):
     """
@@ -512,9 +541,36 @@ def stableintdigest(o, byte_len=4) -> int:
     return int.from_bytes(stablebytesdigest(o)[:byte_len], 'little')
 stabledigest = stableintdigest
 
+# Extra functions to converting values to bytes specialized to specific types
+# This is the mechanism to use to add support for types outside your own control
+# (i.e. for which it is not possible to add a __bytes__ method).
+_byte_converters = TypeDict()
+
 def _tobytes(o) -> bytes:
+    """
+    Utility function for converting an object to bytes. This is used for the
+    state digests, and thus is designed with the following considerations:
+    
+    1. Different inputs should, with high probability, return different byte
+       sequences.
+    2. The same inputs should always return the same byte sequence, even when
+       executed in a new session (in order to satisfy the 'stable' description).
+       Note that this precludes using an object's `id`, which is sometimes
+       how `hash` is implemented.
+    2. It is NOT necessary for the input to be reconstructable from
+       the returned bytes.
+       
+    ..Note:: To avoid overly complicated byte sequences, the distinction 
+       guarantee is not preserved across types. So `_tobytes(b"A")`,
+       `_tobytes("A")` and `_tobytes(65)` all return `b'A'`.
+       So multiple inputs can return the same byte sequence, as long as they
+       are unlikely to be used in the same location to mean different things.
+    """
     # byte converters for specific types
-    if isinstance(o, bytes):
+    if o is None:
+        # TODO: Would another value more appropriately represent None ? E.g. \x00 ?
+        return b""
+    elif isinstance(o, bytes):
         return o
     elif isinstance(o, str):
         return o.encode('utf8')
@@ -523,16 +579,38 @@ def _tobytes(o) -> bytes:
         return o.to_bytes(length=l, byteorder='little', signed=True)
     elif isinstance(o, float):
         return o.hex().encode('utf8')
+    elif isinstance(o, Enum):
+        return _tobytes(o.value)
+    elif isinstance(o, type):
+        return _tobytes(f"{o.__module__}.{o.__qualname__}")
     # Generic byte encoders. These methods may not be ideal for each type, or
     # even work at all, so we first check if the type provides a __bytes__ method.
     elif hasattr(o, '__bytes__'):
         return bytes(o)
-    elif isinstance(o, Mapping):
+    elif type(o) in _byte_converters:
+        return _byte_converters[type(o)](o)
+    elif isinstance(o, Mapping) and not isinstance(o, terminating_types):
         return b''.join(_tobytes(k) + _tobytes(v) for k,v in o.items())
-    elif isinstance(o, Iterable):
+    elif isinstance(o, Iterable) and not isinstance(o, terminating_types):
         return b''.join(_tobytes(oi) for oi in o)
     else:
-        return bytes(o)
+        try:
+            return bytes(o)
+        except TypeError:
+            # As an ultimate fallback, attempt to use the same decomposition
+            # that pickle would
+            try:
+                state = o.__getstate__()
+            except Exception:
+                breakpoint()
+                raise TypeError("mackelab_toolbox.utils._tobytes does not know how "
+                                f"to convert values of type {type(o)} to bytes. "
+                                "One way to solve this is may be to add a "
+                                "`__bytes__` method to that type. If that is "
+                                "not possible, you may also add a converter to "
+                                "mackelab_toolbox.utils.byte_converters.")
+            else:
+                return _tobytes(state)
 
 ##########################
 # Numerical types
