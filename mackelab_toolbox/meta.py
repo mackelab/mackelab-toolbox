@@ -314,7 +314,7 @@ class HideCWDFromImport:
         def analyze_spectrum(data: List[float], window: Slice):
             ...
 
-    This version now works no matter the current directory.
+    This version now works irrespective of the current directory.
 
     .. Note:: Hiding the cwd is only required in packages that double as
        analysis directory. If instead the specialized types were defined is
@@ -369,21 +369,33 @@ class HideCWDFromImport:
         :param:__file__: Path to any file in the directory we want to hide.
             Passing the value of `__file__` from the calling module should
             always be appropriate.
-            Special case: if `__file__` points to a file named "__init__.py",
-            then the _parent_ directory is excluded. This is to account for
-            the use case where a subpackage shadows a third-party package,
-            in which case the HideCWD guard needs to be placed in the
-            *__init__.py* file within that subpackage.
+            Special cases:
+              -`__file__` is `None` => Infer the current directory with os.getcwd()
+                  Note that this is only appropriate in interactive sessions;
+                  for scripts, the cwd is not the same as the directory
+                  containing the file.
+              - `__file__` points to a file named "__init__.py".
+                  In this case the _parent_ directory is excluded. This is to
+                  account for the use case where a subpackage shadows a
+                  third-party package, in which case the HideCWD guard needs to
+                  be placed in the *__init__.py* file within that subpackage.
         """
         # Remark: The reason we don't use os.getcwd() is because we want
         #         to avoid any unnecessary import. Any module name we import
         #         is a module name we can't shadow.
-
-        directory, filename = __file__.rsplit('/', 1)
-        if filename == "__init__.py":
-            self.hidden_dir = directory.rsplit('/', 1)[0]
+        # Remark II: I don't remember what situation prompted the comment above,
+        #         and I don't see how importing `os` within __init__ prevents
+        #         us from shadowing it. If we run into this problem, we
+        #         should document with a concrete example.
+        if __file__ is None:
+            import os
+            self.hidden_dir = os.getcwd()
         else:
-            self.hidden_dir = __file__.rsplit('/', 1)[0]
+            directory, filename = __file__.rsplit('/', 1)
+            if filename == "__init__.py":
+                self.hidden_dir = directory.rsplit('/', 1)[0]
+            else:
+                self.hidden_dir = __file__.rsplit('/', 1)[0]
 
     def __enter__(self):
         # Python will search both in the script directory and the current directory
@@ -394,18 +406,14 @@ class HideCWDFromImport:
         import sys
 
         _script_dir = self.hidden_dir
-        try:
-            _script_dir_pos = sys.path.index(_script_dir)
-        except ValueError:
-            _script_dir_pos = None
-        else:
-            del sys.path[_script_dir_pos]
-        try:
-            _cur_dir_pos = sys.path.index('')
-        except ValueError:
-            _cur_dir_pos = None
-        else:
-            del sys.path[_cur_dir_pos]
+        _script_dir_pos = [i for i, path in enumerate(sys.path)
+                           if path == _script_dir]
+        for i in _script_dir_pos[::-1]:
+            del sys.path[i]
+        _cur_dir_pos = [i for i, path in enumerate(sys.path)
+                        if path == ""]
+        for i in _cur_dir_pos[::-1]:
+            del sys.path[i]
         self._script_dir = _script_dir
         self._script_dir_pos = _script_dir_pos
         self._cur_dir_pos = _cur_dir_pos
@@ -414,7 +422,7 @@ class HideCWDFromImport:
         import sys
 
         # Reinsert directories in inverse order, so positions are correct
-        if self._cur_dir_pos is not None:
-            sys.path.insert(self._cur_dir_pos, '')
-        if self._script_dir_pos is not None:
-            sys.path.insert(self._script_dir_pos, self._script_dir)
+        for i in self._cur_dir_pos:
+            sys.path.insert(i, "")
+        for i in self._script_dir_pos:
+            sys.path.insert(i, self._script_dir)
