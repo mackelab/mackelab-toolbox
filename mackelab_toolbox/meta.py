@@ -278,6 +278,9 @@ class HideCWDFromImport:
     1. The most logical module name is the same as another package.
     2. Code will be executed from within the directory where the package resides.
 
+    .. Caution:: The following names cannot be hidden, as they are used by the
+       context itself: *sys*, *os*.
+
     The motivating use case is the following: The project *MyProject* is
     organized as a pip package, with a combination of lower-level modules doing
     most of the heavy computations, and higher-level ones for analyzing results
@@ -380,22 +383,20 @@ class HideCWDFromImport:
                   third-party package, in which case the HideCWD guard needs to
                   be placed in the *__init__.py* file within that subpackage.
         """
-        # Remark: The reason we don't use os.getcwd() is because we want
-        #         to avoid any unnecessary import. Any module name we import
-        #         is a module name we can't shadow.
-        # Remark II: I don't remember what situation prompted the comment above,
-        #         and I don't see how importing `os` within __init__ prevents
-        #         us from shadowing it. If we run into this problem, we
-        #         should document with a concrete example.
+        # Remark: Any module name we import is a module name we can't shadow;
+        #         we can’t have a module 'os' in the current directory, because
+        #         when we `import os` below, the current directory is still
+        #         in the search path.
+        #         Thus we limit ourselves to two modules: 'sys' and 'os'.
+        import os  # Depending on `os` allows us to deal correctly with both *nix and Windows paths
         if __file__ is None:
-            import os
             self.hidden_dir = os.getcwd()
         else:
-            directory, filename = __file__.rsplit('/', 1)
+            directory, filename = os.path.split(__file__)
             if filename == "__init__.py":
-                self.hidden_dir = directory.rsplit('/', 1)[0]
+                self.hidden_dir = os.path.dirname(directory)
             else:
-                self.hidden_dir = __file__.rsplit('/', 1)[0]
+                self.hidden_dir = directory
 
     def __enter__(self):
         # Python will search both in the script directory and the current directory
