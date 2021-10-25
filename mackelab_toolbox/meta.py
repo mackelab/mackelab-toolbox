@@ -427,3 +427,64 @@ class HideCWDFromImport:
             sys.path.insert(i, "")
         for i in self._script_dir_pos:
             sys.path.insert(i, self._script_dir)
+            
+class HideModule:
+    """
+    Accepts a list of module names, which will be removed from the list
+    of already imported modules within the context.
+    (Specifically, they are removed from `sys.modules` upon entering the
+    context, and reinstated upon exit.)
+    If modules are not in `sys.modules`, they are not removed, nor imported on
+    exit.
+    It is an error to import a hidden module within the context, since then
+    it is ambiguous whether the previous or the new module should be kept.
+    For consistency, this applies even if the module was not imported
+    before entering the context.
+    
+    Rationale: This context messes in a pretty heavy-handed way with Python's
+    import mechanism, and there should be few good reasons to use it.
+    The anticipate usage, and the one which motivated its implementation, is
+    to workaround incompatible dependencies. For example, as of this writing,
+    the package `Sumatra` still requires an old version (1.8) of Django.
+    If we also import `Bokeh`, we can run into problems, because `Bokeh`
+    checks during import whether `Django` is already imported, and if it is,
+    assumes that it is a more recent version. Since Bokeh's dependency on Django
+    is optional, it can be imported as long as we remove Django from the list of
+    imported modules. This can be done either by ensuring Bokeh is imported
+    first, or by importing it within a `HideModule` context:
+    
+    >>> from mackelab_toolbox.meta import HideModule
+    >>> with HideModule('django'):
+    >>>     import bokeh
+
+    Parameters
+    ----------
+    *module_list: Modules to hide, passed as separate arguments.
+        Names must match exactly the keys in `sys.modules`.
+    
+    Raises
+    ------
+    ImportError (on exit): If a hidden module is imported within the context.
+    
+    """
+    def __init__(self, *modules_to_hide: str):
+        self.modules_to_hide = set(modules_to_hide)
+        self._modules_hidden = None
+        
+    def __enter__(self):
+        import sys
+        self._modules_hidden = {}
+        for nm in self.modules_to_hide:
+            if nm in sys.modules:
+                self._modules_hidden[nm] = sys.modules[nm]
+                del sys.modules[nm]
+                
+    
+    def __exit__(self, *args):
+        import sys
+        reimported_modules = self.modules_to_hide & set(sys.modules)
+        if reimported_modules:
+            raise ImportError("The following hidden modules were reimported "
+                              f"within the `HideModule` context: {reimported_modules}")
+        for nm, m in self._modules_hidden.items():
+            sys.modules[nm] = m
