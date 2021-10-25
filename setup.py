@@ -51,7 +51,7 @@ setup(
             'seaborn'
             # Everything from theano & typing
             'theano_shim>=0.2',
-            'pydantic>=1.5',
+            'pydantic>=1.8',
             'blosc',
             'astunparse',
             'simpleeval',
@@ -60,10 +60,14 @@ setup(
             'scipy',
             'numpy',
             # Everything from typing
-            'pydantic>=1.5',
+            'pydantic>=1.8',
             'blosc',    # Serialization typing_module.Array.
             'astunparse',  # Serialization of functions.
             'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
+        ],
+        'test': [
+            'pytest',
+            'pytest-forked'  # Required because 'typing.freeze_types' can only be called once
         ],
         'theano': [
             'theano_shim>=0.2',
@@ -89,7 +93,7 @@ setup(
             'tqdm'
         ],
         'typing': [  # typing & serialization
-            'pydantic>=1.5',
+            'pydantic>=1.8',
             'blosc',    # Serialization typing_module.Array.
             'astunparse',  # Serialization of functions.
             'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
@@ -101,10 +105,13 @@ setup(
         'all': [
             'numpy', 'dill',
             'parameters', 'pyyaml', 'tqdm', 'pandas',
-            'pymc3', 'matplotlib', 'seaborn',
-            'theano_shim>=0.3.0dev0',
-            'pydantic>=1.5', 'blosc', 'astunparse', 'simpleeval',
-            'IPython', 'pygments'
+            'IPython', 'matplotlib',
+            'pymc3', 'seaborn', 'theano_shim>=0.3.0dev0',
+            'pydantic>=1.8', 'blosc', 'astunparse', 'simpleeval',
+            'pytest', 'pytest-forked',
+            'torch',
+            'tqdm',
+            'pygments'
         ]
     },
 )
