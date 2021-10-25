@@ -204,10 +204,10 @@ def test_pydantic(caplog):
     assert len(caplog.records) == 2
     caprec1 = caplog.records[0]   # m2_stt64
     assert caprec1.levelname == "ERROR"
-    assert caprec1.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. Provided value has dtype float64")
+    assert caprec1.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. The provided symbolic value has dtype float64")
     caprec2 = caplog.records[1]   # m2_sts16
-    assert caprec2.levelname == "WARNING"  # Warning because upcast less critical than downcast
-    assert caprec2.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. Provided value has dtype float16")
+    assert caprec2.levelname == "ERROR"
+    assert caprec2.msg.startswith("w expects a symbolic variable with data type <class 'numpy.float32'>. The provided symbolic value has dtype float16")
 
     # Check method for recovering a ParameterSet
     from mackelab_toolbox.parameters import ParameterSet

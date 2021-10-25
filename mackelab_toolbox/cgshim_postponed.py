@@ -72,7 +72,7 @@ def create_type(baseT: type, Tname: str, namedesc: str, validators: tuple=()):
             # but only check that we have the expected type at the end,
             # so that e.g. validators can convert list to Shared
             yield from (cls.deserialize_array, cls.cast_nptype, *validators,
-                        cls.ensure_name, cls.validate_type_and_dim)
+                        cls.ensure_name_if_possible, cls.validate_type_and_dim)
                         
         @classmethod
         def deserialize_array(cls, value):
@@ -98,7 +98,8 @@ def create_type(baseT: type, Tname: str, namedesc: str, validators: tuple=()):
                 target_nptype = cls.nptype
                 # If nptype is an NPValue, we want _its_ nptype
                 target_nptype = getattr(target_nptype, 'nptype', target_nptype)
-                if np.dtype(value.dtype) is not np.dtype(target_nptype):
+                if (not hasattr(value, 'dtype')
+                      or np.dtype(value.dtype) is not np.dtype(target_nptype)):
                     if shim.issymbolic(value):
                         logger.error(
                             f"{field.name} expects a {namedesc} variable with "
@@ -106,7 +107,7 @@ def create_type(baseT: type, Tname: str, namedesc: str, validators: tuple=()):
                             f"provided symbolic value has dtype {value.dtype}. "
                             "Note that for symbolic variables, we perform no "
                             "casting, so types must match exactly.")
-                    elif not np.can_cast(value.dtype, target_nptype):
+                    elif not np.can_cast(value, target_nptype):
                         logger.error(
                             f"{field.name} expects a {namedesc} variable with "
                             f"data type {target_nptype}. Provided value has dtype "
@@ -116,11 +117,21 @@ def create_type(baseT: type, Tname: str, namedesc: str, validators: tuple=()):
             return value
             
         @classmethod
-        def ensure_name(cls, value, field):
+        def ensure_name_if_possible(cls, value, field):
             """
             If `value` does not already define a 'name' attribute (or it is
             'None'), assign the name of this field.
+            
+            .. Caution:: This function only makes a best effort to assign to
+               (and possibly create) a 'name' attribute. However this is not
+               always possible: types implemented in C (e.g. `int`, `float`,
+               `numpy.ndarray`) do not accept arbitrary attributes.
+               Types which define ``__slots__`` also do not accept arbitrary
+               attributes.
+               In these cases, the 'name' attribute is left undefined.
             """
+            # NOTE: For types which don't allow setting 'name', `validate_type_and_dim`
+            #       will typically raise TypeError
             if getattr(value, 'name', None) is None:
                 # Pydantic appends the type to each subfield name when a
                 # field uses Union[] to specify multiple types.
@@ -129,7 +140,12 @@ def create_type(baseT: type, Tname: str, namedesc: str, validators: tuple=()):
                 name = field.name
                 if name.endswith('_'+Tname):   # Python ≥3.9: removesuffix()
                     name = name[:-len(Tname)-1]
-                value.name = name
+                try:
+                    value.name = name
+                except AttributeError:
+                    # `value` does not accept arbitrary types
+                    logger.debug("`ensure_name_if_possible` was enable to assign the "
+                                 f"name '{name}' to variable of type {type(value)}.")
             return value
             
         @classmethod
@@ -268,7 +284,7 @@ else:
             )
         @classmethod
         def json_encoder(cls, v):
-            return ("RandomStateStream", v.gen_seedgen.get_state())
+            return ("RandomStateStream", v.gen_seedgen)
 
     mtb.typing.add_json_encoder(
         shim.config.SymbolicNumpyRNGType,

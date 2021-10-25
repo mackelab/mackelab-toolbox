@@ -99,7 +99,7 @@ def test_transformed_var_theano():
     from mackelab_toolbox.transform import Bijection, TransformedVar, NonTransformedVar
 
     # Type order is important
-    assert str(mtb.typing.AnyNumericalType) == "typing.Union[abc.Shared, abc.Symbolic, mackelab_toolbox.typing_module.Array[number], mackelab_toolbox.typing_module.NPValue[number], mackelab_toolbox.typing_module.Number, float, int]"
+    assert str(mtb.typing.AnyNumericalType) == "typing.Union[abc.Shared, abc.Symbolic, mackelab_toolbox.typing.typing_module.Array[number], mackelab_toolbox.typing.typing_module.NPValue[number], mackelab_toolbox.typing.typing_module.Number, float, int]"
     assert TransformedVar.__fields__['orig'].type_.__args__ == mtb.typing.AnyNumericalType.__args__
         # Among postponed modules, TransformedVar needs to be imported last so
         # that AnyNumericalType has its final value.
@@ -120,14 +120,12 @@ def test_transformed_var_theano():
         bijection = "y -> np.sqrt(y) ; x -> x**2",
         new       = x)
 
-    # I don't know that I _want_ TransformedVar to force a cast to Shared, but
-    # that's the current behaviour (because it uses a Union, and Shared comes first)
-    # Better would be if Union left matching types unchanged; this would require
-    # augmenting NumericalTypes with e.g. ndarray, because
-    # `isinstance(np.array([1]), Array[…])` is False
-    assert shim.isshared(xsq2.new)
-    assert shim.isshared(xsq2.orig)
-
+    # Reason why we don't have shared vars even though AnyNumericalType is a
+    # Union where 'Shared' comes first: 'Shared' returns TypeError when
+    # validating non-shared values.
+    assert not shim.isshared(xsq2.new)
+    assert not shim.isshared(xsq2.orig)
+    
     assert xsq1.orig.name == 'x'
     assert xsq1.new.name  == 'y'
     assert xsqrt1.orig.name == 'y'
@@ -135,9 +133,9 @@ def test_transformed_var_theano():
     assert xsq1.names.orig == xsq1.orig.name
     assert xsq1.names.new  == xsq1.new.name
 
-    assert np.all(xsq2.new.get_value() == xval**2)
-    assert np.all(xsq2.new.get_value()  == xsqrt2.orig.get_value())
-    assert np.all(xsq2.orig.get_value() == xsqrt2.new.get_value())
+    assert np.all(xsq2.new  == xval**2)
+    assert np.all(xsq2.new  == xsqrt2.orig)
+    assert np.all(xsq2.orig == xsqrt2.new)
     assert np.all(xsq1.orig.eval({x: xval}) == xsqrt1.new.eval({x:xval}))
 
     xsq1.rename(orig='a', new='b')

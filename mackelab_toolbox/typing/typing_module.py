@@ -513,6 +513,8 @@ class TypeContainer(metaclass=utils.Singleton):
         Recurse through a list or dictionary, checking for any entry `e` for
         which `json_like(e, json_name)` is True.
         On when a match is found, apply `validate`.
+        Also works when `value` itself matches `json_name`. (I.e., "scalar"
+        values don't need to be wrapped in a list.)
 
         Returns a copy, of the same type as `value`.
 
@@ -525,11 +527,11 @@ class TypeContainer(metaclass=utils.Singleton):
         if json_like(value, json_name):
             return validate(value)
         elif isinstance(value, Mapping):
-            assert isinstance(value, dict)
-            return {k: validate(v) if json_like(v, json_name)
-                       else self.recursive_validate(v, validate, json_name) if isinstance(v, Collection)
-                       else v
-                    for k,v in value.items()}
+            assert isinstance(value, dict)  # ASSUMPTION: type(value) can be initialized with a list of tuples
+            return type(value)((k, validate(v) if json_like(v, json_name)
+                                   else self.recursive_validate(v, validate, json_name) if isinstance(v, Collection)
+                                   else v)
+                               for k,v in value.items())
         elif isinstance(value, itertypes):
             return type(value)(validate(v) if json_like(v, json_name)
                                else self.recursive_validate(v, validate, json_name) if isinstance(v, Collection)
@@ -1542,17 +1544,22 @@ class RNGenerator(np.random.Generator):
         if isinstance(value, np.random.Generator):
             return value
         elif typing.json_like(value, "RNGenerator"):
-        #elif (isinstance(value, dict)
-        #      and 'bit_generator' in value and 'state' in value):
             # Looks like a json-serialized state dictionary
+            value = typing.recursive_validate(value, _ArrayType.validate, "Array")
             state = value[1]
             BG = getattr(np.random, state['bit_generator'])()
             BG.state = state
             return np.random.Generator(BG)
         else:
-            raise TypeError(f"Field {field.name} expects an instance of "
-                            f"np.random.Generator.\nProvided value: {value} "
-                            f"(type: {type(value)}).")
+            # Final attempt: maybe `value` is a form already recognized by Generator
+            value = typing.recursive_validate(value, _ArrayType.validate, "Array")
+            try:
+                rs = cls(value)
+            except Exception as e:
+                raise TypeError(f"Field {field.name} expects an instance of "
+                                f"np.random.Generator.\nProvided value: {value} "
+                                f"(type: {type(value)}).") from e
+            return rs
     @classmethod
     def __modify_schema__(cls, field_schema):
         field_schema.update(type='array',
@@ -1583,19 +1590,24 @@ class RandomState(np.random.RandomState):
             return value
         elif typing.json_like(value, "RandomState"):
             # Looks like a json-serialized state tuple
-            rs = np.random.RandomState()
-            rng_state = value[1]
             # Deserialize arrays that were serialized in the Array format
-            for i, v in enumerate(rng_state):
-                if typing.json_like(v, 'Array'):
-                    rng_state[i] = _ArrayType.validate(v)
+            value = typing.recursive_validate(value, _ArrayType.validate, "Array")
+            rs = cls()
+            rng_state = value[1]
             # Set the RNG to the state saved in the file
             rs.set_state(rng_state)
             return rs
         else:
-            field_name = getattr(field, 'name', "")
-            raise TypeError(f"Field {field_name} expects an instance of "
-                            f"np.random.RandomState.\nProvided value: {value}")
+            value = typing.recursive_validate(value, _ArrayType.validate, "Array")
+            try:
+                # Things like `RandomState.validate(314)` end up here
+                rs = cls(value)
+            except Exception as e:
+                field_name = getattr(field, 'name', "")
+                raise TypeError(f"Field {field_name} expects an instance of "
+                                "np.random.RandomState.\nProvided value: "
+                                f"{value}") from e
+            return rs
     @classmethod
     def __modify_schema__(cls, field_schema):
         field_schema.update(
