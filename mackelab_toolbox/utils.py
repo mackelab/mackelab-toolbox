@@ -1019,6 +1019,11 @@ class Singleton(type):
     >>> class Config(metaclass=Singleton):
     >>>     def num_modules(self):
     >>>         return len(sys.modules)
+    >>> config = Config()
+    
+    Attempting to create a new instance just returns the original one.
+    >>> config2 = Config()
+    >>> config is config2  # True
     """
     def __new__(metacls, name, bases, dct):
         cls = super().__new__(metacls, name, bases, dct)
