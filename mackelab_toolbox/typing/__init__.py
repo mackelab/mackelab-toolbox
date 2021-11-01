@@ -11,16 +11,12 @@ the loaded sys.modules.
 # - Split parts of 'typing.py' into topical submodules (esp. NumPy), like PureFunction already is,
 #   with everything into a global 'typing' namespace
 
-# Add the typing namespace to mackelab_toolbox
-# This is the same trick used in the official typing module:
-#     https://github.com/python/typing/blob/d79eddef37cb09ca9a3d763364c4feb7b8473402/src/typing.py#L2435
-# with the added hackiness that we are replacing the current module in
-# sys.modules.
-import sys
-from .typing_module import typing
-# As a temporary solution, to avoid premature refactoring, we manually inject everything
-# from subpackages into the typing namespace
-from . import typing_pure_function as tpf
-for name in tpf.__all__:
-    setattr(typing, name, getattr(tpf, name))
-sys.modules[__name__] = typing
+# WIP: As a first step in splitting into topical submodules,
+#      we leave typing_module.py untouched, but instead of replacing
+#      `mackelab_toolbox.typing` with the `TypingContainer` defined therein,
+#      we redirect attribute access to the TypingContainer with __getattr__.
+from . import typing_module
+from .typing_pure_function import *
+
+def __getattr__(attr):
+    return getattr(typing_module.typing, attr)

@@ -3,6 +3,7 @@ For almost all cases, you should not import this module directly but use
 
     import macklab_toolbox.typing
 """
+from __future__ import annotations
 
 import sys
 from textwrap import dedent
@@ -168,6 +169,7 @@ def PostponedClass(clsname: str, source_module: str, target_module: str):
     return PostponedClass
 
 def freeze_types():
+    # NB: typing.freeze_types also automatically imports pint/quantities
     """
     Call this function once definitions of dynamic types are finalized
     (in particular, after having called `theano_shim.load`), and before
@@ -588,26 +590,13 @@ class TypeContainer(metaclass=utils.Singleton):
 
     @staticmethod
     def load_pint():
-        import pint
-        typing.add_json_encoder(pint.quantity.Quantity, PintValue.json_encoder)
-        typing.add_json_encoder(pint.unit.Unit, PintUnit.json_encoder)
-        typing.add_unit_type(PintUnit)
-        utils._terminating_types |= {pint.quantity.Quantity, pint.unit.Unit}
-        utils.terminating_types = tuple(utils._terminating_types)
+        import mackelab_toolbox.typing.pint
+        mackelab_toolbox.typing.pint._load_pint(typing)
 
     @staticmethod
     def load_quantities():
-        import quantities
-        # Must have higher priority than numpy types
-        typing.add_json_encoder(quantities.quantity.Quantity,
-                                QuantitiesValue.json_encoder,
-                                priority=5)
-        typing.add_json_encoder(quantities.dimensionality.Dimensionality,
-                                QuantitiesUnit.json_encoder,
-                                priority=5)
-        typing.add_unit_type(QuantitiesUnit)
-        utils._terminating_types |= {quantities.quantity.Quantity, quantities.dimensionality.Dimensionality}
-        utils.terminating_types = tuple(utils._terminating_types)
+        import mackelab_toolbox.typing.quantities
+        mackelab_toolbox.typing.quantities._load_quantities(typing)
 
 typing = TypeContainer()
 
@@ -809,7 +798,7 @@ class IndexableNamespace(SimpleNamespace):
         return self.__dict__.values()
     def items(self):
         return self.__dict__.items()
-        
+
     # Convert to plain dict
     def as_dict(self):
         return {k: v.as_dict() if isinstance(v, IndexableNamespace) else v
@@ -867,209 +856,6 @@ typing.add_json_encoder(IndexableNamespace, IndexableNamespace.json_encoder)
 #             return v
 #         else:
 #             return cls.json_decoder(v)
-
-class PintValue:
-    """
-    Before parsing a serialized PintValue, one needs to set the Pint unit
-    registry. There should only be one unit registry within a project, so this
-    is set as a *class* variable of `PintValue`.
-    >>> import pint
-    >>> ureg = pint.UnitRegistry()
-    >>> from mackelab_toolbox.typing import PintUnit
-    >>> PintUnit.ureg = ureg
-    """
-    @classmethod
-    def __get_validators__(cls):
-        # partial doesn't work because Pydantic expects a particular signature
-        yield from (lambda v: cls.json_decoder(v, noerror=True),
-                    cls.validate_value)
-
-    @staticmethod
-    def validate_value(v):
-        if isinstance(v, PintUnit.pint().Quantity):
-            return v
-        raise TypeError
-
-    @staticmethod
-    def json_encoder(v):
-        return ("PintValue", v.to_tuple())
-    @classmethod
-    def json_decoder(cls, v, noerror=False):
-        pint = PintUnit.pint()
-        if PintUnit.ureg is None:
-            raise RuntimeError(
-                "The Pint unit registry is not set. Do this by assigning to "
-                "`PintUnit.ureg` before attempting to parse a Pint value.")
-        if isinstance(v, (tuple,list)) and len(v) > 0 and v[0] == "PintValue":
-            return PintUnit.ureg.Quantity.from_tuple(v[1])
-        elif noerror:
-            # Let another validator try to parse the value
-            return v
-        else:
-            raise ValueError("Input is incompatible with PintValue.json_decoder. "
-                   f"Input value: {v} (type: {type(v)})")
-
-class PintUnit:
-    # TODO: Type check assignment to ureg
-    # TODO?: ureg, pint as (meta)class properties ?
-    ureg: "pint.registry.UnitRegistry" = None
-    @staticmethod
-    def pint():
-        pint = sys.modules.get('pint', None)
-        if pint is None:
-            raise ValueError("'pint' module is not loaded.")
-        return pint
-
-    @classmethod
-    def __get_validators__(cls):
-        yield from (lambda v: cls.json_decoder(v, noerror=True),
-                    lambda v: cls.validate_value(v, noerror=True),
-                    cls.validate_unit)
-
-    @staticmethod
-    def validate_unit(v):
-        if isinstance(v, PintUnit.pint().Unit):
-            return v
-        else:
-            raise TypeError
-    @staticmethod
-    def validate_value(v, noerror=False):
-        if isinstance(v, PintUnit.pint().Quantity):
-            if v.magnitude != 1:
-                raise ValueError("Quantities can only be converted to units "
-                                 "if they have unit magnitude.")
-            return v.units
-        elif noerror:
-            # Let another validator try to parse the value
-            return v
-        else:
-            raise TypeError
-
-    @staticmethod
-    def json_encoder(v):
-        return ("PintUnit", (str(v),))
-    @classmethod
-    def json_decoder(cls, v, noerror=False):
-        pint = PintUnit.pint()
-        if PintUnit.ureg is None:
-            raise RuntimeError(
-                "The Pint unit registry is not set. Do this by assigning to "
-                "`PintUnit.ureg` before attempting to parse a Pint value.")
-        if isinstance(v, (tuple, list)) and len(v) > 0 and v[0] == "PintUnit":
-            return PintUnit.ureg.Unit(v[1][0])
-        elif noerror:
-            # Let another validator try to parse the value
-            return v
-        else:
-            raise ValueError("Input is incompatible with PintUnit.json_decoder. "
-                   f"Input value: {v} (type: {type(v)})")
-
-class QuantitiesValue():
-    @classmethod
-    def __get_validators__(cls):
-        yield from (cls.json_noerror,  # For whatever reason, lambda doesn't work
-                    cls.validate_value)
-
-    @classmethod
-    def json_noerror(cls, v):
-        return cls.json_decoder(v, noerror=True)
-
-    @classmethod
-    def validate_value(cls, v):
-        pq = QuantitiesUnit.pq()
-        if isinstance(v, pq.Quantity):
-            return v
-        raise TypeError
-
-    @staticmethod
-    def json_encoder(v):
-        return ("QuantitiesValue", (v.magnitude, str(v.dimensionality)))
-    @staticmethod
-    def json_decoder(v, noerror=False):
-        pq = sys.modules.get('quantities', None)
-        if pq is None:
-            raise ValueError("'Quantities' module is not loaded.")
-        elif (isinstance(v, (tuple,list))
-              and len(v) > 0 and v[0] == "QuantitiesValue"):
-            return pq.Quantity(v[1][0], units=v[1][1])
-        elif noerror:
-            # Let another validator try to parse the value
-            return v
-        else:
-            raise ValueError("Input is incompatible with QuantitiesValue.json_decoder. "
-                   f"Input value: {v} (type: {type(v)})")
-
-class QuantitiesUnit(QuantitiesValue):
-    """
-    Exactly the same as QuantitiesValue, except that we enforce the magnitude
-    to be 1. In contrast to Pint, Quantities doesn't seem to have a unit type.
-    """
-    @staticmethod
-    def pq():
-        pq = sys.modules.get('quantities', None)
-        if pq is None:
-            raise ValueError("'Quantities' module is not loaded.")
-        return pq
-
-    @classmethod
-    def validate_value(cls, v, field=None):
-        if field is None:
-            field = SimpleNamespace(name="")
-        pq = QuantitiesUnit.pq()
-        if isinstance(v, pq.Quantity):
-            if v.magnitude != 1:
-                raise ValueError(f"Field {field.name}: Units must have "
-                                 "magnitude of one.")
-            return v
-        raise TypeError
-
-class QuantitiesDimension():
-
-    @classmethod
-    def __get_validators__(cls):
-        yield from (lambda v: cls.json_decoder(v, noerror=True),
-                    lambda v: cls.validate_value(v, noerror=True),
-                    cls.validate_dim)
-
-    @staticmethod
-    def validate_dim(v):
-        pq = QuantitiesUnit.pq()
-        if isinstance(v, pq.dimensionality.Dimensionality):
-            return v
-        raise TypeError
-    @staticmethod
-    def validate_value(v, noerror=False):
-        pq = QuantitiesUnit.pq()
-        if isinstance(v, pq.Quantity):
-            return v.dimensionality
-        elif noerror:
-            return v
-        else:
-            raise TypeError
-
-    @staticmethod
-    def json_encoder(v):
-        return ("QuantitiesDimension", (str(v),))
-    @staticmethod
-    def json_decoder(v, noerror=False):
-        pq = sys.modules.get('quantities', None)
-        if pq is None:
-            raise ValueError("'Quantities' module is not loaded.")
-        if isinstance(v, (tuple,list)) and len(v) > 0 and v[0] == "QuantitiesDimension":
-            return pq.quantity.validate_dimensionality(v[1][0])
-        elif noerror:
-            # Let another validator try to parse
-            return v
-        else:
-            raise ValueError("Input is incompatible with QuantitiesDimension.json_decoder. "
-                   f"Input value: {v} (type: {type(v)})")
-
-typing.PintValue = PintValue
-typing.PintUnit  = PintUnit
-typing.QuantitiesValue = QuantitiesValue
-typing.QuantitiesUnit = QuantitiesUnit
-typing.QuantitiesDimension = QuantitiesDimension
-# JSON encoders added by typing.load_pint/load_quantities
 
 ################
 # Types based on numbers module

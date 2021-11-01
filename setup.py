@@ -111,7 +111,9 @@ setup(
             'pytest', 'pytest-forked',
             'torch',
             'tqdm',
-            'pygments'
+            'pygments',
+            # Not (yet) in any context, but some functionality for them
+            'pint', 'quantities'
         ]
     },
 )
