@@ -87,7 +87,7 @@ class PintUnit(pint.Unit, metaclass=PintUnitMeta):
         - If `value` has different units to `self`: raise `ValueError`.
 
         Perhaps a more natural, but more verbose, function name would be
-        "ensure_has_units".
+        "ensure_units".
         """
         if (not isinstance(value, pint.Quantity)
               or value.units == PintUnit.ureg.dimensionless):

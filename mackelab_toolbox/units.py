@@ -7,7 +7,7 @@ Care is taken not to import either `pint` or `quantities` if it isn't already
 loaded.
 """
 
-from typing import Any
+from typing import Union, Any, List
 from .utils import Singleton
 
 class UnitlessT(int, metaclass=Singleton):
@@ -33,7 +33,7 @@ class UnitlessT(int, metaclass=Singleton):
         return cls(v)
 unitless = UnitlessT(1)
 
-def detect_unit_library(value: Any):
+def detect_unit_library(value: Any) -> Union[str,List[str]]:
     """
     Return the unit libary on which `value` depends.
     We detect types with duck typing rather than testing
@@ -99,6 +99,34 @@ def unit_convert(value, to):
             else:
                 assert False  # Should not reach this point
 
+def ensure_units(units, value):
+    """
+    Give `value` the specified units. In contrast to using multiplication by a
+    unit to construct a `Quantity`, `ensure_units` is meant for situations where
+    we are unsure whether `value` already has the desired units.
+
+    - If `value` has no units: equivalent to multiplying by `units`.
+    - If `value` has the same units as `units`: return `value` unchanged.
+    - If `value` has different units to `units`: raise `ValueError`.
+    """
+    if is_dimensionless(value):
+        return value*units
+    elif value.units == units:
+        return value 
+    else:
+        unitlib = detect_unit_library(value)
+        if unitlib == "pint":
+            from pint import DimensionalityError
+        elif unitlib == "quantities":
+            DimensionalityError = ValueError
+        else:
+            assert False  # Should never reach this point
+        try:
+            return unit_convert(value, units)
+        except DimensionalityError as e:
+            raise ValueError(f"Cannot apply units `{units}` to value `{value}`: "
+                             f"it already has units `{value.units}`.") from e
+                
 def get_magnitude(value, in_units_of=None):
     vallib = detect_unit_library(value)
     if vallib == 'none':

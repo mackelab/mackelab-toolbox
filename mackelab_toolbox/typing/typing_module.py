@@ -617,8 +617,7 @@ class Range:
         yield cls.validate
     @classmethod
     def validate(cls, v):
-        if (isinstance(v, Sequence) and isinstance(v[0], str)
-            and v[0].lower() == 'range'): # JSON decoder
+        if typing.json_like(v, 'range'): # JSON decoder
             v = range(*v[1])
         if not isinstance(v, range):
             raise TypeError(f"{v} is not of type `range`.")

@@ -3,6 +3,7 @@ Pydantic-aware classes for Quantities objects.
 Load these with `typing.load_quantities()`
 """
 
+import sys
 import quantities
 from mackelab_toolbox import utils
 
