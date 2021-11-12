@@ -206,8 +206,12 @@ if shim.config.library == 'numpy':
     Shared = mtb.typing.Array
 else:
     def make_shared(cls, value, field):
-        if not shim.isshared(value) and not shim.is_symbolic(value):
-            value = shim.shared(value)
+        if not shim.isshared(value):
+            if not shim.graph.is_computable(value):
+                raise TypeError(f"Cannot convert the symbolic value {value} "
+                                "to a shared variable: it has these symbolic "
+                                f"dependencies: {shim.graph.pure_symbolic_inputs(value)}.")
+            value = shim.shared(shim.graph.eval(value, if_too_costly='warn'))
         return value
     Shared = create_type(shim.config.SymbolicSharedType,
                          'Shared', 'shared', validators=(make_shared,))
