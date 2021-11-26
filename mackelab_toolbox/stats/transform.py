@@ -104,7 +104,8 @@ if __name__ == "__main__":
 
 # %%
 from typing import Union, Optional, Sequence
-from warnings import warn
+from warnings import warn, catch_warnings, simplefilter
+import textwrap
 from math import prod
 import numpy as np
 from scipy.stats._distn_infrastructure import rv_generic, rv_continuous, rv_frozen
@@ -116,6 +117,20 @@ from scipy._lib._util import check_random_state
 from smttask.typing import PureFunction
 from mackelab_toolbox.typing import Distribution, json_kwd_encoder
 
+# HACK: I wasn't able to ensure transformation warnings were shown only once,
+#       even with warnings.simplefilter('once'). So instead I define this
+#       custom Warning class, which only instantiates the first time it is
+#       created with a new message. Afterwards it returns `None`; it's up to
+#       the calling code to check the value because passing to `warn`.
+class TransformationWarning(UserWarning):
+    _already_shown = set()
+    def __new__(cls, *args, **kwargs):
+        h = hash(args[0])
+        if h in cls._already_shown:
+            return None
+        else:
+            cls._already_shown.add(h)
+            return super().__new__(cls, *args, **kwargs)
 
 # %% [markdown]
 # ## Univariate transformed RV
@@ -256,10 +271,46 @@ class transformed(rv_generic):
         return self.xrv.shapes
     @property
     def a(self):
-        return self.map(self.xrv.a)
+        with catch_warnings(record=True) as warn_list:
+            res = self.map(self.xrv.a)
+        if warn_list:
+            warn_plural = f"{'s' if len(warn_list) > 1 else ''}"
+            # NB: w.message is a Warning object, not a string. Using `repr` instead of `str` would also show warning type.
+            warn_msgs = "\n".join(
+                textwrap.indent("\n".join(textwrap.wrap(str(w.message))), "  ")
+                for w in warn_list)
+            xrv_str = getattr(self.xrv, 'name', type(self.xrv).__name__)
+            m = (f"Warning{warn_plural} triggered when "
+                 "evaluating the lower bound of a transformed distribution.\n"
+                 f"Base distribution: {xrv_str}\n"
+                 f"Transform: {self.map}\n"
+                 f"Lower bound of base distribution: {self.xrv.a}\n"
+                 f"Warning{warn_plural}: {warn_msgs}")
+            w = TransformationWarning(m)  # Hack to prevent displaying repeated warnings
+            if w:
+                warn(w)
+        return res
     @property
     def b(self):
-        return self.map(self.xrv.b)
+        with catch_warnings(record=True) as warn_list:
+            res = self.map(self.xrv.b)
+        if warn_list:
+            warn_plural = f"{'s' if len(warn_list) > 1 else ''}"
+            # NB: w.message is a Warning object, not a string. Using `repr` instead of `str` would also show warning type.
+            warn_msgs = "\n".join(
+                textwrap.indent("\n".join(textwrap.wrap(str(w.message))), "  ")
+                for w in warn_list)
+            xrv_str = getattr(self.xrv, 'name', type(self.xrv).__name__)
+            m = (f"Warning{warn_plural} triggered when "
+                 "evaluating the upper bound of a transformed distribution.\n"
+                 f"Base distribution: {self.xrv}\n"
+                 f"Transform: {self.map}\n"
+                 f"Upper bound of base distribution: {self.xrv.a}\n"
+                 f"Warning{warn_plural}: {warn_msgs}")
+            w = TransformationWarning(m)  # Hack to prevent displaying repeated warnings
+            if w:
+                warn(w)
+        return res
     @property
     def _parse_args(self):
         return self.xrv._parse_args
