@@ -449,10 +449,10 @@ class TypeContainer(metaclass=utils.Singleton):
     ####################
     # Less unsafe importing of arbitrary modules
 
-    # Without `safe_modules`, a malicious actor could modify a data file
+    # Without `safe_packages`, a malicious actor could modify a data file
     # containing a serialized model, pointing 'module' to any file in
     # PYTHONPATH, and it would be executed during deserialization.
-    # With the `safe_modules` variable, that file would have to be within one
+    # With the `safe_packages` variable, that file would have to be within one
     # of the standard packages (or the user's own package), which are
     # ostensibly already being trusted and executed.
     safe_packages = {
