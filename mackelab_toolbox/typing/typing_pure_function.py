@@ -48,10 +48,12 @@ class PureFunctionMeta(type):
                     raise TypeError("Only one input type argument may be specified to"
                                      f"`PureFunction`. Received {callableT['inT']} and {a}.")
                 callableT['inT'] = a
-            elif isinstance(a, (_Final, type)):
+            elif isinstance(a, (_Final, type)) or a is None:
                 if callableT['outT'] is not None:
                     raise TypeError("Only one output type argument may be specified to"
                                      f"`PureFunction`. Received {callableT} and {a}.")
+                if a is None:
+                    a = type(None)  # This is what Callable does automatically anyway, and it allows us to check below that either both of inT, outT were passed, or neither
                 callableT['outT'] = a
             else:
                 raise TypeError("Arguments to the `PureFunction` type can "
