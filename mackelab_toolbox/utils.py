@@ -135,7 +135,7 @@ def index_iter(shape: Tuple[int]) -> itertools.product:
     `numpy.ndindex` ::
 
     >>> list(np.ndindex((2,2)))
-    
+
     (The timing with `ndindex` is the comparable to using `np.nditer` to extract
     only the shape, which suggests that may be the source of the overhead.)
     """
@@ -268,7 +268,7 @@ class SanitizedOrderedDict(SanitizedDict, OrderedDict):
         Return an empty OrderedDict with the same sanitization.
         """
         return SanitizedOrderedDict(*args, sanitize=self.sanitize, **kwargs)
-        
+
 class TypeDict(OrderedDict):
     """
     A dictionary using types as keys. A key will match any of its subclasses;
@@ -284,12 +284,12 @@ class TypeDict(OrderedDict):
         else:
             raise KeyError(f"Type {key} is not a subclass of any of this "
                            "TypeDict's type keys.")
-                           
+
     def __setitem__(self, key, value):
         if not isinstance(key, type):
             raise TypeError(f"TypeDict keys must be types")
         return super().__setitem__(key, value)
-        
+
     def __contains__(self, key):
         return (isinstance(key, type) and
                 any(issubclass(key, k) for k in self))
@@ -346,14 +346,14 @@ import numpy as np
 def array_to_str(arr: np.ndarray, precision: int=3) -> str:
     """
     Convert an array into a string with the given precision.
-    
+
     TODO: Change precision to sig digits.
     """
     if not getattr(arr, 'ndim', True) or not isinstance(arr, Iterable):
         return f"{arr:.{precision}}"
     else:
         return "[" + ", ".join(array_to_str(x) for x in arr) + "]"
-        
+
 def array_to_latex_string(arr: np.ndarray, precision: int=3) -> str:
     raise NotImplementedError
 
@@ -493,7 +493,7 @@ def stablehash(o):
              '''
              logp = np.sum(np.log(N-np.arange(M))) - M*np.log(N)
              return 1-np.exp(logp)
-    
+
     Returns
     -------
     HASH object
@@ -550,7 +550,7 @@ def _tobytes(o) -> bytes:
     """
     Utility function for converting an object to bytes. This is used for the
     state digests, and thus is designed with the following considerations:
-    
+
     1. Different inputs should, with high probability, return different byte
        sequences.
     2. The same inputs should always return the same byte sequence, even when
@@ -559,8 +559,8 @@ def _tobytes(o) -> bytes:
        how `hash` is implemented.
     2. It is NOT necessary for the input to be reconstructable from
        the returned bytes.
-       
-    ..Note:: To avoid overly complicated byte sequences, the distinction 
+
+    ..Note:: To avoid overly complicated byte sequences, the distinction
        guarantee is not preserved across types. So `_tobytes(b"A")`,
        `_tobytes("A")` and `_tobytes(65)` all return `b'A'`.
        So multiple inputs can return the same byte sequence, as long as they
@@ -1020,7 +1020,7 @@ class Singleton(type):
     >>>     def num_modules(self):
     >>>         return len(sys.modules)
     >>> config = Config()
-    
+
     Attempting to create a new instance just returns the original one.
     >>> config2 = Config()
     >>> config is config2  # True
@@ -1164,17 +1164,21 @@ class GitSHA:
     """
     Return an object that nicely prints the SHA hash of the current git commit.
     Displays as formatted HTML in a Jupyter Notebook, otherwise a simple string.
-    
+
     .. Hint:: This is especially useful for including a git hash in a report
        produced with Jupyter Book. Adding a cell `GitSHA() at the bottom of
        notebook with the tag 'remove-input' will print the hash with no visible
        code, as though it was part of the report footer.
-       
+
     Usage:
     >>> GitSHA()
     myproject main #3b09572a
     """
-    css = "color: grey; text-align: right"
+    css: str= "color: grey; text-align: right"
+    # Default values used when a git repository can’t be loaded
+    path  : str="No git repo found"
+    branch: str=""
+    sha   : str=""
     def __init__(self, path=None, nchars=8, sha_prefix='#',
                  show_path='stem', show_branch=True):
         """
@@ -1187,7 +1191,11 @@ class GitSHA:
                     corresponds to the implied repository name)
             'none': Don't display the path at all.
         """
-        repo = git.Repo(search_parent_directories=True)
+        try:
+            repo = git.Repo(search_parent_directories=True)
+        except git.InvalidGitRepositoryError:
+            # Skip initialization and use defaults
+            return
         self.repo = repo
         self.sha = sha_prefix+repo.head.commit.hexsha[:nchars]
         if show_path.lower() == 'full':
@@ -1220,9 +1228,9 @@ class lesslog:
     those of level ERROR.
     (If no logger is specified, all loggers are set to this level.)
     The log level of each logger is restored when exiting the context.
-    
+
     Example usage::
-    
+
     >>> import logging
     >>> import matplotlib.pyplot as plt
     >>> from mackelab_toolbox.utils import lesslog, sciformat
@@ -1231,8 +1239,8 @@ class lesslog:
     >>>   # The line below would normally print a warning
     >>>   plt.scatter(range(5), range(5), c=(.1, .3, .5))
     """
-    
-    
+
+
     def __init__(self, loggers="", level=logging.ERROR):
         if isinstance(loggers, str):
             loggers = [loggers]
