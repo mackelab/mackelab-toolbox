@@ -1154,7 +1154,9 @@ def Code(*obj, sep=''):
     src = sep.join([inspect.getsource(s) for s in obj])
     return CodeStr(src.strip())  # .strip() removes final newline
 
+from typing import Union
 from pathlib import Path
+from datetime import datetime
 try:
     import git
 except ModuleNotFoundError:
@@ -1179,17 +1181,21 @@ class GitSHA:
     path  : str="No git repo found"
     branch: str=""
     sha   : str=""
-    def __init__(self, path=None, nchars=8, sha_prefix='#',
-                 show_path='stem', show_branch=True):
+    def __init__(self, path: Union[None,str,Path]=None, nchars: int=8,
+                 sha_prefix: str='#', show_path: str='stem',
+                 show_branch: bool=True, datefmt: str="%Y-%m-%d"):
         """
         :param:path: Path to the git repository. Defaults to CWD.
         :param:nchars: Numbers of SHA hash characters to display. Default: 8.
-        :param:sha_prefix: Character used to indicate the SHA hash. Default: '#'
+        :param:sha_prefix: Character used to indicate the SHA hash. Default: '#'.
         :param:show_path: How much of the repository path to display.
             'full': Display the full path.
             'stem': (Default) Only display the directory name (which often
                     corresponds to the implied repository name)
             'none': Don't display the path at all.
+        :param:datefmt: The format string to pass to ``datetime.strftime``.
+            To not display any time at all, use an empty string.
+            Default format is ``2000-12-31``.
         """
         try:
             repo = git.Repo(search_parent_directories=True)
@@ -1211,12 +1217,19 @@ class GitSHA:
             self.branch = repo.active_branch.name
         else:
             self.branch = ""
+
+        if datefmt:
+            self.timestamp = datetime.now().strftime(datefmt)
+        else:
+            self.timestamp = ""
+
     def __str__(self):
-        return " ".join((self.path, self.branch, self.sha))
+        return " ".join((s for s in (self.timestamp, self.path, self.branch, self.sha)
+                         if s))
     def __repr__(self):
         return self.__str__()
     def _repr_html_(self):
-        return f"<p style=\"{self.css}\">git: {self.path} {self.branch} {self.sha}</p>"
+        return f"<p style=\"{self.css}\">{self.timestamp} git: {self.path} {self.branch} {self.sha}</p>"
 
 #####################
 # Logging utilities
