@@ -850,33 +850,50 @@ class TimeThis:
     see if a time consuming process exists between them.
 
     The default is to print the timing result with `print`. This can be changed
-    when instantiating the context::
+    by providing a different callable when instantiating the context::
     >>> logger = logging.getLogger(__name__)
+    >>> with TimeThis("Big loop", output=logger.debug):
+    >>>     sum(range(1000000))
+    To make the new output function the default, assign it to the class::
+    >>> TimeThis.output = staticmethod(logger.debug)
+    
+    For complete control over the output, the pair of methods
+    `output_function` and `output_last_Δ` are provided. (The latter prints the
+    "Time since last timing context" line when `TimeThis` is called more than
+    once.) These can also be provided to the context:
     >>> def log_time(name, Δ):
             logger.debug(f"{name} (exec time): {Δ} s")
-    >>> with TimeThis("Big loop", output=log_time):
+    >>> def log_time_Δ(name, Δ):
+    >>>     pass  # Deactivate printing of inter-context timing.
+    >>> with TimeThis("Big loop",
+                      output_function=log_time, output_last_Δ=log_time_Δ):
     >>>     sum(range(1000000))
-
+    Or assigned as defaults::
+    >>> TimeThis.output_function = staticmethod(log_time)
+    >>> TimeThis.output_last_Δ = staticmethod(log_time_Δ)
+    
     To turn off timing for all contexts without removing them from code, do
     >>> TimeThis.on = False
 
     .. limitation:: `TimeThis` contexts can be nested, but the reported
-       between-context time is then ill-defined. The within-context time
+       inter-context time is then ill-defined. The within-context time
        should be fine.
     """
     on = True
     last_t = None
+    output = print
 
     def __init__(self, name=None,
-                 output: Optional[Callable[[str,float],None]]=None,
-                 output_last_Δ: Optional[Callable[[str,float],None]]=None):
-        if output is None:
-            output = self.default_output
-        if output_last_Δ is None:
-            output_last_Δ = self.default_output_last_Δ
+                 output         : Optional[Callable[[str],None]]=None,
+                 output_function: Optional[Callable[[str,float],None]]=None,
+                 output_last_Δ  : Optional[Callable[[str,float],None]]=None):
         self.name = name
-        self.output = output
-        self.output_last_Δ = output_last_Δ
+        if output is not None:
+            self.output = output
+        if output_function is not None:
+            self.output_function
+        if output_last_Δ is not None:
+            self.output_last_Δ = output_last_Δ
     def __enter__(self):
         self.t1 = perf_counter()
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -884,26 +901,24 @@ class TimeThis:
         if self.on:
             if TimeThis.last_t:
                 self.output_last_Δ(self.name, self.t1 - TimeThis.last_t)
-            self.output(self.name, t2-self.t1)
+            self.output_function(self.name, t2-self.t1)
         TimeThis.last_t = t2
 
-    @staticmethod
-    def default_output(name, Δ):
+    def output_function(self, name, Δ):
         if name:
             name += ": "
         else:
             name = ""
         if Δ < 1:
-            print(f"{name}{Δ*1000:.2f} ms")
+            self.output(f"{name}{Δ*1000:.2f} ms")
         else:
-            print(f"{name}{Δ:.2f} s")
-    @staticmethod
-    def default_output_last_Δ(name, Δ):
+            self.output(f"{name}{Δ:.2f} s")
+    def output_last_Δ(self, name, Δ):
         prefix = "Time since last TimeThis context: "
         if Δ < 1:
-            print(f"{prefix}{Δ*1000:.2f} ms")
+            self.output(f"{prefix}{Δ*1000:.2f} ms")
         else:
-            print(f"{prefix}{Δ:.2f} s")
+            self.output(f"{prefix}{Δ:.2f} s")
 
 
 #####################
