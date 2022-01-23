@@ -100,7 +100,8 @@ setup(
         ],
         'utils': [
             'IPython',
-            'pygments'
+            'pygments',
+            'termcolor'  # Optional dependency for TimeThis
         ],
         'all': [
             'numpy', 'dill',

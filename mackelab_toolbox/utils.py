@@ -820,6 +820,12 @@ def mm2in(size, *args):
 
 from time import perf_counter
 from typing import Optional, Callable
+def nocolored(s, *arg, **kwargs):
+    return s
+try:
+    from termcolor import colored
+except ModuleNotFoundError:
+    colored = nocolored
 
 class TimeThis:
     """
@@ -857,6 +863,11 @@ class TimeThis:
     To make the new output function the default, assign it to the class::
     >>> TimeThis.output = staticmethod(logger.debug)
     
+    By default, times longer than 1 second and 1 min are highlighted by
+    printing them in color (repectively in blue and yellow). This can be turned
+    off for a specific context by passing ``color=False``, or globally by
+    setting ``TimeThis.color = False``. The threshold values are hard-coded.
+    
     For complete control over the output, the pair of methods
     `output_function` and `output_last_Δ` are provided. (The latter prints the
     "Time since last timing context" line when `TimeThis` is called more than
@@ -879,15 +890,18 @@ class TimeThis:
        inter-context time is then ill-defined. The within-context time
        should be fine.
     """
-    on = True
+    on     = True
     last_t = None
     output = print
+    color  = True
 
-    def __init__(self, name=None,
+    def __init__(self, name=None, color: Optional[bool]=None,
                  output         : Optional[Callable[[str],None]]=None,
                  output_function: Optional[Callable[[str,float],None]]=None,
                  output_last_Δ  : Optional[Callable[[str,float],None]]=None):
         self.name = name
+        if color is not None:
+            self.color = color
         if output is not None:
             self.output = output
         if output_function is not None:
@@ -904,6 +918,15 @@ class TimeThis:
             self.output_function(self.name, t2-self.t1)
         TimeThis.last_t = t2
 
+    # Colours with good contrast on both dark & light bg:
+    # blue < yellow < magenta (dark bg)
+    # yellow < blue < magenta (light bg)
+    @property
+    def colored(self):
+        if self.color:
+            return colored
+        else:
+            return nocolored 
     def output_function(self, name, Δ):
         if name:
             name += ": "
@@ -911,14 +934,18 @@ class TimeThis:
             name = ""
         if Δ < 1:
             self.output(f"{name}{Δ*1000:.2f} ms")
+        elif Δ < 60:
+            self.output(self.colored(f"{name}{Δ:.2f} s", 'blue'))
         else:
-            self.output(f"{name}{Δ:.2f} s")
+            self.output(self.colored(f"{name}{Δ/60:.1f} s", 'yellow'))
     def output_last_Δ(self, name, Δ):
         prefix = "Time since last TimeThis context: "
         if Δ < 1:
             self.output(f"{prefix}{Δ*1000:.2f} ms")
+        elif Δ < 60:
+            self.output(self.colored(f"{prefix}{Δ:.2f} s", 'blue'))
         else:
-            self.output(f"{prefix}{Δ:.2f} s")
+            self.output(self.colored(f"{prefix}{Δ/60:.2f} s", 'yellow'))
 
 
 #####################
