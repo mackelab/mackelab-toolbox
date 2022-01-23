@@ -5,6 +5,7 @@ tests/stash/*
 /*.pyc
 /*.egg
 /*.egg-info
+.mypy_cache
 
 # Notebook checkpoints
 .ipynb_checkpoints
