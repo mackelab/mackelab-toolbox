@@ -782,11 +782,27 @@ class IndexableNamespace(SimpleNamespace):
 
     # Dict-like interface
     def __getitem__(self, key):
-        return self.__dict__[key]
+        try:
+            return self.__dict__[key]
+        except KeyError:
+            if "." in key:
+                root, stem = key.split(".", 1)
+                return self.__dict__[root][stem]
+            else:
+                raise
     def __setitem__(self, key, value):
-        self.__dict__[key] = value
+        try:
+            self.__dict__[key] = value
+        except KeyError:
+            if "." in key:
+                root, stem = key.split(".", 1)
+                self.__dict__[root][stem] = value
+            else:
+                raise
     def __contains__(self, key):
-        return key in self.__dict__
+        if "." in key:
+            root, stem = key.split(".", 1)
+        return (key in self.__dict__) or (stem in self.__dict__[root])
 
     # Required to behave like a mapping, otherwise Pydantic gets confused
     def __iter__(self):
