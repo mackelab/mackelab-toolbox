@@ -1070,13 +1070,21 @@ class Singleton(type):
     def __new__(metacls, name, bases, dct):
         cls = super().__new__(metacls, name, bases, dct)
         cls.__instance = None
-        # Don't overwrite cls.__new__ if it exists
-        for supercls in cls.mro():
-            # Ensure we don't assign __clsnew__ to __super_new, other we get
-            # infinite recursion
-            if supercls.__new__ != metacls.__clsnew__:
-                cls.__super_new = supercls.__new__
-                break
+        # We need to patch __clsnew__ into __new__.
+        # 1. Don't overwrite cls.__new__ if one of the parents is already a Singleton
+        #    (Otherwise, the child will try to assign two or more different __new__ 
+        #     functions to __super_new)
+        if any(isinstance(supercls, metacls) for supercls in cls.mro()[1:]):
+            pass
+        # 2. Don't overwrite cls.__new__ if it exists
+        else:
+            for supercls in cls.mro():
+                # Ensure we don't assign __clsnew__ to __super_new, other we get
+                # infinite recursion
+                if supercls.__new__ != metacls.__clsnew__:
+                    assert not hasattr(cls, f"_{metacls.__name__}__super_new"), "Multiple Singleton metaclasses have clashed in an unexpected way."
+                    cls.__super_new = supercls.__new__
+                    break
         cls.__new__ = metacls.__clsnew__
         return cls
     @staticmethod
