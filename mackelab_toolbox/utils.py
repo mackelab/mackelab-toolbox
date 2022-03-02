@@ -464,7 +464,7 @@ def format(s, *args, **kwargs):
 ###############
 # Hashing
 import hashlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Sequence, Collection, Mapping
 from enum import Enum
 # from .utils import terminating_types, TypeDict
 
@@ -557,7 +557,7 @@ def _tobytes(o) -> bytes:
        executed in a new session (in order to satisfy the 'stable' description).
        Note that this precludes using an object's `id`, which is sometimes
        how `hash` is implemented.
-    2. It is NOT necessary for the input to be reconstructable from
+    3. It is NOT necessary for the input to be reconstructable from
        the returned bytes.
 
     ..Note:: To avoid overly complicated byte sequences, the distinction
@@ -565,6 +565,26 @@ def _tobytes(o) -> bytes:
        `_tobytes("A")` and `_tobytes(65)` all return `b'A'`.
        So multiple inputs can return the same byte sequence, as long as they
        are unlikely to be used in the same location to mean different things.
+       
+    **Supported types**
+    - None
+    - bytes
+    - str
+    - int
+    - float
+    - Enum
+    - type
+    - Any object implementing a ``__bytes__`` method
+    - Mapping
+    - Sequence
+    - Collection
+    - Any object for which `bytes(o)` does not raise an exception
+
+    Raises
+    ------
+    TypeError:
+        - If `o` is a consumable Iterable.
+        - If `o` is of a type for which `_to_bytes` is not implemented.
     """
     # byte converters for specific types
     if o is None:
@@ -591,8 +611,12 @@ def _tobytes(o) -> bytes:
         return _byte_converters[type(o)](o)
     elif isinstance(o, Mapping) and not isinstance(o, terminating_types):
         return b''.join(_tobytes(k) + _tobytes(v) for k,v in o.items())
-    elif isinstance(o, Iterable) and not isinstance(o, terminating_types):
+    elif isinstance(o, Sequence) and not isinstance(o, terminating_types):
         return b''.join(_tobytes(oi) for oi in o)
+    elif isinstance(o, Collection) and not isinstance(o, terminating_types):
+        return b''.join(_tobytes(oi) for oi in sorted(o))
+    elif isinstance(o, Iterable) and not isinstance(o, terminating_types):
+        raise ValueError("Cannot compute a stable hash for a consumable Iterable.")
     else:
         try:
             return bytes(o)
