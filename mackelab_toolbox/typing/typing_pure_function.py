@@ -249,6 +249,8 @@ class PureFunction(metaclass=PureFunctionMeta):
                 pure_func = cls.subtypes[label](value)
             else:
                 cls.raise_validation_error(value)
+        else:
+            cls.raise_validation_error(value)
         return pure_func
 
     # TODO: Add arg so PureFunction subtype can be specified in error message
