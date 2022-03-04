@@ -74,6 +74,7 @@ The *Mackelab Toolbox* is meant to provide standard solutions to recurring codin
      units --> utils
      
      subgraph plotting_context["plotting"]
+       colors --> meta
        plot --> colors
        plot --> utils
        plot --> rcParams
