@@ -467,7 +467,7 @@ class TypeContainer(metaclass=utils.Singleton):
     def import_module(self, module):
         import importlib
         if not any(module.startswith(sm) for sm in self.safe_packages):
-            raise ValueError(f"Module {module} is not a submodule of one of the "
+            raise ValueError(f"Module '{module}' is not a submodule of one of the "
                              "listed safe packages.\n"
                              f"Safe packages: {self.safe_packages}")
         return importlib.import_module(module)
@@ -724,8 +724,8 @@ class Type(BuiltinType):
     def validate(cls, v):
         if isinstance(v, type):
             return v
-        else:
-            data = cls.Data(**v)
+        elif typing.json_like(v, "Type"):
+            data = cls.Data.parse_obj(v[1])
             if data.module == "__main__":
                 raise ValueError(
                     f"Class '{data.name}' was serialized with module '__main__'. "
@@ -736,7 +736,13 @@ class Type(BuiltinType):
             return C
     @classmethod
     def json_encoder(cls, v):
-        return cls.Data(module=v.__module__, name=v.__qualname__)
+        data = cls.Data(module=v.__module__, name=v.__qualname__)
+        if data.module == "__main__":
+            logger.warning(f"Class '{data.name}' was serialized with module '__main__' "
+                           "and will therefore not be deserializable. "
+                           "To allow classes to be deserialized, ensure they are defined "
+                           "in a separate module and imported into the main exec script.")
+        return ("Type", data)
 typing.Type = Type
 typing.add_json_encoder(type, Type.json_encoder)
 
