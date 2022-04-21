@@ -1255,6 +1255,7 @@ class GitSHA:
     path  : str="No git repo found"
     branch: str=""
     sha   : str=""
+    timestamp: str=None
     def __init__(self, path: Union[None,str,Path]=None, nchars: int=8,
                  sha_prefix: str='#', show_path: str='stem',
                  show_branch: bool=True, datefmt: str="%Y-%m-%d"):
@@ -1271,11 +1272,18 @@ class GitSHA:
             To not display any time at all, use an empty string.
             Default format is ``2000-12-31``.
         """
+        # Set attributes that should always work (don't depend on repo)
+        if datefmt:
+            self.timestamp = datetime.now().strftime(datefmt)
+        else:
+            self.timestamp = ""
+        # Try to load repository
         try:
             repo = git.Repo(search_parent_directories=True)
         except git.InvalidGitRepositoryError:
-            # Skip initialization and use defaults
+            # Skip initialization of repo attributes and use defaults
             return
+        # Set attributes that depend on repository
         self.repo = repo
         self.sha = sha_prefix+repo.head.commit.hexsha[:nchars]
         if show_path.lower() == 'full':
@@ -1291,11 +1299,6 @@ class GitSHA:
             self.branch = repo.active_branch.name
         else:
             self.branch = ""
-
-        if datefmt:
-            self.timestamp = datetime.now().strftime(datefmt)
-        else:
-            self.timestamp = ""
 
     def __str__(self):
         return " ".join((s for s in (self.timestamp, self.path, self.branch, self.sha)
