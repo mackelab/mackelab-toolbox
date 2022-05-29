@@ -46,6 +46,7 @@ Created on Tue Nov 28 2017
 Author: Alexandre René
 """
 
+from reprlib import repr  # Used by 'profiling'; imported here since it replaces standard `repr`
 import logging
 logger = logging.getLogger(__name__)
 
@@ -885,8 +886,32 @@ def mm2in(size, *args):
 
 # %% [markdown]
 # ## Profiling #####################
+#
+# - `TimeThis` computes the execution time for the code inside its context.
+#   Use this for finding *where*, in a segment of code, a big bottleneck is located.
+#
+# - `timeit` is a convenience wrapper for a function in the *timeit* module.
+#   It *repeatedly executes* the given code a large number of times, in order
+#   to get higher precision timings.
+#   Use one of the `timeit` variants for *comparing* the speed of two alternative implementations.
+
+
+# %%
+import sys
+from sys import getsizeof, stderr
+import builtins
+import re
 from time import perf_counter
-from typing import Optional, Callable
+from itertools import chain
+from collections import deque, ChainMap
+from statistics import mean, stdev
+from dataclasses import dataclass
+from timeit import repeat as timeit_repeat
+
+# from reprlib import repr  # At top of this module
+
+from typing import Optional, Union, Callable, List, Literal
+
 def nocolored(s, *arg, **kwargs):
     return s
 try:
@@ -1021,6 +1046,379 @@ class TimeThis:
         else:
             self.output(self.colored(f"{prefix}{Δ/60:.2f} s", 'yellow'))
 
+# %% [markdown]
+# ### `timeit`
+#
+# Wrapper for timeit.repeat. For when you want the convenience of
+# IPython's `%timeit` magic outside of IPython.
+#
+# Difference with *timeit.repeat*:
+# - Defaults to using `globals()` for the globals.
+#   (Pass `globals=None` to prevent this.)
+# - By default, the *minimum* is shown instead of the mean (as recommended in the *timeit* docs).
+# - Returns a `TimeitResult` object, which provides statistics as
+#   attributes and pretty printing.
+#
+
+# %%
+@dataclass
+class TimeitResult:
+    number : int
+    repeat : int
+    results: List[int]
+    unit   : Literal['ns','μs','ms','s']="s"
+    fmt    : str="{min:.2f} ± {std:.2f} {unit} per loop (min ± std. dev. of {repeat} runs, {number} loops each)"
+    per_loop: bool=False
+        # Different from %timeit: we report min instead of mean, and always use the same units
+    def __str__(self):
+        attrs = [attr for attr in dir(self) if attr in self.fmt]
+        return self.fmt.format(**{attr: getattr(self, attr) for attr in attrs})
+    def _repr_pretty_(self, p, cycle):
+        assert not cycle
+        return p.text(str(self))
+    def _repr_markdown_(self):
+        s = str(self)
+        units = type(self).__annotations__["unit"].__args__  # Get unit strings from type annotation
+        # Heuristic: highlight numbers with decimals (excludes 'number' and 'repeat')
+        s = re.sub(r"(\d+\.\d+)", r"**\1**", s)
+        # Highlight units – must be surrounded by spaces
+        s = re.sub(" (" + "|".join(units) + ") ", r" **\1** ", s)
+        return s
+    def __post_init__(self):
+        # Convert results to per loop values
+        if not self.per_loop:
+            self.results = [r/self.number for r in self.results]
+            self.per_loop = True
+        # Determine best units
+        if self.unit == "s":  # Hack: other units can be forced, but not 's'
+            for scale, unit in [(1, "s"), (1e-3, "ms"), (1e-6, "μs"), (1e-9, "ns")]:
+                if self.min > scale:
+                    break
+            # NB: If we exhaust the loop, we get ns as desired
+            self.results = [r/scale for r in self.results]
+            self.unit = unit
+    @property
+    def min(self):
+        return min(self.results)
+    @property
+    def max(self):
+        return max(self.results)
+    @property
+    def mean(self):
+        return mean(self.results)
+    @property
+    def std(self):
+        return 0 if len(self.results) <= 1 else stdev(self.results)
+
+def timeit(stmt='pass', setup='pass', repeat=5, number=1000000,
+           globals='globals', fmt=None):
+    """
+    Wrapper for timeit.repeat. For when you want the convenience of
+    IPython's `%timeit` magic outside of IPython.
+
+    Difference with *timeit.repeat*:
+    - Defaults to using `globals()` in the caller's frame for the globals.
+      (Pass `globals=None` to prevent this.)
+    - Returns a `TimeitResult` object, which provides statistics as
+      attributes and pretty printing.
+
+    Use `fmt` to customize the display string. For even more control,
+    instead of a str, pass a subclass of `TimeitResult` to `fmt`.
+    
+    .. Todo:: Add 'auto' option to `number`, and emulate how `%timeit` selects
+       the number of loops automatically.
+    """
+
+    if globals == "globals":
+        globals = sys._getframe(1).f_globals
+    res = timeit_repeat(
+        stmt, setup, repeat=repeat, number=number, globals=globals)
+    result_container = TimeitResult
+    kwargs = {}
+    if fmt is None:
+        pass
+    elif isinstance(fmt, str):
+        kwargs["fmt"] = fmt
+    elif isinstance(fmt, type) and issubclass(fmt, TimeitResult):
+        result_container = fmt
+    return result_container(
+        number=number, repeat=repeat, results=res, unit='s', **kwargs)
+
+
+# %% [markdown]
+# ### `total_size`
+#
+# Return the total memory used by an object, including that of references it contains.
+#
+# #### Extending
+#
+# Modules can add handlers for their types to `_total_size_handlers`.
+
+# %%
+def total_size(o, handlers={}, verbose=False):
+    """
+    Returns the approximate memory footprint an object and all of its contents.
+
+    Automatically finds the contents of the following builtin containers and
+    their subclasses:  tuple, list, deque, dict, set and frozenset.
+
+    If a type is unrecognized, a TypeError is raised.
+
+    To support additional types, additional handlers can be passed as arguments.
+    Librairies can also add their types to the `_total_size_handlers` dictionary.
+
+        handlers = {SomeContainerClass: iter,
+                    OtherContainerClass: OtherContainerClass.get_elements}
+
+    .. Note:: To make it easier to override defaults, handlers are tried in
+       reverse order:
+       - All user specified `handlers` before global `_total_size_handlers`
+       - Within a dict, in reverse order (latest ones first).
+
+    .. Note:: Heavily based on https://code.activestate.com/recipes/577504/,
+       with the following changes:
+       - Python 2 support is dropped
+       - An error is raised if no handler is found for a type
+       - Handlers for non-container types must also be provided, and should return None
+       - Handlers can return `NotImplemented`, letting other handlers try
+         to handle an object
+       - Entries in the handler dictionary can use strings for their key,
+         allowing to define handlers without worrying whether a user has the
+         required module installed (and without causing an unnecessary import)
+    """
+    seen = set()                      # track which object id's have already been seen
+    default_size = getsizeof(0)       # estimate sizeof object without __sizeof__
+
+    # Initialize handlers
+    # Loop over keys, and replace strings keys with corresponding type
+    _all_handlers = ChainMap(handlers, _total_size_handlers)  # Give precedence to user-specified handlers
+    all_handlers = {}
+    for key, handler in reversed(list(_all_handlers.items())):
+        if isinstance(key, type):
+            all_handlers[key] = handler
+
+        elif isinstance(key, str):
+            if "." not in key:
+                raise NotImplementedError(
+                    "I'm not sure in which situation one would need a str key "
+                    "that doesn't include a module in total_size's handlers "
+                    "dict; waiting for a use case.")
+            else:
+                # 'key' is a dotted name: first part indicates the package
+                # where type is defined.
+                # Problem: given "foo.bar.MyType", we don't know whether to do
+                # `from foo.bar import MyType` or `from foo import bar.MyType`.
+                # So we try all combinations, giving precedence to more
+                # specified packages (so `from foo.bar` would be tried first).
+                # For each combination, we check whether that package is
+                # imported:  if not, it is not possible (without irresponsible
+                # manipulation of imports) for `o` to have this type, and thus
+                # we don't need to check for it
+                modname = key
+                name = ""
+                for k in range(key.count(".")):
+                    modname, name_prefix = key.rsplit(".", 1)
+                    name = name_prefix + ("." + name if name else "")
+                    mod = sys.modules.get(modname)
+                    if mod:
+                        T = getattr(mod, name)
+                        if not isinstance(T, type):
+                            raise TypeError(f"`total_size` has a handler for "
+                                            f"type {key}, but this is not a "
+                                            f"type. (It is a {type(T)}).")
+                        all_handlers[T] = handler
+                        break
+                # If we exit the loop without finding anything, it means the
+                # required module is not available.
+
+        else:
+            raise TypeError("Keys for `total_size` dictionary of handlers "
+                            f"should be types or strings; received {type(key)}.")
+
+    # Define the recursive `sizeof` function
+    def sizeof(o):
+        # if not isinstance(o, (tuple, str, dict, int, float)):
+        #     import pdb; pdb.set_trace()
+        if o is None or id(o) in seen:  # Do not double count the same object. `None` acts as a termination value, and is anyway always 'seen'
+            return 0
+        seen.add(id(o))
+        s = getsizeof(o, default_size)
+
+        if verbose:
+            print(s, type(o), repr(o), file=stderr)
+
+        for typ, handler in all_handlers.items():
+            if isinstance(o, typ):
+                it = handler(o)
+                if it is NotImplemented:
+                    continue
+                elif it is not None:
+                    s += sum(map(sizeof, it))
+                break
+        else:
+            raise TypeError("`total_size` has no handler for objects of type "
+                            f"{type(o)}")
+        return s
+
+    # Apply the recursive `sizeof` function
+    return sizeof(o)
+
+_scalar_handler = lambda o: None
+_dict_handler = lambda d: chain.from_iterable(d.items())
+_total_size_handlers = {
+    int: _scalar_handler,
+    float: _scalar_handler,
+    str: _scalar_handler,
+    tuple: iter,
+    list: iter,
+    deque: iter,
+    dict: _dict_handler,
+    set: iter,
+    frozenset: iter,
+   }
+
+# %%
+
+def total_size_handler(T: Union[str, type]):
+    """
+    Register a handler for applying the function `total_size` to objects of
+    type `T`. To avoid unnecessary imports, it is allowed to specify types as
+    import strings: if the containing module has not been imported, the
+    handler is skipped (since then it is extremely unlikely that a variable
+    of that type has been defined).
+
+    Handlers are executed in the reverse order in which they are specified.
+    """
+    def decorator(handler):
+        if T in _total_size_handlers:
+            logger.warning(f"Overwriting `total_size` handler for type {T}.")
+        _total_size_handlers[T] = handler
+    return decorator
+
+# %% [markdown]
+# Measuring sizes of NumPy arrays:
+# - `.nbytes` returns the number of bytes consumed by the elements of the array, and *only*.
+#   This excludes overhead (104 bytes) but includes the memory of elements in views.
+# - `getsizeof` it returns only the size of the overhead (since the actual data is referenced).
+# - Doing `.nbytes` + overhead is unsatisfactory, because it can lead to double counting.
+#   For example, in the following case, it would count almost twice the actually used memory for array `A`:
+#
+#       [A[:-1], A[1:]]
+#
+# - When given a view, we return the size of the view itself, plus the *fullsize* of its underlying array.
+#   The `seen` tracking in `total_size` ensures that the underlying array is counted only once.
+#
+#   In the case where an object *only* uses a partial view of an array, this would produce a larger number
+#   then the memory actually used. However, in such cases one could argue that the full array size should
+#   still be counted (since it is somehow used), and since that leads to much simpler computer logic, it
+#   is the interpretation we take.
+
+# %%
+def _numpy_array_handler(o):
+    # Recall that the recursive `sizeof` already calls `sys.getsizeof` on `o`)
+    # Question: Are there ndarray attributes we should also return ?
+    if o.base is not None:
+        yield o.base
+
+def _numpy_dtype_handler(o):
+    ".. Caution:: This implementation is not highly researched"
+    if o is o.base:
+        # This is not a new dtype; it's not adding memory
+        # (QUESTION: Can there be bases which aren't defined in the numpy packages ? Maybe those should still be counted ?)
+        return None
+
+    for attr in dir(o):
+        val = getattr(o, attr)
+        baseval = getattr(o.base, attr)
+        if val is not baseval:  # Objects allocated as part of the class definition shouldn't be counted against the instance's footprint
+            yield val     # DTypes seem to be C structs, so their keys don't add to the memory footprint
+
+# Use a string key so that we don't introduce an unnecessary (and potentially
+# fatal) numpy import
+_total_size_handlers["numpy.ndarray"] = _numpy_array_handler
+_total_size_handlers["numpy.dtype"] = _numpy_dtype_handler
+
+# %% [markdown]
+# The bit of code below compares `total_size` to `sys.getsizeof`, which doesn't include the size of the elements in containers.
+
+# %%
+if exenv in {"jbook", "notebook"}:
+    import sys
+    from tabulate import tabulate
+
+    b = b"abcdefghijklmnopqrst"
+    s = "abcdefghijklmnopqrst"
+    flst = [float(x) for x in range(20)]
+
+    print("Confirm that utils.getsizeof does not include size of contents:\n")
+    print("Size of b:                ", sys.getsizeof(b))
+    print("Size of s:                ", sys.getsizeof(s))
+    print("Size of list containing s:", sys.getsizeof([s]))
+    print("total_size([s]):         ", total_size([s]), f" (= {sys.getsizeof(s)} + {sys.getsizeof([s])})")
+    print()
+
+    sizes = range(5)
+    types = (str, tuple, list, set, frozenset)
+
+    print("=====================================")
+    print("sys.getsizeof (values are independent of content):\n\n")
+    for data, _types in zip((s, flst), (types, types[:-1])):
+        print("data: ", data)
+        print()
+        res = []
+        if data == s:
+            # Include sizes with a pure bytes object, for comparison with str
+            res += [["bytes (byte data)", *(sys.getsizeof(b[:n]) for n in sizes)]]
+        res += [[T.__name__, *(sys.getsizeof(T(data[:n])) for n in sizes)]
+                for T in _types]
+        print(tabulate(res, headers = ["# elements →"] + list(sizes)))
+        print()
+
+    print("=====================================")
+    print("total_size (values depend on content):\n\n")
+    for data, _types in zip((s, flst), (types, types[:-1])):
+        print("data: ", data)
+        print()
+        res = []
+        if data == s:
+            # Include sizes with a pure bytes object, for comparison with str
+            res += [["bytes (byte data)", *(sys.getsizeof(b[:n]) for n in sizes)]]
+        res += [[T.__name__, *(total_size(T(data[:n])) for n in sizes)]
+                for T in _types]
+        print(tabulate(res, headers = ["# elements →"] + list(sizes)))
+        print()
+
+
+    from collections import defaultdict
+    import numpy as np
+
+    sizes = [0, 10, 100, 1000]
+    sysgso = defaultdict(lambda: [])
+    gfs = defaultdict(lambda: [])
+    for n in sizes:
+        iarr32 = np.arange(n, dtype=np.int32)
+        farr64 = np.arange(n, dtype=np.float64)
+        sysgso["int32"].append(sys.getsizeof(iarr32))
+        sysgso["float64"].append(sys.getsizeof(farr64))
+        sysgso["int32   (A[:])"].append(sys.getsizeof(iarr32[:]))
+        sysgso["float64 (A[:])"].append(sys.getsizeof(farr64[:]))
+        gfs["int32"].append(total_size(iarr32))
+        gfs["float64"].append(total_size(farr64))
+        gfs["int32   (A[:])"].append(total_size(iarr32[:]))
+        gfs["float64 (A[:])"].append(total_size(farr64[:]))
+        gfs["int32   (A[::4])"].append(total_size(iarr32[::4]))
+        gfs["float64 (A[::4])"].append(total_size(farr64[::4]))
+        gfs["int32 ([A, A])"].append(total_size([iarr32, iarr32]))
+
+    print("=====================================")
+    print("getsizeof – NumPy array\n")
+    print(tabulate([[k] + v for k,v in sysgso.items()],
+                   headers = ["# elements →"] + list(sizes)))
+
+    print("\n\n=====================================")
+    print("total_size – NumPy array\n")
+    print(tabulate([[k] + v for k,v in gfs.items()],
+                   headers = ["# elements →"] + list(sizes)))
 
 
 # %% [markdown]

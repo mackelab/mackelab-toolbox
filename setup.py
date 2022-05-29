@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='mackelab-toolbox',
-    version='0.2.0a1',
+    version='0.2.0a2',
     description='A set of common Python utilities for computational science',
     url='https://github.com/mackelab/mackelab_toolbox',
 
@@ -103,7 +103,10 @@ setup(
             'pygments',
             'termcolor'  # Optional dependency for TimeThis
         ],
-        'all': [
+        'dev': [  # Extra dependencies only required for tests or docs; NOT included in 'all'
+            'tabulate'
+        ],
+        'all': [  # Does NOT include 'dev' packages
             'numpy', 'dill',
             'parameters', 'pyyaml', 'tqdm', 'pandas',
             'IPython', 'matplotlib',
