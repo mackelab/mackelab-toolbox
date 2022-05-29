@@ -1,0 +1,17 @@
+# Reducing the activation energy for documentation with literate programming
+
+We find that [literate programming](https://en.wikipedia.org/wiki/Literate_programming) is especially well suited for documenting a tool box: compared to a more polished package, contributors are *less* likely to want to spend time documenting their little utility function, and users are *more* likely to want to look at the code. Therefore inlining documentation with the code itself makes sense.
+
+This is especially true now that the combination of Jupyter and [Jupytext](https://jupytext.readthedocs.io/) allows to render inlined documentation as markdown. Further combined with [Jupyter Book](jupyterbook.org/), one can then produce a beautiful code explorer, with hidden code by default that can be exposed at the click of a button. Short of hiring a tech writer to maintain documentation, this is a near ideal solution to one of the perennial problems of toolbox librairies: enabling users to discover that the function they need is already implemented.
+
+Since this toolbox provides functions relevant to a variety of packages, it naturally uses those package names for its modules (`numpy`, `pymc3`, `typing`, etc.). This introduces the slight problem that if opened in a notebook, all those modules prevent their associated packages from being imported, since the current directory is set to *mackelab-toolbox/mackelab_toolbox*. The *typing* module is especially problematic, since it prevents Jupyter from even loading a kernel, so none of the files can be executed if they are opened as notebooks.
+Our solution is to symlink the code files from here, with non-clashing names. Opening the files with *mackelab-toolbox/docs/sources/* as the current directory allows them to be executed as normal notebooks, and for the inlined tests to run. Compiling a code browser with Jupyter Book now also works, for the same reason.
+
+## Choosing between docstrings and inlined documentation
+
+Think of the inlined documentation as the block of text you would write in a separate documentation file. This will often contain some repetition with the docstring, but ultimately the two have different goals:
+
+- The docstring is mostly focused on "how to use", and should document every option.
+  Documentation may allocate more space to explain "when" and "why", and skip over less common options.
+- Docstrings try to be as concise as possible, either because they show up in code completion tooltips, or to allow a user to more efficient scan an API reference.
+- Documentation allows for much richer formatting, with images, equations, [mermaid](https://mermaid-js.github.io/) diagrams, etc.

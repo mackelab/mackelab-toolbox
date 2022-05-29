@@ -1,29 +1,42 @@
 # -*- coding: utf-8 -*-
+# ---
+# jupyter:
+#   jupytext:
+#     formats: py:percent
+#     notebook_metadata_filter: -jupytext.text_representation.jupytext_version,-kernelspec
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+# ---
 
-# ******************* Organization of this module ************************** #
-#                                                                            #
-# This file is split into sections, each with its own set of imports.        #
-# This makes it easy to split off a section into an independent module       #
-# when/if it gets big enough.                                                #
-#                                                                            #
-# Sections:                                                                  #
-#   - Safeguards                                                             #
-#   - Iteration utilities                                                    #
-#   - Specialized types                                                      #
-#   - String utilities                                                       #
-#   - Hashing                                                                #
-#   - Numerical types                                                        #
-#   - Dictionary utilities                                                   #
-#   - Unit conversion utilities                                              #
-#   - Profiling                                                              #
-#   - Stashing                                                               #
-#   - Sentinel values                                                        #
-#   - Introspection / Class-hacking / Metaprogramming  -> meta.py            #
-#   - IPython / Jupyter Notebook utilities                                   #
-#   - Misc. utilities                                                        #
-#                                                                            #
-# ************************************************************************** #
+# %% [markdown]
+# ********************* Organization of this module **************************
+# *                                                                          *
+# * This file is split into sections, each with its own set of imports.      *
+# * This makes it easy to split off a section into an independent module     *
+# * when/if it gets big enough.                                              *
+# *                                                                          *
+# * Sections:                                                                *
+# *   - Safeguards                                                           *
+# *   - Iteration utilities                                                  *
+# *   - Specialized types                                                    *
+# *   - String utilities                                                     *
+# *   - Hashing                                                              *
+# *   - Numerical types                                                      *
+# *   - Dictionary utilities                                                 *
+# *   - Unit conversion utilities                                            *
+# *   - Profiling                                                            *
+# *   - Stashing                                                             *
+# *   - Sentinel values                                                      *
+# *   - Introspection / Class-hacking / Metaprogramming  -> meta.py          *
+# *   - IPython / Jupyter Notebook utilities                                 *
+# *   - Logging utilities                                                    *
+# *   - Misc. utilities                                                      *
+# *                                                                          *
+# ****************************************************************************
 
+# %%
 """
 Mackelab utilities
 
@@ -36,8 +49,24 @@ Author: Alexandre René
 import logging
 logger = logging.getLogger(__name__)
 
-########################
-# Safeguards – Attempt to detect certain hard to debug errors
+# %% tags=["remove-cell"]
+exenv = "script"
+if __name__ != "__main__":
+    exenv = "module"
+elif False:
+    pass
+
+    # %% tags=["remove-cell"]
+    exenv = "jbook"
+
+    # %% tags=["skip-execution", "remove-cell"]
+    exenv = "notebook"
+
+# %% [markdown]
+# ## Safeguards ########################
+# Attempt to detect certain hard to debug errors
+
+# %%
 from collections.abc import Iterable
 import builtins
 
@@ -64,8 +93,10 @@ def isinstance(obj, class_or_tuple):
                 .format(type(obj).__name__))
     return r
 
-########################
-# Iteration utilities
+# %% [markdown]
+# ## Iteration utilities ########################
+
+# %%
 import itertools
 from collections.abc import Iterable
 from typing import Tuple
@@ -141,8 +172,10 @@ def index_iter(shape: Tuple[int]) -> itertools.product:
     """
     return itertools.product(*(range(s) for s in shape))
 
-############################
-# Specialized types
+# %% [markdown]
+# ## Specialized types ############################
+
+# %%
 import abc
 from enum import Enum
 from collections import OrderedDict
@@ -337,9 +370,10 @@ def rgetattr(obj, attr, *args):
         return getattr(obj, attr, *args)
     return reduce(_getattr, [obj] + attr.split('.'))
 
-################
-# String utilities
+# %% [markdown]
+# ## String utilities ################
 
+# %%
 from collections.abc import Iterable
 import numpy as np
 
@@ -461,8 +495,10 @@ formatter = ExtendedFormatter()
 def format(s, *args, **kwargs):
     return formatter.format(s, *args, **kwargs)
 
-###############
-# Hashing
+# %% [markdown]
+# ## Hashing ###############
+
+# %%
 import hashlib
 from collections.abc import Iterable, Sequence, Collection, Mapping
 from enum import Enum
@@ -565,7 +601,7 @@ def _tobytes(o) -> bytes:
        `_tobytes("A")` and `_tobytes(65)` all return `b'A'`.
        So multiple inputs can return the same byte sequence, as long as they
        are unlikely to be used in the same location to mean different things.
-       
+
     **Supported types**
     - None
     - bytes
@@ -636,8 +672,11 @@ def _tobytes(o) -> bytes:
             else:
                 return _tobytes(state)
 
-##########################
-# Numerical types
+
+# %% [markdown]
+# ## Numerical types ##########################
+
+# %%
 from numbers import Number, Integral, Real
 import numpy as np
 
@@ -749,8 +788,11 @@ def broadcast_shapes(*shapes):
 #     'float64': np.float64
 #     }
 
-#######################
-# Dictionary utilities
+
+# %% [markdown]
+# ## Dictionary utilities #######################
+
+# %%
 from collections import OrderedDict
 
 def sort_dict(d: dict, key: bool=None, reverse: bool=False) -> dict:
@@ -811,8 +853,10 @@ def prune_dict(data: dict, keys: set):
             data[k] = prune_dict(v, keys)
     return data
 
-############################
-# Unit conversion utilities
+# %% [markdown]
+# ## Unit conversion utilities ############################
+
+# %%
 from collections.abc import Iterable
 
 def mm2in(size, *args):
@@ -839,9 +883,8 @@ def mm2in(size, *args):
     else:
         return type(size)(s/25.4 for s in size)
 
-#####################
-# Profiling
-
+# %% [markdown]
+# ## Profiling #####################
 from time import perf_counter
 from typing import Optional, Callable
 def nocolored(s, *arg, **kwargs):
@@ -851,6 +894,13 @@ try:
 except ModuleNotFoundError:
     colored = nocolored
 
+# %% [markdown]
+# ### `TimeThis`
+#
+# Profiling helper for slow (> millisecond) code segments.
+# This context manager is not particularly careful with overhead, and hence isn't appropriate for submillisecond measures.
+
+# %%
 class TimeThis:
     """
     Profiling helper for slow (> millisecond) code segments.
@@ -886,12 +936,12 @@ class TimeThis:
     >>>     sum(range(1000000))
     To make the new output function the default, assign it to the class::
     >>> TimeThis.output = staticmethod(logger.debug)
-    
+
     By default, times longer than 1 second and 1 min are highlighted by
     printing them in color (repectively in blue and yellow). This can be turned
     off for a specific context by passing ``color=False``, or globally by
     setting ``TimeThis.color = False``. The threshold values are hard-coded.
-    
+
     For complete control over the output, the pair of methods
     `output_function` and `output_last_Δ` are provided. (The latter prints the
     "Time since last timing context" line when `TimeThis` is called more than
@@ -906,7 +956,7 @@ class TimeThis:
     Or assigned as defaults::
     >>> TimeThis.output_function = staticmethod(log_time)
     >>> TimeThis.output_last_Δ = staticmethod(log_time_Δ)
-    
+
     To turn off timing for all contexts without removing them from code, do
     >>> TimeThis.on = False
 
@@ -950,7 +1000,7 @@ class TimeThis:
         if self.color:
             return colored
         else:
-            return nocolored 
+            return nocolored
     def output_function(self, name, Δ):
         if name:
             name += ": "
@@ -972,9 +1022,11 @@ class TimeThis:
             self.output(self.colored(f"{prefix}{Δ/60:.2f} s", 'yellow'))
 
 
-#####################
-# Stashing
 
+# %% [markdown]
+# ## Stashing #####################
+
+# %%
 from collections import OrderedDict, deque
 from collections.abc import MutableSequence, MutableSet, MutableMapping
 from copy import deepcopy
@@ -1059,9 +1111,10 @@ class Stash:
             setattr(self._obj, attr, val)
 
 
-####################
-# Sentinel values
+# %% [markdown]
+# ## Sentinel values ####################
 
+# %%
 class Singleton(type):
     """Singleton metaclass
     Based on the pattern for numpy._globals._NoValue
@@ -1096,7 +1149,7 @@ class Singleton(type):
         cls.__instance = None
         # We need to patch __clsnew__ into __new__.
         # 1. Don't overwrite cls.__new__ if one of the parents is already a Singleton
-        #    (Otherwise, the child will try to assign two or more different __new__ 
+        #    (Otherwise, the child will try to assign two or more different __new__
         #     functions to __super_new)
         if any(isinstance(supercls, metacls) for supercls in cls.mro()[1:]):
             pass
@@ -1151,14 +1204,17 @@ def sentinel(name, repr_str=None):
     return sentinel.__instances[name]
 sentinel.__instances = {}
 
-###################
-# Introspection / Class-hacking / Metaprogramming
+# %% [markdown]
+# ## Introspection / Class-hacking / Metaprogramming ###################
 
+# %%
 from .meta import *
 
-#########################
-# IPython / Jupyter Notebook utilities
 
+# %% [markdown]
+# ## IPython / Jupyter Notebook utilities #########################
+
+# %%
 class PDF:
     """
     Create an object from a pdf file which allows it to be viewed in a notebook.
@@ -1308,9 +1364,10 @@ class GitSHA:
     def _repr_html_(self):
         return f"<p style=\"{self.css}\">{self.timestamp} git: {self.path} {self.branch} {self.sha}</p>"
 
-#####################
-# Logging utilities
+# %% [markdown]
+# ## Logging utilities #####################
 
+# %%
 class lesslog:
     """
     Context manager for temporarily changing the log level of loggers.
@@ -1346,9 +1403,10 @@ class lesslog:
             logger.level = level
         self.out_of_context_levels
 
-#####################
-# Misc. utilities
+# %% [markdown]
+# ## Misc. utilities #####################
 
+# %%
 # TODO: Pre-evaluate strings to some more efficient expression, so
 #       we don't need to parse the string every time.
 #       > This is now done in `mackelab_toolbox.transform`
