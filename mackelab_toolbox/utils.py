@@ -1685,6 +1685,7 @@ def Code(*obj, sep=''):
 from typing import Union
 from pathlib import Path
 from datetime import datetime
+from socket import gethostname
 try:
     import git
 except ModuleNotFoundError:
@@ -1709,10 +1710,12 @@ class GitSHA:
     path  : str="No git repo found"
     branch: str=""
     sha   : str=""
+    hostname: str=""
     timestamp: str=None
     def __init__(self, path: Union[None,str,Path]=None, nchars: int=8,
                  sha_prefix: str='#', show_path: str='stem',
-                 show_branch: bool=True, datefmt: str="%Y-%m-%d"):
+                 show_branch: bool=True, show_hostname: bool=False,
+                 datefmt: str="%Y-%m-%d"):
         """
         :param:path: Path to the git repository. Defaults to CWD.
         :param:nchars: Numbers of SHA hash characters to display. Default: 8.
@@ -1737,6 +1740,10 @@ class GitSHA:
         except git.InvalidGitRepositoryError:
             # Skip initialization of repo attributes and use defaults
             return
+        if show_hostname:
+            self.hostname = gethostname()
+        else:
+            self.hostname = ""
         # Set attributes that depend on repository
         self.repo = repo
         self.sha = sha_prefix+repo.head.commit.hexsha[:nchars]
@@ -1755,12 +1762,13 @@ class GitSHA:
             self.branch = ""
 
     def __str__(self):
-        return " ".join((s for s in (self.timestamp, self.path, self.branch, self.sha)
+        return " ".join((s for s in (self.timestamp, self.hostname, self.path, self.branch, self.sha)
                          if s))
     def __repr__(self):
         return self.__str__()
     def _repr_html_(self):
-        return f"<p style=\"{self.css}\">{self.timestamp} git: {self.path} {self.branch} {self.sha}</p>"
+        hoststr = f"&nbsp;&nbsp;&nbsp;host: {self.hostname}" if self.hostname else ""
+        return f"<p style=\"{self.css}\">{self.timestamp}{hoststr}&nbsp;&nbsp;&nbsp;git: {self.path} {self.branch} {self.sha}</p>"
 
 # %% [markdown]
 # ## Logging utilities #####################
