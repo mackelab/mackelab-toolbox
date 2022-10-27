@@ -1812,62 +1812,62 @@ class lesslog:
 # %% [markdown]
 # ## Misc. utilities #####################
 
-# %%
-# TODO: Pre-evaluate strings to some more efficient expression, so
-#       we don't need to parse the string every time.
-#       > This is now done in `mackelab_toolbox.transform`
-# TODO: Update and use with `mackelab_toolbox.transform` ?
-import simpleeval
-import ast
-import operator
-import numpy as np
-class StringFunction:
-    """See `mackelab_toolbox.transform.Transform`, which is more mature."""
-    # Replace the "safe" operators with their standard forms
-    # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
-    #  input but this does not work with non-numerical types.)
-    _operators = simpleeval.DEFAULT_OPERATORS
-    _operators.update(
-        {ast.Add: operator.add,
-         ast.Mult: operator.mul,
-         ast.Pow: operator.pow})
-    # Allow evaluation to find operations in standard namespaces
-    namespaces = {'np': np}
+# # %%
+# # TODO: Pre-evaluate strings to some more efficient expression, so
+# #       we don't need to parse the string every time.
+# #       > This is now done in `mackelab_toolbox.transform`
+# # TODO: Update and use with `mackelab_toolbox.transform` ?
+# import simpleeval
+# import ast
+# import operator
+# import numpy as np
+# class StringFunction:
+#     """See `mackelab_toolbox.transform.Transform`, which is more mature."""
+#     # Replace the "safe" operators with their standard forms
+#     # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
+#     #  input but this does not work with non-numerical types.)
+#     _operators = simpleeval.DEFAULT_OPERATORS
+#     _operators.update(
+#         {ast.Add: operator.add,
+#          ast.Mult: operator.mul,
+#          ast.Pow: operator.pow})
+#     # Allow evaluation to find operations in standard namespaces
+#     namespaces = {'np': np}
 
-    def __init__(self, expr, args):
-        """
-        Parameters
-        ----------
-        expr: str
-            String to evaluate.
-        args: iterable of strings
-            The function argument names.
-        """
-        self.expr = expr
-        self.args = args
-    def __call__(self, *args, **kwargs):
-        names = {nm: arg for nm, arg in zip(self.args, args)}
-        names.update(kwargs)  # FIXME: Unrecognized args ?
-        names.update(self.namespaces)  # FIXME: Overwriting of arguments ?
-        try:
-            res = simpleeval.simple_eval(
-                self.expr,
-                operators=self._operators,
-                names=names)
-        except simpleeval.NameNotDefined as e:
-            e.args = ((e.args[0] +
-                       "\n\nThis may be due to a module function in the transform "
-                       "expression (only numpy, as 'np', are "
-                       "available by default).\nIf '{}' is a module or class, you can "
-                       "make it available by adding it to the function namespace: "
-                       "`StringFunction.namespaces.update({{'{}': {}}})`.\nSuch a line would "
-                       "typically be included at the beginning of the execution script "
-                       "(it does not need to be in the same module as the one where "
-                       "the string function is defined, as long as it is executed first)."
-                       .format(e.name, e.name, e.name),)
-                      + e.args[1:])
-            raise
-        return res
+#     def __init__(self, expr, args):
+#         """
+#         Parameters
+#         ----------
+#         expr: str
+#             String to evaluate.
+#         args: iterable of strings
+#             The function argument names.
+#         """
+#         self.expr = expr
+#         self.args = args
+#     def __call__(self, *args, **kwargs):
+#         names = {nm: arg for nm, arg in zip(self.args, args)}
+#         names.update(kwargs)  # FIXME: Unrecognized args ?
+#         names.update(self.namespaces)  # FIXME: Overwriting of arguments ?
+#         try:
+#             res = simpleeval.simple_eval(
+#                 self.expr,
+#                 operators=self._operators,
+#                 names=names)
+#         except simpleeval.NameNotDefined as e:
+#             e.args = ((e.args[0] +
+#                        "\n\nThis may be due to a module function in the transform "
+#                        "expression (only numpy, as 'np', are "
+#                        "available by default).\nIf '{}' is a module or class, you can "
+#                        "make it available by adding it to the function namespace: "
+#                        "`StringFunction.namespaces.update({{'{}': {}}})`.\nSuch a line would "
+#                        "typically be included at the beginning of the execution script "
+#                        "(it does not need to be in the same module as the one where "
+#                        "the string function is defined, as long as it is executed first)."
+#                        .format(e.name, e.name, e.name),)
+#                       + e.args[1:])
+#             raise
+#         return res
 
 from collections.abc import Iterable
 class SkipCounter(int):

@@ -63,7 +63,7 @@ setup(
             'pydantic>=1.8',
             'blosc',    # Serialization typing_module.Array.
             'astunparse',  # Serialization of functions.
-            'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
+            'simpleeval',  # Serialization of transforms (TransformedVar)
         ],
         'test': [
             'pytest',
@@ -96,7 +96,7 @@ setup(
             'pydantic>=1.8',
             'blosc',    # Serialization typing_module.Array.
             'astunparse',  # Serialization of functions.
-            'simpleeval',  # Serialization of transforms (TransformedVar, utils.StringFunction)
+            'simpleeval',  # Serialization of transforms (TransformedVar)
         ],
         'utils': [
             'IPython',
