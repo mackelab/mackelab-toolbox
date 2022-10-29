@@ -1729,22 +1729,25 @@ class GitSHA:
             To not display any time at all, use an empty string.
             Default format is ``2000-12-31``.
         """
-        # Set attributes that should always work (don't depend on repo)
+        ## Set attributes that should always work (don't depend on repo)
         if datefmt:
             self.timestamp = datetime.now().strftime(datefmt)
         else:
             self.timestamp = ""
+        if show_hostname:
+            self.hostname = gethostname()
+        else:
+            self.hostname = ""
+        ## Set attributes that depend on repository
         # Try to load repository
+        if git is None:
+            # TODO?: Add to GitSHA a message saying that git python package is not installed ?
+            return
         try:
             repo = git.Repo(search_parent_directories=True)
         except git.InvalidGitRepositoryError:
             # Skip initialization of repo attributes and use defaults
             return
-        if show_hostname:
-            self.hostname = gethostname()
-        else:
-            self.hostname = ""
-        # Set attributes that depend on repository
         self.repo = repo
         self.sha = sha_prefix+repo.head.commit.hexsha[:nchars]
         if show_path.lower() == 'full':

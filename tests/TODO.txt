@@ -1,0 +1,1 @@
+- Test GitSHA, both within a repo and outside a repo
