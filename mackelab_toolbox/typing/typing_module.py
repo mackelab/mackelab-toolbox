@@ -1438,163 +1438,167 @@ typing.add_json_encoder(np.random.RandomState, RandomState.json_encoder)
 # ####
 # SciPy statistical distributions
 
-import scipy as sp
-import scipy.stats
+try:
+    import scipy as sp
+    import scipy.stats
+except ModuleNotFoundError:
+    pass
+else:
 
-# FIXME: Is there a public name for frozen data types ?
-RVFrozen = sp.stats._distn_infrastructure.rv_frozen
-MvRVFrozen = sp.stats._multivariate.multi_rv_frozen
-MvNormalFrozen = sp.stats._multivariate.multivariate_normal_frozen
-# List of modules searched for distribution names; precedence is given to
-# modules earlier in the list
-stat_modules = [sp.stats]
+    # FIXME: Is there a public name for frozen data types ?
+    RVFrozen = sp.stats._distn_infrastructure.rv_frozen
+    MvRVFrozen = sp.stats._multivariate.multi_rv_frozen
+    MvNormalFrozen = sp.stats._multivariate.multivariate_normal_frozen
+    # List of modules searched for distribution names; precedence is given to
+    # modules earlier in the list
+    stat_modules = [sp.stats]
 
-# Making an ABC allows to declare subclasses with @Distribution.register
-class Distribution(abc.ABC):
-    """
-    Pydantic-aware type for SciPy _frozen_ distributions. A frozen distribution
-    is one for which the parameters (like `loc` and `scale`) are fixed.
-    """
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate_dispatch
-
-    @classmethod
-    def validate_dispatch(cls, v):
+    # Making an ABC allows to declare subclasses with @Distribution.register
+    class Distribution(abc.ABC):
         """
-        Find the correct distribution class by inspecting the modules in
-        `stat_modules`, and call its `validate` method on `v`.
-        If the distribution class does not define `validate`, use
-        `Distribution.default_validate`.
-
-        .. Note:: Since  `default_validate` works with all standard scipy.stats
-           distributions, it is rarely needed to define custom `validate`
-           methods.
+        Pydantic-aware type for SciPy _frozen_ distributions. A frozen distribution
+        is one for which the parameters (like `loc` and `scale`) are fixed.
         """
-        if isinstance(v, (RVFrozen, MvRVFrozen)):
-            # Already a frozen dist; nothing to do
-            return v
-        elif isinstance(v, (sp.stats._distn_infrastructure.rv_generic,
-                            sp.stats._multivariate.multi_rv_generic)):
-            raise TypeError("`Distribution` expects a frozen random variable; "
-                            f"received '{v}' with unspecified parameters.")
-        elif typing.json_like(v, "Distribution"):
+        @classmethod
+        def __get_validators__(cls):
+            yield cls.validate_dispatch
+
+        @classmethod
+        def validate_dispatch(cls, v):
+            """
+            Find the correct distribution class by inspecting the modules in
+            `stat_modules`, and call its `validate` method on `v`.
+            If the distribution class does not define `validate`, use
+            `Distribution.default_validate`.
+
+            .. Note:: Since  `default_validate` works with all standard scipy.stats
+               distributions, it is rarely needed to define custom `validate`
+               methods.
+            """
+            if isinstance(v, (RVFrozen, MvRVFrozen)):
+                # Already a frozen dist; nothing to do
+                return v
+            elif isinstance(v, (sp.stats._distn_infrastructure.rv_generic,
+                                sp.stats._multivariate.multi_rv_generic)):
+                raise TypeError("`Distribution` expects a frozen random variable; "
+                                f"received '{v}' with unspecified parameters.")
+            elif typing.json_like(v, "Distribution"):
+                dist = None
+                for module in stat_modules:
+                    dist = getattr(module, v[1], None)
+                    if dist:
+                        break
+                if dist is None:
+                    raise ValueError(f"Unable to deserialize distribution '{v[1]}': "
+                                     "unrecognized distribution name.")
+                if hasattr(dist, 'validate'):
+                    return dist.validate(v)
+                else:
+                    return cls.default_validate(v)
+            else:
+                v_s = str(v)
+                if len(v_s) > 50:
+                    v_s = v_s[:49] + '…'
+                raise TypeError(f"Value `{v_s}` is neither a distribution object "
+                                "nor a recognized serialization of a distribution object.")
+
+        @classmethod
+        def default_validate(cls, v):
             dist = None
             for module in stat_modules:
                 dist = getattr(module, v[1], None)
                 if dist:
                     break
-            if dist is None:
-                raise ValueError(f"Unable to deserialize distribution '{v[1]}': "
-                                 "unrecognized distribution name.")
-            if hasattr(dist, 'validate'):
-                return dist.validate(v)
+            assert dist is not None
+            if len(v) > 5 or len(v) < 4:
+                logger.warning("Malformed serialization: Serialized Distribution "
+                               f"expects 4 or 5 fields; received {len(v)}.")
+            if len(v) == 5:
+                rng_state = v[4]
+                if typing.json_like(rng_state, "RandomState"):
+                    rng_state = RandomState.validate(rng_state)
+                elif typing.json_like(rng_state, "RNGenerator"):
+                    rng_state = RNGenerator.validate(rng_state)
             else:
-                return cls.default_validate(v)
-        else:
-            v_s = str(v)
-            if len(v_s) > 50:
-                v_s = v_s[:49] + '…'
-            raise TypeError(f"Value `{v_s}` is neither a distribution object "
-                            "nor a recognized serialization of a distribution object.")
-
-    @classmethod
-    def default_validate(cls, v):
-        dist = None
-        for module in stat_modules:
-            dist = getattr(module, v[1], None)
-            if dist:
-                break
-        assert dist is not None
-        if len(v) > 5 or len(v) < 4:
-            logger.warning("Malformed serialization: Serialized Distribution "
-                           f"expects 4 or 5 fields; received {len(v)}.")
-        if len(v) == 5:
-            rng_state = v[4]
-            if typing.json_like(rng_state, "RandomState"):
-                rng_state = RandomState.validate(rng_state)
-            elif typing.json_like(rng_state, "RNGenerator"):
-                rng_state = RNGenerator.validate(rng_state)
-        else:
-            rng_state = None
-        kwds = v[3]
-        if not isinstance(kwds, dict):
-            raise TypeError("The fourth field of a serialized Distribution "
-                            f"should be a dictionary; received {type(kwds)}.")
-        kwds = {k: Array.validate(v) if typing.json_like(v, "Array") else v
-                for k, v in kwds.items()}
-        args = v[2]
-        if not isinstance(args, Sequence):
-            raise TypeError("The third field of a serialized Distribution "
-                            f"should be a tuple or list; received {type(kwds)}.")
-        args = [Array.validate(v) if typing.json_like(v, "Array") else v
-                for v in args]
-        # Special case for mixture distribution: all recursive deserialization
-        for key, val in kwds.items():
-            if key == 'dists':
-                if isinstance(val, Iterable):
-                    kwds[key] = [Distribution.validate_dispatch(dist)
-                                 if typing.json_like(dist, "Distribution")
-                                 else dist
-                                 for dist in val]
-                else:
-                    # There should not be a code path which leads here,
-                    # but if one _did_ exist, this seems the most reasonable
-                    kwds[key] = (Distribution.validate_dispatch(val)
-                                 if typing.json_like(dist, "Distribution")
-                                 else dist)
-        # Special case for distributions as arguments (e.g. transformed)
-        # (Could this be combined with the special case for mixtures ?)
-        for i, arg in enumerate(args[:]):
-            if typing.json_like(arg, "Distribution"):
-                args[i] = Distribution.validate_dispatch(arg)
-        for key, val in kwds.items():
-            if typing.json_like(val, "Distribution"):
-                kwds[key] = Distribution.validate_dispatch(val)
-        # Finally, reconstruct the serialized distribution
-        frozen_dist = dist(*args, **kwds)
-        frozen_dist.random_state = rng_state
-            # The random state is actually tied to the internal, non-frozen dist object, but we can ignore that for our purposes
-        return frozen_dist
+                rng_state = None
+            kwds = v[3]
+            if not isinstance(kwds, dict):
+                raise TypeError("The fourth field of a serialized Distribution "
+                                f"should be a dictionary; received {type(kwds)}.")
+            kwds = {k: Array.validate(v) if typing.json_like(v, "Array") else v
+                    for k, v in kwds.items()}
+            args = v[2]
+            if not isinstance(args, Sequence):
+                raise TypeError("The third field of a serialized Distribution "
+                                f"should be a tuple or list; received {type(kwds)}.")
+            args = [Array.validate(v) if typing.json_like(v, "Array") else v
+                    for v in args]
+            # Special case for mixture distribution: all recursive deserialization
+            for key, val in kwds.items():
+                if key == 'dists':
+                    if isinstance(val, Iterable):
+                        kwds[key] = [Distribution.validate_dispatch(dist)
+                                     if typing.json_like(dist, "Distribution")
+                                     else dist
+                                     for dist in val]
+                    else:
+                        # There should not be a code path which leads here,
+                        # but if one _did_ exist, this seems the most reasonable
+                        kwds[key] = (Distribution.validate_dispatch(val)
+                                     if typing.json_like(dist, "Distribution")
+                                     else dist)
+            # Special case for distributions as arguments (e.g. transformed)
+            # (Could this be combined with the special case for mixtures ?)
+            for i, arg in enumerate(args[:]):
+                if typing.json_like(arg, "Distribution"):
+                    args[i] = Distribution.validate_dispatch(arg)
+            for key, val in kwds.items():
+                if typing.json_like(val, "Distribution"):
+                    kwds[key] = Distribution.validate_dispatch(val)
+            # Finally, reconstruct the serialized distribution
+            frozen_dist = dist(*args, **kwds)
+            frozen_dist.random_state = rng_state
+                # The random state is actually tied to the internal, non-frozen dist object, but we can ignore that for our purposes
+            return frozen_dist
 
 
-    @classmethod
-    def __modify_schema__(cls, field_schema):
-        field_schema.update(type='array',
-                            items=[{'type': 'string'},
-                                   {'type': 'string'},  # dist name
-                                   {'type': 'array'},   # dist args
-                                   {'type': 'array'},   # dist kwds
-                                   {'type': 'array'}    # random state (optional) Accepted: int, old RandomState, new RNGenerator
-                                   ])
+        @classmethod
+        def __modify_schema__(cls, field_schema):
+            field_schema.update(type='array',
+                                items=[{'type': 'string'},
+                                       {'type': 'string'},  # dist name
+                                       {'type': 'array'},   # dist args
+                                       {'type': 'array'},   # dist kwds
+                                       {'type': 'array'}    # random state (optional) Accepted: int, old RandomState, new RNGenerator
+                                       ])
 
-    @staticmethod
-    def json_encoder_RVFrozen(v, include_rng_state=True):
-        if v.args:
-            logger.warning(
-                "For the most consistent and reliable serialization of "
-                "distributions, consider specifying them using only keyword "
-                f"parameters. Received for distribution {v.dist.name}:\n"
-                f"Positional args: {v.args}\nKeyword args: {v.kwds}")
-        random_state = v.dist._random_state if include_rng_state else None
-        return ("Distribution", v.dist.name, v.args, v.kwds, random_state)
-    @staticmethod
-    def json_encoder_MvRVFrozen(v, include_rng_state=True):
-        # We need to special case multivariate distributions, because they follow
-        # a different convention (and don't have a standard 'kwds' attribute)
-        dist = v._dist
-        if isinstance(v, MvNormalFrozen):
-            name = "multivariate_normal"
-            args = ()
-            kwds = dict(mean=v.mean, cov=v.cov)
-        else:
-            raise ValueError(
-                "The json_encoder for `Distribution` needs to be special "
-                "cased for each multivariate distribution, and this has "
-                f"not yet been done for '{dist}'.")
-        random_state = dist._random_state if include_rng_state else None
-        return ("Distribution", name, args, kwds, random_state)
+        @staticmethod
+        def json_encoder_RVFrozen(v, include_rng_state=True):
+            if v.args:
+                logger.warning(
+                    "For the most consistent and reliable serialization of "
+                    "distributions, consider specifying them using only keyword "
+                    f"parameters. Received for distribution {v.dist.name}:\n"
+                    f"Positional args: {v.args}\nKeyword args: {v.kwds}")
+            random_state = v.dist._random_state if include_rng_state else None
+            return ("Distribution", v.dist.name, v.args, v.kwds, random_state)
+        @staticmethod
+        def json_encoder_MvRVFrozen(v, include_rng_state=True):
+            # We need to special case multivariate distributions, because they follow
+            # a different convention (and don't have a standard 'kwds' attribute)
+            dist = v._dist
+            if isinstance(v, MvNormalFrozen):
+                name = "multivariate_normal"
+                args = ()
+                kwds = dict(mean=v.mean, cov=v.cov)
+            else:
+                raise ValueError(
+                    "The json_encoder for `Distribution` needs to be special "
+                    "cased for each multivariate distribution, and this has "
+                    f"not yet been done for '{dist}'.")
+            random_state = dist._random_state if include_rng_state else None
+            return ("Distribution", name, args, kwds, random_state)
 
-typing.Distribution = Distribution
-typing.add_json_encoder(RVFrozen, Distribution.json_encoder_RVFrozen)
-typing.add_json_encoder(MvRVFrozen, Distribution.json_encoder_MvRVFrozen)
+    typing.Distribution = Distribution
+    typing.add_json_encoder(RVFrozen, Distribution.json_encoder_RVFrozen)
+    typing.add_json_encoder(MvRVFrozen, Distribution.json_encoder_MvRVFrozen)
