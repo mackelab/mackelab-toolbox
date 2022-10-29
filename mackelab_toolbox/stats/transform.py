@@ -243,7 +243,7 @@ class transformed(rv_generic):
         if monotone in ["both", "neither"]:
             # Purposely undocumented synonyms for "no"
             monotone = "no"
-        elif monotone not in ["increasing", "decreasing", "no"]:
+        elif monotone not in {"increasing", "decreasing", "no"}:
             raise ValueError("'monotone' argument must be either 'increasing', "
                              f"'decreasing' or 'no'. Received '{monotone}'.")
         self.xrv = xrv
@@ -271,8 +271,14 @@ class transformed(rv_generic):
         return self.xrv.shapes
     @property
     def a(self):
+        monotone = self.monotone
+        if monotone not in {"increasing", "decreasing"}:
+            raise NotImplementedError("`a` bound cannot be computed for non-monotone transformations.")
         with catch_warnings(record=True) as warn_list:
-            res = self.map(self.xrv.a)
+            if monotone == "increasing":
+                res = self.map(self.xrv.a)
+            else:
+                res = self.map(self.xrv.b)
         if warn_list:
             warn_plural = f"{'s' if len(warn_list) > 1 else ''}"
             # NB: w.message is a Warning object, not a string. Using `repr` instead of `str` would also show warning type.
@@ -292,8 +298,14 @@ class transformed(rv_generic):
         return res
     @property
     def b(self):
+        monotone = self.monotone
+        if monotone not in {"increasing", "decreasing"}:
+            raise NotImplementedError("`a` bound cannot be computed for non-monotone transformations.")
         with catch_warnings(record=True) as warn_list:
-            res = self.map(self.xrv.b)
+            if monotone == "increasing":
+                res = self.map(self.xrv.b)
+            else:
+                res = self.map(self.xrv.a)
         if warn_list:
             warn_plural = f"{'s' if len(warn_list) > 1 else ''}"
             # NB: w.message is a Warning object, not a string. Using `repr` instead of `str` would also show warning type.
