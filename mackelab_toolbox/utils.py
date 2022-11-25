@@ -1759,10 +1759,12 @@ class GitSHA:
         else:
             raise ValueError("Argument `show_path` should be one of "
                              "'full', 'stem', or 'none'")
+        self.branch = ""
         if show_branch:
-            self.branch = repo.active_branch.name
-        else:
-            self.branch = ""
+            try:
+                self.branch = repo.active_branch.name
+            except TypeError:  # Can happen if on a detached head
+                pass
 
     def __str__(self):
         return " ".join((s for s in (self.timestamp, self.hostname, self.path, self.branch, self.sha)
