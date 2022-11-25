@@ -101,7 +101,7 @@ setup(
         'utils': [
             'IPython',
             'pygments',
-            'termcolor'  # Optional dependency for TimeThis
+            'termcolor',  # Optional dependency for TimeThis
             'simpleeval'  # Dependency for total_size_handler
         ],
         'dev': [  # Extra dependencies only required for tests or docs; NOT included in 'all'
