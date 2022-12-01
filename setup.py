@@ -22,7 +22,7 @@ setup(
     # SOLUTION: All dependencies are specified as 'extras', so one can install
     # based on what the toolbox will be used for:
     # >>> pip install[iotools, plotting]
-    # The usual 'all' extra, which is especially useful for testing.
+    # The usual 'all' extra is the union of all contexts except 'dev'.
     install_requires=[
     ],
 

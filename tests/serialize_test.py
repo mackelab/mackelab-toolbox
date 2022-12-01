@@ -54,6 +54,50 @@ def test_function_serialization():
     booλs = Foo.parse_raw(fooλs.json())
     booλt = Foo.parse_raw(fooλt.json())
 
+def test_purefunction_serialization():
+    from functools import partial
+    from mackelab_toolbox.typing import PureFunction
+    from mackelab_toolbox.serialize import config, serialize_function
+    config.trust_all_inputs = True
+
+    def func(a, b):
+        return a**b
+
+    purefunc = PureFunction(func)
+    purepartialfunc = PureFunction(partial(func, b=2))
+    purepartialpurefunc = PureFunction(partial(purefunc, b=2))
+
+    class Foo(BaseModel):
+        class Config:
+            json_encoders = {PureFunction: PureFunction.json_encoder}
+        f: PureFunction
+
+    # Plain function serialization
+    # Users should not use `serialize_function` directly, but PureFunction
+    assert serialize_function(func) == "def func(a, b):\n    return (a ** b)"
+
+    # Serialization of PureFunction's with Pydantic
+    # This uses `serialize_function` for the function itself, and saves some additional metadata.
+    foo = Foo(f=func)
+    foo2 = Foo.parse_raw(foo.json())
+    assert foo2.json() == foo.json()
+    assert foo2.f(4.1, 3) == foo.f(4.1, 3)
+
+    foo = Foo(f=purefunc)
+    foo2 = Foo.parse_raw(foo.json())
+    assert foo2.json() == foo.json()
+    assert foo2.f(4.1, 3) == foo.f(4.1, 3)
+
+    foo = Foo(f=purepartialfunc)
+    foo2 = Foo.parse_raw(foo.json())
+    assert foo2.json() == foo.json()
+    assert foo2.f(4.1) == foo.f(4.1)
+
+    foo = Foo(f=purepartialpurefunc)
+    foo2 = Foo.parse_raw(foo.json())
+    assert foo2.json() == foo.json()
+    assert foo2.f(4.1) == foo.f(4.1)
+
 def test_numpy_serialization():
     # TODO: Validators should allow DOWNcasting instead of upcasting
     #       Logic: If a model requires 32-bit and downcasts a 64-bit, it will

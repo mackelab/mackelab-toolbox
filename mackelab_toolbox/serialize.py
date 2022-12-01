@@ -92,11 +92,15 @@ def serialize_function(f):
     user is responsible for ensuring any names referred to within the function
     body are available in the decoder's scope.
     """
+    from .typing import PureFunction  # NB: If this was in the same module as PureFunction, we could put the import at the top
+
     if f in operator.__dict__.values():
         "Special case serializing builtin functions"
         return f"operator.{f.__name__}"
     elif hasattr(f, '__func_src__'):
         return f.__func_src__
+    elif isinstance(f, PureFunction):
+        return f  # Should be serialized by Pydantic
     elif isinstance(f, FunctionType):
         s = remove_comments(inspect.getsource(f))
         decorator_lines, s = split_decorators(s)
