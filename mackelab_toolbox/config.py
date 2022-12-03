@@ -28,6 +28,7 @@ Within MyPackage/config.py, one then does something like
         path_default_config=root/".project-default.cfg",
         package_name       ="MyPackage")
 """
+import os
 from pathlib import Path
 from typing import Optional, Union, ClassVar
 import logging
@@ -40,6 +41,13 @@ import textwrap
 from .utils import Singleton  # Ensure only one Config instance
 
 logger = logging.getLogger(__name__)
+
+def prepend_rootdir(val, values):
+    if isinstance(val, Path) and not val.is_absolute():
+        rootdir = values.get("rootdir")
+        if rootdir:
+            val = rootdir/val
+    return val
 
 # TODO: Make Config classes Singletons
 class ValidatingConfigMeta(ModelMetaclass):
@@ -112,6 +120,22 @@ class ValidatingConfigMeta(ModelMetaclass):
             if new_nm != nm:  # Ensure we aren't overwriting the type
                 annotations[nm] = newT
 
+
+        # # Add the `prepend_rootdir` validator to all fields with a `Path` type
+        # if new_namespace.get("make_paths_absolute", True):
+
+        #     path_fields = [field_name for field_name, ann in annotations.items()
+        #                    if Path in getattr(ann, "__args__", [ann]) # This condition works with two types of annotations `Path` and `Union[Path, ...]`
+        #                       and field_name != "rootdir"]
+        #     if path_fields and "prepend_rootdir" not in new_namespace:
+        #         # NB: Put the validator at the top, so it has precedence over all other (non-pre) ones
+        #         #     This way all validators get absolute file paths, unless they specify `pre=True`.
+        #         new_namespace = {"prepend_rootdir": validator(*path_fields, allow_reuse=True)(prepend_rootdir),
+        #                          **new_namespace}
+
+        # if "prepend_rootdir" in new_namespace:
+        #     print(new_namespace)
+        #     breakpoint()
         return super().__new__(metacls, cls, bases,
                                {**new_namespace, **new_nested_classes,
                                 '__annotations__': annotations})
@@ -125,11 +149,25 @@ class ValidatingConfigBase(BaseModel, metaclass=ValidatingConfigMeta):
     # Used for passing arguments to validators -- use names that won’t cause conflicts
     make_paths_absolute: ClassVar[bool]=True
 
-    rootdir: Path
+    rootdir: Optional[Path]
 
     class Config:
         validate_all = True  # To allow specifying defaults with as little boilerplate as possible
                              # E.g. without this, we would need to write `mypath: Path=Path("the/path")`
+
+    def __init__(self, *, rootdir, **cfdict):
+        # Convert dotted sections to nested dicts
+        # We do one level here; recursion takes care of nested levels 
+        tomove = []
+        for section in cfdict:
+            if "." in section:
+                section_, subsection = section.split(".", 1)
+                if section_ in cfdict and subsection not in cfdict[section_]:
+                    tomove.append((section_, subsection))
+        for section_, subsection in tomove:
+            cfdict[section_][subsection] = cfdict[f"{section_}.{subsection}"]
+            del cfdict[f"{section_}.{subsection}"]
+        super().__init__(rootdir=rootdir, **cfdict)
 
     @validator("*", pre=True)
     def pass_rootdir(cls, val, values, field):
@@ -141,23 +179,25 @@ class ValidatingConfigBase(BaseModel, metaclass=ValidatingConfigMeta):
                 val["rootdir"] = cur_rootdir
         return val
 
-    # Normally it would make more sense to use pre=False; then we can just
-    # check if Pydantic converted the value to a `Path`.
-    # However, because "*" validators have lower precedence, any validator
-    # in the Config class would get the non-prepended path.
-    # By passing pre=True and doing the cast to Path ourselves, we allow
-    # users to define validators which receive the absolute path.
-    @validator("*", pre=True)
-    def prepend_rootdir(cls, val, values, field):
-        # This condition works with two types of annotations `Path` and `Union[Path, ...]`
-        if Path in getattr(field.type_, "__args__", [field.type_]):
-            if not isinstance(val, Path):
-                val = Path(val)
-            if cls.make_paths_absolute and not val.is_absolute():
-                rootdir = values.get("rootdir")
-                if rootdir:
-                    val = rootdir/val
-        return val
+    # # Normally it would make more sense to use pre=False; then we can just
+    # # check if Pydantic converted the value to a `Path`.
+    # # However, because "*" validators have lower precedence, any validator
+    # # in the Config class would get the non-prepended path.
+    # # By passing pre=True and doing the cast to Path ourselves, we allow
+    # # users to define validators which receive the absolute path.
+    # # !! FIXME !!: This "works" with `Union[Path,...]` by coercing to Path.
+    # #              In other words, you might as well use the type `Path`.
+    # @validator("*", pre=True)
+    # def prepend_rootdir(cls, val, values, field):
+    #     # This condition works with two types of annotations `Path` and `Union[Path, ...]`
+    #     if Path in getattr(field.type_, "__args__", [field.type_]):
+    #         if not isinstance(val, Path):
+    #             val = Path(val)
+    #         if cls.make_paths_absolute and not val.is_absolute():
+    #             rootdir = values.get("rootdir")
+    #             if rootdir:
+    #                 val = rootdir/val
+    #     return val
 
 # TODO: Make this work with metaclass=Singleton
 class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
@@ -204,43 +244,66 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
                   projectdir: Path
 
               path : pathsType
-    - A `rootdir` field is added to all auto-generated `ValidatingConfigBase`
-      nested classes, and its default value is set to that of the parent.
+    - The user configuration file is found by searching upwards from the current
+      directory for a file matching the value of `Config.user_config_filename`
+      (default: "project.cfg")
+    - The `rootdir` value is the path of the directory containing the user config.
     - All arguments of type `Path` are made absolute by prepending `rootdir`.
       Unless they already are absolute, or the class variable
       `make_paths_absolute` is set to `False`.
+      !! NOT CURRENTLY TRUE !!: For reasons I don’t yet understandand, the
+      mechanism to do this adds the correct validator, but it isn’t executed.
+      For the moment, please import the `prepend_rootdir` function and apply it
+      (wrapping with ``validator(field)(prepend_rootdir)`` to all relevant fields.
+    - A `rootdir` field is added to all auto-generated `ValidatingConfigBase`
+      nested classes, and its default value is set to that of the parent.
+
+    Inside config/__init__.py, one would have:
+
+        config = Config(Path(__file__)/".project-defaults.cfg" 
     """
     # rootdir: Path
 
     package_name: ClassVar[str]
 
-    path_default_config: Path="config/.project-defaults.cfg"  # Rel path => prepended with rootdir
-    path_user_config: Path="../project.cfg"  # Rel path => prepended with rootdir
+    #path_default_config: Path="config/.project-defaults.cfg"  # Rel path => prepended with rootdir
+    #path_user_config: Path="../project.cfg"  # Rel path => prepended with rootdir
+    user_config_filename: ClassVar[str]="project.cfg"  # Searched for, starting from CWD
 
     top_message_default: ClassVar = """
-        # This configuration file is excluded from git, and so can be used to
-        # configure machine-specific variables.
+        # This configuration file for '{package_name}' is excluded from git, 
+        # and so can be used to configure machine-specific variables.
         # This can be used for example to set output paths for figures, or to set
         # flags (e.g. using GPU or not).
         # Default values are listed below; uncomment and edit as needed.
         #
-        # Within scripts, these values are stored in the object `statGLOW.config`.
-        # Adding a new config field is done by modifying the file `statGLOW/config.py`.
+        # Adding a new config field is done by modifying the config module `{config_module_name}`.
         
         """
 
     # NB: It would be nicer to use Pydantic mechanisms to deal with the defaults for
     #     path arguments. But that would require also implementing `ensure_user_config`
     #     as a validator – not sure that would actually be simpler
-    def __init__(self, rootdir: Union[str,Path],
-                 path_default_config=None, path_user_config=None,
-                 *, make_paths_absolute: bool=True, interpolation=None,
-                 **kwargs):
+    def __init__(self,
+                 default_config_file: Union[str,Path],
+                 cwd: Union[None,str,Path]=None,
+                 # rootdir: Union[str,Path],
+                 # path_default_config=None, path_user_config=None,
+                 *,
+                 interpolation=None, empty_lines_in_values=False,
+                 config_module_name: Optional[str]=None,
+                 **kwargs
+                 ):
         """
         Instantiate a `Config` instance, reading from both the default and
         user config files.
         If the user-editable config file does not exist yet, an empty one
-        with instructions is created.
+        with instructions is created, at the root directory of the version-
+        controlled repository. If there are multiple nested repositories, the
+        outer one is used (logic: one might have a code repo outside a project
+        repo; this should go in the project repo). If no repository is found,
+        no template config file is created.
+
 
         See also `ValidatingConfig.ensure_user_config_exists`.
         
@@ -248,51 +311,70 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
         ----------
         rootdir: By default, all relative paths are prepended with `rootdir`.
             This is the location 
-        make_paths_absolute: If true (default), all values of type 'Path'
-            are prepended with `rootdir`, unless they are already absolute.
         interpolation: Passed as argument to ConfigParser. Default is
             ExtendedInterpolation(). (Note that, as with ConfigParser, an
             *instance* must be passed.)
+        empty_lines_in_values: Passed as argument to ConfigParser. Default is
+            True: this prevents multiline values with empty lines, but makes
+            it much easier to indent without accidentally concatenating values.
+        config_module_name: The value of __name__ when called within the
+            project’s configuration module. Used for autogenerated instructions.
+        **kwargs:
+            Additional keyword arguments are passed to ConfigParser.
         """
-        paths = dict(path_default_config = path_default_config,
-                     path_user_config = path_user_config)
-        # Make paths absolute
-        for nm in ("path_default_config", "path_user_config"):
-            path = paths[nm] or self.__fields__[nm].default
-            path = Path(path)
-            if make_paths_absolute and not path.is_absolute():
-                path = rootdir/path
-            paths[nm] = path
+        ## Search for `project.cfg` file in the current directory and its parents ##
+        # If no project config is found, create one in the location documented above
+        if cwd is None:
+            cwd = Path(os.getcwd())
+        default_location_for_conffile = None  # Will be set the first time we find a .git folder
+        conffile = self.user_config_filename
+       
+        wdfiles = set(os.listdir(cwd))
+        if conffile in wdfiles:
+            rootdir = cwd
+        else:
+            if {".git", ".hg", ".svn"} & wdfiles:
+                default_location_for_conffile = cwd/conffile
+            for wd in cwd.parents:
+                wdfiles = set(os.listdir(wd))
+                if conffile in wdfiles:
+                    rootdir = wd
+                    break
+                elif {".git", ".hg", ".svn"} & wdfiles: #and not default_location_for_conffile:
+                    default_location_for_conffile = wd/conffile
+            else:
+                logger.warning(f"Could not find a file '{conffile}' in '{cwd}' or its parents.")
+                rootdir = None
 
         # Read the config file(s)
         if interpolation is None: interpolation = ExtendedInterpolation() 
-        cfp = ConfigParser(interpolation=interpolation)
-        cfp.read_file(open(paths["path_default_config"]))
-        cfp.read(paths["path_user_config"])
+        cfp = ConfigParser(interpolation=interpolation,
+                           empty_lines_in_values=empty_lines_in_values,
+                           **kwargs)
+        with open(default_config_file) as f:
+            cfp.read_file(f)
 
-        # Parse cfp as dict; dotted sections become nested dicts
-        # TODO: Support more than one level of nesting
+        if rootdir:
+            cfp.read(rootdir/conffile)
+        elif default_location_for_conffile is not None:
+            # We didn’t find a project config file, but we did find that
+            # we are inside a VC repo => place config file at root of repo
+            # `ensure_user_config_exists` creates a config file from the
+            # defaults file, listing all default values (behind comments),
+            # and adds basic instructions and the default option values
+            self.ensure_user_config_exists(
+                default_config_file, default_location_for_conffile,
+                self.package_name, config_module_name, kwargs)
+        else:
+            logger.error(f"The provided current workding directory ('{cwd}') "
+                         "is not part of a version controlled repository.")
+
+        # Convert cfp to a dict; this loses the 'defaults' functionality, but makes
+        # it much easier to support validation and nested levels
         cfdict = {section: dict(values) for section, values in cfp.items()}
-        tomove = []
-        for section in cfdict:
-            if "." in section:
-                section_, subsection = section.split(".", 1)
-                if section_ in cfdict and subsection not in cfdict[section_]:
-                    tomove.append((section_, subsection))
-        for section_, subsection in tomove:
-            cfdict[section_][subsection] = cfdict[f"{section_}.{subsection}"]
-            del cfdict[f"{section_}.{subsection}"]
 
-        # Create user config file if it doesn't exist yet
-        # The file documents basic instructions and the default option values
-        self.ensure_user_config_exists(
-            paths['path_default_config'], paths['path_user_config'],
-            self.package_name, **kwargs)
-
-        # Instantiate the Config instance, using values read into `cfp`
-        super().__init__(rootdir=rootdir, **paths, **cfdict)
-        # if make_paths_absolute:
-        #     prepend_root_to_relpaths(rootdir, self)
+        # Use Pydantic to validate the values read into `cfp`
+        super().__init__(rootdir=rootdir, **cfdict)
 
     def ensure_user_config_exists(
         self,
@@ -300,10 +382,14 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
         path_user_config: Union[str,Path],
         package_name: str,
         config_module_name: str="config",
-        top_message: Optional[str]=None,
         ):
         """
         If the user-editable config file does not exist, create it.
+
+        Basic instructions are added as a comment to the top of the file.
+        Their content is determined by the class variable `top_message_default`.
+        Two variables are available for substitution into this message:
+        `package_name` and `config_module_name`.
 
         Parameters
         ----------
@@ -315,13 +401,10 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
             Only used for the top message.
         package_name: The name of the package using the config object.
             Only used for the top message.
-        top_message: Message to display at the top of the user config file, when it
-            is created. `textwrap.dedent` is called on the value after removing
-            initial newlines.
-            Accepts two variables for substitution:
-            `package_name` and `config_module_name`.
+        config_module_name: String which may optionally used for substitution
+            in `self.top_message_default`.
         """
-        if top_message is None: top_message = self.top_message_default
+        top_message = self.top_message_default
         # Remove any initial newlines from `top_message`
         for i, c in enumerate(top_message):
             if c != "\n":
