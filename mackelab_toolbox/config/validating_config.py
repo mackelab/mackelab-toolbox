@@ -10,9 +10,9 @@ Within MyPackage/config.py, one then does something like
 
     from pathlib import Path
     from pydantic import BaseModel
-    from mackelab_toolbox.config import ProjectConfig
+    from mackelab_toolbox.config import ValidatingConfig
 
-    class Config(ProjectConfig):
+    class Config(ValidatingConfig):
         class PATH(BaseModel):
             <path param name 1>: <type 1>
             <path param name 2>: <type 2>
@@ -27,10 +27,13 @@ Within MyPackage/config.py, one then does something like
         path_user_config   =root/"project.cfg",
         path_default_config=root/".project-default.cfg",
         package_name       ="MyPackage")
+
+(c) Alexandre René 2022-2023
+https://github.com/mackelab/mackelab-toolbox/tree/master/mackelab_toolbox/config
 """
 import os
 from pathlib import Path
-from typing import Optional, Union, ClassVar
+from typing import Optional, Union, ClassVar#, _UnionGenericAlias  >= 3.9
 import logging
 from configparser import ConfigParser, ExtendedInterpolation
 from pydantic import BaseModel, validator
@@ -38,18 +41,8 @@ from pydantic.main import ModelMetaclass
 from pydantic.utils import lenient_issubclass
 import textwrap
 
-from .utils import Singleton  # Ensure only one Config instance
-
 logger = logging.getLogger(__name__)
 
-def prepend_rootdir(val, values):
-    if isinstance(val, Path) and not val.is_absolute():
-        rootdir = values.get("rootdir")
-        if rootdir:
-            val = rootdir/val
-    return val
-
-# TODO: Make Config classes Singletons
 class ValidatingConfigMeta(ModelMetaclass):
     """
     Some class magic with nested types:
@@ -107,7 +100,7 @@ class ValidatingConfigMeta(ModelMetaclass):
             if T.__bases__ == (object,):
                 copied_attrs = {nm: attr for nm, attr in T.__dict__.items()
                                 if nm not in {'__dict__', '__weakref__', '__qualname__', '__name__'}}
-                newT = ModelMetaclass(nm, (ValidatingConfigBase,), copied_attrs)  # TODO?: Use Singleton here? (without causing metaclass conflict…)
+                newT = ValidatingConfigMeta(nm, (ValidatingConfigBase,), copied_attrs)
                 # newT = type(nm, (T,BaseModel), {})  
             else:
                 if not issubclass(T, ValidatingConfigBase):
@@ -120,26 +113,13 @@ class ValidatingConfigMeta(ModelMetaclass):
             if new_nm != nm:  # Ensure we aren't overwriting the type
                 annotations[nm] = newT
 
-
-        # # Add the `prepend_rootdir` validator to all fields with a `Path` type
-        # if new_namespace.get("make_paths_absolute", True):
-
-        #     path_fields = [field_name for field_name, ann in annotations.items()
-        #                    if Path in getattr(ann, "__args__", [ann]) # This condition works with two types of annotations `Path` and `Union[Path, ...]`
-        #                       and field_name != "rootdir"]
-        #     if path_fields and "prepend_rootdir" not in new_namespace:
-        #         # NB: Put the validator at the top, so it has precedence over all other (non-pre) ones
-        #         #     This way all validators get absolute file paths, unless they specify `pre=True`.
-        #         new_namespace = {"prepend_rootdir": validator(*path_fields, allow_reuse=True)(prepend_rootdir),
-        #                          **new_namespace}
-
-        # if "prepend_rootdir" in new_namespace:
-        #     print(new_namespace)
-        #     breakpoint()
         return super().__new__(metacls, cls, bases,
                                {**new_namespace, **new_nested_classes,
                                 '__annotations__': annotations})
 
+
+# Singleton pattern
+_config_instances = {}
 
 class ValidatingConfigBase(BaseModel, metaclass=ValidatingConfigMeta):
     """
@@ -154,52 +134,114 @@ class ValidatingConfigBase(BaseModel, metaclass=ValidatingConfigMeta):
     class Config:
         validate_all = True  # To allow specifying defaults with as little boilerplate as possible
                              # E.g. without this, we would need to write `mypath: Path=Path("the/path")`
+        validate_assignment = True  # E.g. if a field converts str to Path, allow updating values with strings
 
-    def __init__(self, *, rootdir, **cfdict):
-        # Convert dotted sections to nested dicts
-        # We do one level here; recursion takes care of nested levels 
+    ## Singleton pattern ##
+
+    def __new__(cls, *a, **kw):
+        if cls not in _config_instances:
+            _config_instances[cls] = super().__new__(cls)  # __init__ will add this to __instances
+        return _config_instances[cls]
+
+    def __copy__(x):  # Singleton => no copies
+        return x
+    def __deepcopy__(x, memo=None):
+        return x
+
+    ## Initialization ##
+
+    @classmethod
+    def _unflatten_cfdict(cls, cfdict, rootdir=False):
+        """
+        Convert dotted sections to nested dicts in `cfdict`
+        We do one level here; recursion takes care of nested levels 
+
+        Parameters
+        ----------
+            rootdir: If one of the elements of `cfdict` is also initialization
+                data for a ValidatingConfig, and it does not yet contain an
+                `rootdir`, this value is added to those data.
+
+        Note
+        ----
+        `cfdict` is modified in place.
+        """
+
         tomove = []
         for section in cfdict:
             if "." in section:
                 section_, subsection = section.split(".", 1)
-                if section_ in cfdict and subsection not in cfdict[section_]:
-                    tomove.append((section_, subsection))
+                tomove.append((section_, subsection))
         for section_, subsection in tomove:
-            cfdict[section_][subsection] = cfdict[f"{section_}.{subsection}"]
-            del cfdict[f"{section_}.{subsection}"]
+            if section_ not in cfdict:
+                cfdict[section_] = {}
+            else:
+                assert isinstance(cfdict[section_], dict), f"Configuration field '{fieldnm}' should be a dictionary."  # Must be mutable
+            if subsection not in cfdict[section_]:
+                cfdict[section_][subsection] = cfdict[f"{section_}.{subsection}"]
+                del cfdict[f"{section_}.{subsection}"]
+        # Use "one-level-up" as a default value
+        # So if there is no "pckg.colors" section, but there is a "colors" section,
+        # use "colors" for "pckg.colors", if pckg expects that section.
+        for fieldnm, field in cls.__fields__.items():
+            # Having Union[ValidatingConfig, other type(s)] could break the logic of the next test; since we have no use case, just detect, warn and exit
+            # if isinstance(field.type_, _UnionGenericAlias):  ≥3.9
+            if str(field.type_).startswith("typing.Union"):
+                if any((isinstance(T, type) and issubclass(T, ValidatingConfigBase))
+                       for T in field.type_.__args__):
+                    raise TypeError("Using a subclass of `ValidatingConfig` inside a Union is not supported.")
+            elif isinstance(field.type_, type) and issubclass(field.type_, ValidatingConfigBase):
+                if fieldnm not in cfdict:
+                    cfdict[fieldnm] = {}
+                else:
+                    assert isinstance(cfdict[fieldnm], dict), f"Configuration field '{fieldnm}' should be a dictionary."  # Must be mutable
+                subcfdict = cfdict[fieldnm]
+                for subfieldnm, subfield in field.type_.__fields__.items():
+                    if subfieldnm not in subcfdict and subfieldnm in cfdict:
+                        # A field is missing, and a plausible default is available
+                        # QUESTION: Should we make a (deep) copy, in cause two validating configs make conflicting changes ?
+                        subcfdict[subfieldnm] = cfdict[subfieldnm]
+
+                # If we didn’t add anything, remove the blank dictionary
+                if len(cfdict[fieldnm]) == 0:
+                    del cfdict[fieldnm]
+
+                # A ValidatingConfig type requires `rootdir`
+                if rootdir and "rootdir" not in cfdict[fieldnm]:
+                    cfdict[fieldnm]["rootdir"] = rootdir
+
+    def __init__(self, *, rootdir, **cfdict):
+        self._unflatten_cfdict(cfdict, rootdir)
         super().__init__(rootdir=rootdir, **cfdict)
+
+        # # Singleton pattern
+        # ValidatingConfigBase.__instances[type(self)] = self
+
+    def __dir__(self):
+        return list(self.__fields__)
 
     @validator("*", pre=True)
     def pass_rootdir(cls, val, values, field):
         "Pass the value of `rootdir` to nested subclasses"
         if lenient_issubclass(field.type_, ValidatingConfigBase):
             cur_rootdir = values.get("rootdir")
-            if cur_rootdir and isinstance(val, dict) and "rootdir" not in val:
+            if isinstance(val, dict) and "rootdir" not in val:
                 # TODO: Any other types of arguments we should support ?
                 val["rootdir"] = cur_rootdir
         return val
 
-    # # Normally it would make more sense to use pre=False; then we can just
-    # # check if Pydantic converted the value to a `Path`.
-    # # However, because "*" validators have lower precedence, any validator
-    # # in the Config class would get the non-prepended path.
-    # # By passing pre=True and doing the cast to Path ourselves, we allow
-    # # users to define validators which receive the absolute path.
-    # # !! FIXME !!: This "works" with `Union[Path,...]` by coercing to Path.
-    # #              In other words, you might as well use the type `Path`.
-    # @validator("*", pre=True)
-    # def prepend_rootdir(cls, val, values, field):
-    #     # This condition works with two types of annotations `Path` and `Union[Path, ...]`
-    #     if Path in getattr(field.type_, "__args__", [field.type_]):
-    #         if not isinstance(val, Path):
-    #             val = Path(val)
-    #         if cls.make_paths_absolute and not val.is_absolute():
-    #             rootdir = values.get("rootdir")
-    #             if rootdir:
-    #                 val = rootdir/val
-    #     return val
+    @validator("*", pre=True)
+    def reset_default(cls, val, field):
+        """Allow to use defaults in the BaseModel definition.
 
-# TODO: Make this work with metaclass=Singleton
+        Config models can define defaults. To allow config files to specify
+        that we want to use the hardcoded default, we interpret the string value
+        ``"<default>"`` to mean to use the hardcoded default.
+        """
+        if val == "<default>":
+            val = field.default  # NB: If no default is set, this returns `None`
+        return val
+
 class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     """
     Augments Python's ConfigParser with a dataclass interface and automatic validation.
@@ -215,11 +257,22 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
             ├── [code files]
             └── config
                 ├── __init__.py
-                ├── .project-defaults.cfg
+                ├── defaults.cfg
                 └── [other config files]
 
     `ValidatingConfig` should be imported and instantiated from within
-    ``MyPckg.config.__init__.py``.
+    ``MyPckg.config.__init__.py``::
+
+       from pathlib import Path
+       from mackelab_toolbox.config import ValidatingConfig
+
+       class Config(ValidatingConfig):
+           arg1: <type>
+           arg2: <type>
+           ...
+
+       config = Config(Path(__file__).parent/".project-defaults.cfg",
+                       config_module_name=__name__)
 
     `project.cfg` should be excluded by `.gitignore`. This is where users can
     modify values for their local setup. If it does not exist, a template one
@@ -229,6 +282,8 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     There are some differences and magic behaviours compared to a plain
     BaseModel, which help to reduce boilerplate when defining configuration options:
     - Defaults are validated (`validate_all = True`).
+    - Values of ``"<default>"`` are replaced by the hard coded default in the Config
+      definition. (These defaults may be `None`.)
     - Nested plain classes are automatically converted to inherit ValidatingConfigBase,
       and a new attribute of that class type is created. Specifically, if we
       have the following:
@@ -247,6 +302,18 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     - The user configuration file is found by searching upwards from the current
       directory for a file matching the value of `Config.user_config_filename`
       (default: "project.cfg")
+      + If multiple config files are found, **the most global one is used**.
+        The idea of a global config files is to help provide consistency across
+        a document. If a sub project is compiled as part of a larger one, we want
+        to use the larger project's config, which may set things like font
+        sizes and color schemes, for all figures/report pages.
+      + If it is important that particular pages use particular options, the
+        global config file is not the best place to set that. Rather, set
+        those options in the file itself, or a sibling text file.
+    - If a user configuration file is not found, and the argument
+      `ensure_user_config_exists` is `True`, then a new blank configuration file
+      is created at the location we would have expected to find one: inside
+      the nearest parent directory which is a version control repository.
     - The `rootdir` value is the path of the directory containing the user config.
     - All arguments of type `Path` are made absolute by prepending `rootdir`.
       Unless they already are absolute, or the class variable
@@ -265,16 +332,18 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     # rootdir: Path
 
     package_name: ClassVar[str]
+    default_config_file: ClassVar[Union[str,Path]]
+    ensure_user_config_exists: ClassVar[bool]=False  # Set to True to add a template config file when none is found
 
     #path_default_config: Path="config/.project-defaults.cfg"  # Rel path => prepended with rootdir
     #path_user_config: Path="../project.cfg"  # Rel path => prepended with rootdir
     user_config_filename: ClassVar[str]="project.cfg"  # Searched for, starting from CWD
 
     top_message_default: ClassVar = """
-        # This configuration file for '{package_name}' is excluded from git, 
-        # and so can be used to configure machine-specific variables.
-        # This can be used for example to set output paths for figures, or to set
-        # flags (e.g. using GPU or not).
+        # This configuration file for '{package_name}' should be excluded from
+        # git, so that it can be used to configure machine-specific variables.
+        # Typical uses are to set output paths for figures,
+        # or to set flags (e.g. whether using GPU).
         # Default values are listed below; uncomment and edit as needed.
         #
         # Adding a new config field is done by modifying the config module `{config_module_name}`.
@@ -284,13 +353,16 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     # NB: It would be nicer to use Pydantic mechanisms to deal with the defaults for
     #     path arguments. But that would require also implementing `ensure_user_config`
     #     as a validator – not sure that would actually be simpler
+    # TODO: Move all arguments to class variables; match signature of ValidatingConfigBase
     def __init__(self,
-                 default_config_file: Union[str,Path],
+                 # default_config_file: Union[None,str,Path]=None,
                  cwd: Union[None,str,Path]=None,
+                 # ensure_user_config_exists: bool=False,
                  # rootdir: Union[str,Path],
                  # path_default_config=None, path_user_config=None,
                  *,
-                 interpolation=None, empty_lines_in_values=False,
+                 interpolation=None,
+                 empty_lines_in_values=False,
                  config_module_name: Optional[str]=None,
                  **kwargs
                  ):
@@ -309,8 +381,22 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
         
         Parameters
         ----------
-        rootdir: By default, all relative paths are prepended with `rootdir`.
-            This is the location 
+        default_config_file: Path to the config file used for defaults.
+            SPECIAL CASE: If this value is None, then `ValidatingConfig`
+            behaves like `ValidatingConfigBase`: no config file is parsed or
+            created. This is intended for including as a component of a larger
+            ValidatingConfig.
+            The assumption then is that all fields are passed by keywords.
+            NOT TRUE: Currently we do the special case if kwargs is non-empty.
+        cwd: "Current working directory". The search for a config file starts
+            from this directory then walks through the parents. 
+            The value of `None` indicates to use the current working directory;
+            especially if running on a local machine, this is generally what
+            you want, and is usually the most portable.
+        ensure_user_config_exists: Set to true if you want a template config
+            file to be created in a standard location, if no user config file
+            is found.
+        *
         interpolation: Passed as argument to ConfigParser. Default is
             ExtendedInterpolation(). (Note that, as with ConfigParser, an
             *instance* must be passed.)
@@ -318,65 +404,89 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
             True: this prevents multiline values with empty lines, but makes
             it much easier to indent without accidentally concatenating values.
         config_module_name: The value of __name__ when called within the
-            project’s configuration module. Used for autogenerated instructions.
+            project’s configuration module.
+            Used for autogenerated instructions in the template user config file.
+
         **kwargs:
             Additional keyword arguments are passed to ConfigParser.
+
+        Todo
+        ----
+        When multiple config files are present in the hierarchy, combine them.
+        Relative paths in lower config files should still work.
         """
-        ## Search for `project.cfg` file in the current directory and its parents ##
-        # If no project config is found, create one in the location documented above
-        if cwd is None:
-            cwd = Path(os.getcwd())
-        default_location_for_conffile = None  # Will be set the first time we find a .git folder
-        conffile = self.user_config_filename
-       
-        wdfiles = set(os.listdir(cwd))
-        if conffile in wdfiles:
-            rootdir = cwd
-        else:
-            if {".git", ".hg", ".svn"} & wdfiles:
-                default_location_for_conffile = cwd/conffile
-            for wd in cwd.parents:
-                wdfiles = set(os.listdir(wd))
-                if conffile in wdfiles:
-                    rootdir = wd
-                    break
-                elif {".git", ".hg", ".svn"} & wdfiles: #and not default_location_for_conffile:
-                    default_location_for_conffile = wd/conffile
+        # HACK !! : Support for (re)-instantiating a config is ill-defined
+        #           This way we support updating fields is more accidental than intended, so may be fragile
+        if getattr(self, "rootdir", False):  # Hacky way to check if __init__ has already been run on this object
+            # Already initialized; if there are new kwargs, validate them.
+            self._unflatten_cfdict(kwargs)
+            for field, val in kwargs.items():
+                setattr(self, field, val)  # Relies on `validate_assignment = True`
+        elif kwargs:
+            # We have NOT yet initialized, but are passing keyword arguments:
+            # this may happen because of __new__ returning an existing instance,
+            # in which case this __init__ gets executed twice
+            # (self.dict() should be empty, but in general we would do this to avoid overwriting an already set value)
+            super().__init__(**{**self.dict(),**kwargs})
+        else:  # Normal path
+            ## Search for `project.cfg` file in the current directory and its parents ##
+            # If no project config is found, create one in the location documented above
+            if cwd is None:
+                cwd = Path(os.getcwd())
+            default_location_for_conffile = None  # Will be set the first time we find a .git folder
+            conffile = self.user_config_filename
+           
+            wdfiles = set(os.listdir(cwd))
+            if conffile in wdfiles:
+                rootdir = cwd
             else:
-                logger.warning(f"Could not find a file '{conffile}' in '{cwd}' or its parents.")
                 rootdir = None
+                if {".git", ".hg", ".svn"} & wdfiles:
+                    default_location_for_conffile = cwd/conffile
+                for wd in cwd.parents:
+                    wdfiles = set(os.listdir(wd))
+                    if conffile in wdfiles:
+                        rootdir = wd
+                        # break
+                    elif ({".git", ".hg", ".svn"} & wdfiles
+                          and not default_location_for_conffile):
+                        default_location_for_conffile = wd/conffile
 
-        # Read the config file(s)
-        if interpolation is None: interpolation = ExtendedInterpolation() 
-        cfp = ConfigParser(interpolation=interpolation,
-                           empty_lines_in_values=empty_lines_in_values,
-                           **kwargs)
-        with open(default_config_file) as f:
-            cfp.read_file(f)
+                if rootdir is None and self.ensure_user_config_exists:
+                    logger.warning(f"Could not find a file '{conffile}' in '{cwd}' or its parents.")
 
-        if rootdir:
-            cfp.read(rootdir/conffile)
-        elif default_location_for_conffile is not None:
-            # We didn’t find a project config file, but we did find that
-            # we are inside a VC repo => place config file at root of repo
-            # `ensure_user_config_exists` creates a config file from the
-            # defaults file, listing all default values (behind comments),
-            # and adds basic instructions and the default option values
-            self.ensure_user_config_exists(
-                default_config_file, default_location_for_conffile,
-                self.package_name, config_module_name, kwargs)
-        else:
-            logger.error(f"The provided current workding directory ('{cwd}') "
-                         "is not part of a version controlled repository.")
+            # Read the config file(s)
+            if interpolation is None: interpolation = ExtendedInterpolation() 
+            cfp = ConfigParser(interpolation=interpolation,
+                               empty_lines_in_values=empty_lines_in_values,
+                               **kwargs)
+            with open(self.default_config_file) as f:
+                cfp.read_file(f)
 
-        # Convert cfp to a dict; this loses the 'defaults' functionality, but makes
-        # it much easier to support validation and nested levels
-        cfdict = {section: dict(values) for section, values in cfp.items()}
+            if rootdir:
+                cfp.read(rootdir/conffile)
+            elif default_location_for_conffile is not None:
+                if self.ensure_user_config_exists:
+                    # We didn’t find a project config file, but we did find that
+                    # we are inside a VC repo => place config file at root of repo
+                    # `ensure_user_config_exists` creates a config file from the
+                    # defaults file, listing all default values (behind comments),
+                    # and adds basic instructions and the default option values
+                    self.add_user_config_if_missing(
+                        self.default_config_file, default_location_for_conffile,
+                        self.package_name, config_module_name)
+            elif self.ensure_user_config_exists:
+                logger.error(f"The provided current working directory ('{cwd}') "
+                             "is not part of a version controlled repository.")
 
-        # Use Pydantic to validate the values read into `cfp`
-        super().__init__(rootdir=rootdir, **cfdict)
+            # Convert cfp to a dict; this loses the 'defaults' functionality, but makes
+            # it much easier to support validation and nested levels
+            cfdict = {section: dict(values) for section, values in cfp.items()}
 
-    def ensure_user_config_exists(
+            # Use Pydantic to validate the values read into `cfp`
+            super().__init__(rootdir=rootdir, **cfdict)
+
+    def add_user_config_if_missing(
         self,
         path_default_config: Union[str,Path],
         path_user_config: Union[str,Path],
@@ -443,3 +553,22 @@ class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
                                 fout.write(sline)
                             stashed_lines.clear()
                             fout.write("# "+line+"\n")
+            logger.warning(f"A default project config file was created at {path_user_config}.")
+
+
+## Convenience validators ##
+
+import os
+
+def prepend_rootdir(val, values):
+    if isinstance(val, Path) and not val.is_absolute():
+        rootdir = values.get("rootdir")
+        if rootdir:
+            val = rootdir/val
+    return val
+
+def ensure_dir_exists(cls, dirpath):
+    if dirpath:
+        os.makedirs(dirpath, exist_ok=True)
+    return dirpath
+
