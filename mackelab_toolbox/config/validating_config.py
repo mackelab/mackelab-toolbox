@@ -32,14 +32,14 @@ Within MyPackage/config.py, one then does something like
 https://github.com/mackelab/mackelab-toolbox/tree/master/mackelab_toolbox/config
 """
 import os
+import logging
+import textwrap
 from pathlib import Path
 from typing import Optional, Union, ClassVar#, _UnionGenericAlias  >= 3.9
-import logging
 from configparser import ConfigParser, ExtendedInterpolation
 from pydantic import BaseModel, validator
 from pydantic.main import ModelMetaclass
 from pydantic.utils import lenient_issubclass
-import textwrap
 
 logger = logging.getLogger(__name__)
 

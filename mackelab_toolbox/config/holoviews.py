@@ -8,10 +8,8 @@ from mackelab_toolbox.utils import Singleton
 from .validating_config import ValidatingConfigBase, prepend_rootdir  # prepend_rootdir is a workaround because assigning automatically doesn’t currently work
 
 # HoloConfig
-import re
-from typing import Any, List, Dict, Tuple
-from pydantic import validator, root_validator, PrivateAttr#, StrictInt, StrictFloat, StrictBool
-from pydantic.errors import PydanticErrorMixin
+from typing import Any, Dict, Tuple
+from pydantic import validator, root_validator #, StrictInt, StrictFloat, StrictBool
 import holoviews as hv
 import addict
 
@@ -19,7 +17,7 @@ import addict
 HoloParam = Union[int, float, bool,
                   Tuple[Union[int, float, bool], ...],
                   str]
-from pydantic.validators import int_validator, float_validator, bool_validator, str_validator
+from pydantic.validators import int_validator, float_validator, bool_validator
 class GenericParam:
 
     @classmethod

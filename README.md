@@ -10,11 +10,13 @@ This repository contains Python code shared across the lab. It is public to allo
 It is important to note that **all dependencies are optional**. Being a collaborative toolbox, this package contains a relatively large number of functions for many different uses, extending or patching the functionality of a large number of sometimes heavy packages.
 For example, there are very few situations where it would make sense to simultaneously install *PyTorch*, *TensorFlow* and *JaX*, but helper functions for any of these could be included in this toolbox.
 
-Thus, to avoid forcing users to install unneeded dependencies, modules are organized into different *contexts*. When installing the toolbox, one specifies which contexts are needed as optional or ['extra' dependencies](https://setuptools.readthedocs.io/en/latest/userguide/dependency_management.html#optional-dependencies). The usual `'all'` option is provided to install all dependencies, which is especially useful for running the test suite.
+Thus, to avoid forcing users to install unneeded dependencies, modules are organized into different *contexts*. When installing the toolbox, one specifies which contexts are needed as optional or ['extra' dependencies](https://setuptools.readthedocs.io/en/latest/userguide/dependency_management.html#optional-dependencies). The `'all'` option is provided to install all dependencies, which is especially useful for running the test suite.
 
 Each context is associated to one or more modules. To be able to import a particular module, simply install a context associated with it.
 
 These are the currently defined contexts, and their associated modules:
+  - `config`: [*config*](mackelab_toolbox/config)
+    + `config-holoviews`: [*config/holoviews.py*](mackelab_toolbox/config/holoviews.py)
   - `'iotools'`: [*iotools.py*](mackelab_toolbox/iotools.py)
   - `'pymc3'`: [*pymc3.py*](mackelab_toolbox/pymc3.py), [*pymc_typing.py*](mackelab_toolbox/pymc_typing.py), + everything from `'theano'`, `'typing'`, `'parameters'`
   - `'theano'`: [*theano.py*](mackelab_toolbox/theano.py), [*cgshim.py*](mackelab_toolbox.py), [*optimizers.py*](mackelab_toolbox/optimizers.py), + everything from `'typing'`
@@ -28,8 +30,6 @@ These are the currently defined contexts, and their associated modules:
 ### User installation
 
 If you only need *mackelab_toolbox* as a dependency, the following will suffice
-
-> Eventually this package will be placed on PyPI, at which point the usual `pip install mackelab_toolbox[…]` will work.
 
 ```bash
 pip install --upgrade pip wheel
