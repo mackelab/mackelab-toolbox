@@ -502,6 +502,7 @@ def format(s, *args, **kwargs):
 # %%
 import hashlib
 from collections.abc import Iterable, Sequence, Collection, Mapping
+from dataclasses import is_dataclass, fields
 from enum import Enum
 # from .utils import terminating_types, TypeDict
 
@@ -594,6 +595,8 @@ def _tobytes(o) -> bytes:
        executed in a new session (in order to satisfy the 'stable' description).
        Note that this precludes using an object's `id`, which is sometimes
        how `hash` is implemented.
+       It also precludes using `hash` or `__hash__`, since that function is
+       randomly salted for each new Python session.
     3. It is NOT necessary for the input to be reconstructable from
        the returned bytes.
 
@@ -611,11 +614,15 @@ def _tobytes(o) -> bytes:
     - float
     - Enum
     - type
+    - dataclasses, as long as their fields are supported types.
+      + NOTE: At present we allow hashing both frozen and non-frozen dataclasses
     - Any object implementing a ``__bytes__`` method
     - Mapping
     - Sequence
     - Collection
     - Any object for which `bytes(o)` does not raise an exception
+
+    TODO?: Restrict to immutable objects ?
 
     Raises
     ------
@@ -640,6 +647,9 @@ def _tobytes(o) -> bytes:
         return _tobytes(o.value)
     elif isinstance(o, type):
         return _tobytes(f"{o.__module__}.{o.__qualname__}")
+    elif is_dataclass(o):
+        # DEVNOTE: To restrict this to immutable dataclasses, check `o.__dataclass_params__.frozen`
+        return _tobytes(tuple((f.name, getattr(o, f.name)) for f in fields(o)))
     # Generic byte encoders. These methods may not be ideal for each type, or
     # even work at all, so we first check if the type provides a __bytes__ method.
     elif hasattr(o, '__bytes__'):
