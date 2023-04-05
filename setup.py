@@ -2,6 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='mackelab-toolbox',
+    python_requires='>=3.6',
     version='0.2.0',
     description='A set of common Python utilities for computational science',
     url='https://github.com/mackelab/mackelab_toolbox',
@@ -29,6 +30,14 @@ setup(
     packages=find_packages(),
 
     extras_require = {
+        'config': [
+            'pydantic'
+        ],
+        'config-holoviews': [
+            'addict',
+            'holoviews',
+            'pydantic'
+        ],
         'iotools': [
             'numpy',
             'dill',   # Should only include in 'all'; see TODO in iotools.py
@@ -104,10 +113,11 @@ setup(
             'termcolor',  # Optional dependency for TimeThis
             'simpleeval'  # Dependency for total_size_handler
         ],
-        'dev': [  # Extra dependencies only required for tests or docs; NOT included in 'all'
-            'tabulate'
+        'dev': [  # Extra dependencies only required for docs; NOT included in 'all'
+            'tabulate',
         ],
         'all': [  # Does NOT include 'dev' packages
+            'addict',
             'numpy', 'dill',
             'parameters', 'pyyaml', 'tqdm', 'pandas',
             'IPython', 'matplotlib',
