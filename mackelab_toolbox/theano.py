@@ -179,13 +179,16 @@ def add_variable_subtype(T: type):
     Tname = T.__name__
     # Update the forward ref in TheanoApplydata
     oldt = TheanoApplyData.__fields__['inputs'].type_
-    if not isinstance(oldt, ForwardRef):
+    if isinstance(oldt, ForwardRef):
+        oldt_str = oldt.__forward_arg__
+        assert oldt_str.startswith('Union[') and oldt_str.endswith(']')
+        newt = ForwardRef(f"{oldt_str[:6]}{Tname},{oldt_str[6:]}")
+        TheanoApplyData.__fields__['inputs'].type_ = newt
+    elif getattr(oldt, "__origin__", None) is Union:  # With newer Python, types are more easily resolved, and may not cause ForwardRef
+        oldt.__args__ += (T,)
+    else:
         raise RuntimeError("Theano types have already been frozen: cannot "
                            "add new subtypes.")
-    oldt_str = oldt.__forward_arg__
-    assert oldt_str.startswith('Union[') and oldt_str.endswith(']')
-    newt = ForwardRef(f"{oldt_str[:6]}{Tname},{oldt_str[6:]}")
-    TheanoApplyData.__fields__['inputs'].type_ = newt
     # Add type to the namespace, so it can be found when forward refs are replaced by types
     subtype_namespace[Tname] = T
 
