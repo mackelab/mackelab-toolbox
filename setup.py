@@ -30,14 +30,6 @@ setup(
     packages=find_packages(),
 
     extras_require = {
-        'config': [
-            'pydantic'
-        ],
-        'config-holoviews': [
-            'addict',
-            'holoviews',
-            'pydantic'
-        ],
         'iotools': [
             'numpy',
             'dill',   # Should only include in 'all'; see TODO in iotools.py
@@ -116,8 +108,7 @@ setup(
         'dev': [  # Extra dependencies only required for docs; NOT included in 'all'
             'tabulate',
         ],
-        'all': [  # Does NOT include 'dev' packages
-            'addict',
+        'all': [  # Does not include 'dev' packages
             'numpy', 'dill',
             'parameters', 'pyyaml', 'tqdm', 'pandas',
             'IPython', 'matplotlib',
