@@ -140,9 +140,9 @@ def flatten(*l, terminate=None):
         else:
             yield el
 
-class FixedGenerator:
+class SizedIterable:
     """
-    Generator object which knows its length. Note this class is intended for use
+    Iterable object which knows its length. Note this class is intended for use
     with iterables that don't provide their length (e.g. generators), and as
     such cannot check that the provided length is correct.
     """
@@ -153,6 +153,8 @@ class FixedGenerator:
         return iter(self.iterable)
     def __len__(self):
         return self.length
+
+FixedGenerator = SizedIterable  # Alias for old name
 
 def index_iter(shape: Tuple[int]) -> itertools.product:
     """
