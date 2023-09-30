@@ -46,6 +46,12 @@ setup(
             'matplotlib',
             #'seaborn',  # Not currently used in plot.py
         ],
+        'viz': [
+            'matplotlib',
+            'seaborn',
+            'holoviews',
+            'tabulate'
+        ],
         'pymc3': [
             'pymc3',
             'matplotlib',
@@ -106,12 +112,12 @@ setup(
             'simpleeval'  # Dependency for total_size_handler
         ],
         'dev': [  # Extra dependencies only required for docs; NOT included in 'all'
-            'tabulate',
         ],
         'all': [  # Does not include 'dev' packages
             'numpy', 'dill',
             'parameters', 'pyyaml', 'tqdm', 'pandas',
             'IPython', 'matplotlib',
+            'tabulate', 'holoviews',
             'pymc3', 'seaborn', 'theano_shim>=0.3.0dev0',
             'pydantic>=1.8', 'blosc', 'astunparse', 'simpleeval',
             'pytest', 'pytest-forked',

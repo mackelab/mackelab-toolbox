@@ -1,10 +1,13 @@
 from dataclasses import dataclass, fields
 import matplotlib as mpl
+import matplotlib.colors as mplcol
 import seaborn as sns
-from seaborn.utils import mplcol, colorsys
+from seaborn.utils import colorsys
 import holoviews as hv
+from tabulate import tabulate
 
 from mackelab_toolbox.meta import class_or_instance_method
+from .console import console
 
 # TODO: Don't break if holoviews is not available
 # TODO: Is it possible to have _repr_html_ work for the class as well ?
@@ -53,17 +56,30 @@ class ColorScheme():
             data  : hv.Cycle = ["#4c72b0", "#dd8452", "#55a868"]
             accent: str      = "#c44e52"
             
-    >>> colors.data  # hv.Cycle(["#4c72b0", "#dd8452", "#55a868"])
+    >>> colors.data
+    hv.Cycle(["#4c72b0", "#dd8452", "#55a868"])
+
+    In an IPython notebook, a rich visual display is used to visualize
+    the color scheme. Note that we need to instantiate `colors` for IPython
+    to pickup the visualization method::
+
+    >>> colors()
+    # [Rich visual display of the colorscheme]
     
     In a Jupyter notebook, the ``colors`` object will be represented as a
     series of coloured squares, very similar to the representation of a
     Seaborn color palette.
     """
+
+    ## Iterator ##
+
     @class_or_instance_method
     def iter_names_and_colors(self):  # TODO: Better name ?
         for field in fields(self):  # NB: Also works when `self` is actually the class
             yield field.name, getattr(self, field.name)
          
+    ## Display methods ##
+
     def _repr_html_(self):
         # Adapted from seaborn.color_palette._repr_html_
         s = 55
@@ -91,6 +107,42 @@ class ColorScheme():
             html += f'<tr><td style="{style}">' + f'</td><td style="{style}">'.join(color_cells) + "</td></tr>"
         html += "</table>"
         return html
+
+    @class_or_instance_method
+    def print_hls_values(cls):
+        """Print the HLS values, with a similar layout to the rich palette display."""
+
+        color_descs = {}
+        def color_desc_hls(color):
+            rgb = mplcol.colorConverter.to_rgb(color)
+            h,l,s = tuple(int(a*100) for a in colorsys.rgb_to_hls(*rgb))
+            return f"{h:>2} {l:>2} {s:>2}"
+        for name, c in cls.iter_names_and_colors():
+            if isinstance(c, hv.Cycle):
+                color_descs[name] = [color_desc_hls(_c) for _c in c.values]
+            else:
+                color_descs[name] = [color_desc_hls(c)]
+
+        print(console.BOLD + "Color scheme HLS values (between 0-100)" + console.END)
+        print(tabulate(color_descs, headers="keys", tablefmt="rounded_outline", stralign="right"))
+
+    @class_or_instance_method
+    def print_rgb_values(cls):
+        """Print the RGB values, with a similar layout to the rich palette display."""
+
+        color_descs = {}
+        def color_desc_rgb(color):
+            rgb = mplcol.colorConverter.to_rgb(color)
+            r,g,b = tuple(int(a*255) for a in rgb(rgb))
+            return f"{r:>2} {g:>2} {b:>2}"
+        for name, c in cls.iter_names_and_colors():
+            if isinstance(c, hv.Cycle):
+                color_descs[name] = [color_desc_rgb(_c) for _c in c.values]
+            else:
+                color_descs[name] = [color_desc_rgb(c)]
+
+        print(console.BOLD + "Color scheme RGB values (between 0-255)" + console.END)
+        print(tabulate(color_descs, headers="keys", tablefmt="rounded_outline", stralign="right"))
         
     @class_or_instance_method
     def latex_definitions(cls):
@@ -115,13 +167,26 @@ class ColorScheme():
             rgb = ', '.join(f"{c:.4f}" for c in rgb)
             print(r"\definecolor{"+field.name+"}{rgb}{"+rgb+"}")
     
+    ## Add/remove scheme color names ##
+
+    @class_or_instance_method
+    def limit_cycles(self_or_cls, max_len):
+        """Return a new `ColorScheme` where all cycles have length at most `max_len`"""
+        cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
+        return cls(**{key: Cycle(cycle.key, values=cycle.values[:max_len])
+                           if isinstance(cycle, Cycle)
+                           else cycle
+                      for key, cycle in self_or_cls.iter_names_and_colors()})
+    ## Color manipulation methods ##
+
     @class_or_instance_method
     def desaturate(self_or_cls, prop):
-        "Decrease the saturation channel of all scheme colors by some percent."
+        """Decrease the saturation channel of all scheme colors by some percent."""
         cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
-        return cls(**{key: Cycle([sns.desaturate(c, prop) for c in cycle.values]) if isinstance(cycle, Cycle)
-                        else sns.desaturate(cycle, prop)
-                   for key, cycle in self_or_cls.iter_names_and_colors()})
+        return cls(**{key: Cycle(cycle.key, values=[sns.desaturate(c, prop) for c in cycle.values])
+                           if isinstance(cycle, Cycle)
+                           else sns.desaturate(cycle, prop)
+                      for key, cycle in self_or_cls.iter_names_and_colors()})
     @class_or_instance_method
     def lighten(self_or_cls, amount):
         """
@@ -129,7 +194,8 @@ class ColorScheme():
         amount. (Specifically, `amount` is added to the light channel.)
         """
         cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
-        return cls(**{key: Cycle([inc_hls_values(c, l=amount) for c in cycle.values]) if isinstance(cycle, Cycle)
+        return cls(**{key: Cycle(cycle.key, values=[inc_hls_values(c, l=amount) for c in cycle.values])
+                           if isinstance(cycle, Cycle)
                            else inc_hls_values(cycle, l=amount)
                       for key, cycle in self_or_cls.iter_names_and_colors()})
     
@@ -137,7 +203,8 @@ class ColorScheme():
     def set_hls_values(self_or_cls, h=None, l=None, s=None):
         "Independently manipulate the h, l, or s channels of all scheme colors."
         cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
-        return cls(**{key: Cycle([sns.set_hls_values(c, h=h, l=l, s=s) for c in cycle.values]) if isinstance(cycle, Cycle)
+        return cls(**{key: Cycle(cycle.key, values=[sns.set_hls_values(c, h=h, l=l, s=s) for c in cycle.values])
+                           if isinstance(cycle, Cycle)
                            else sns.set_hls_values(cycle, h=h, l=l, s=s)
                       for key, cycle in self_or_cls.iter_names_and_colors()})
     @class_or_instance_method
@@ -147,7 +214,8 @@ class ColorScheme():
         factor. Applied to all scheme colors.
         """
         cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
-        return cls(**{key: Cycle([mul_hls_values(c, h=h, l=l, s=s) for c in cycle.values]) if isinstance(cycle, Cycle)
+        return cls(**{key: Cycle(cycle.key, values=[mul_hls_values(c, h=h, l=l, s=s) for c in cycle.values])
+                           if isinstance(cycle, Cycle)
                            else mul_hls_values(cycle, h=h, l=l, s=s)
                       for key, cycle in self_or_cls.iter_names_and_colors()})
     @class_or_instance_method
@@ -157,6 +225,7 @@ class ColorScheme():
         factor. Applied to all scheme colors.
         """
         cls = self_or_cls if isinstance(self_or_cls, type) else type(self_or_cls)
-        return cls(**{key: Cycle([inc_hls_values(c, h=h, l=l, s=s) for c in cycle.values]) if isinstance(cycle, Cycle)
+        return cls(**{key: Cycle(cycle.key, values=[inc_hls_values(c, h=h, l=l, s=s) for c in cycle.values])
+                           if isinstance(cycle, Cycle)
                            else inc_hls_values(cycle, h=h, l=l, s=s)
                       for key, cycle in self_or_cls.iter_names_and_colors()})
